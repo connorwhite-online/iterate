@@ -7,6 +7,8 @@ import http from "node:http";
 export interface IteratePluginOptions {
   /** Port for the iterate daemon (default: 4000) */
   daemonPort?: number;
+  /** Disable the babel plugin that injects component names/source locations (default: false) */
+  disableBabelPlugin?: boolean;
 }
 
 /**
@@ -25,14 +27,76 @@ export interface IteratePluginOptions {
  * 1. Starts the iterate daemon when `vite dev` runs
  * 2. Injects the overlay `<script>` into every HTML page
  * 3. Proxies /__iterate__/* and /api/* to the daemon
- * 4. Cleans up daemon when dev server stops
+ * 4. Injects component name/source data attributes via babel
+ * 5. Cleans up daemon when dev server stops
  */
-export function iterate(options: IteratePluginOptions = {}): Plugin {
+export function iterate(options: IteratePluginOptions = {}): Plugin[] {
   const daemonPort = options.daemonPort ?? 4000;
   let daemon: ChildProcess | null = null;
   let overlayJS: string | null = null;
 
-  return {
+  const plugins: Plugin[] = [];
+
+  // Babel plugin: injects data-iterate-component and data-iterate-source attributes
+  if (!options.disableBabelPlugin) {
+    let babelCore: typeof import("@babel/core") | null = null;
+    let babelPluginPath: string | null = null;
+
+    plugins.push({
+      name: "iterate:component-source",
+      apply: "serve",
+      enforce: "pre", // Run before @vitejs/plugin-react transforms JSX
+
+      async configResolved(config) {
+        try {
+          // Dynamically import @babel/core — available via @vitejs/plugin-react
+          babelCore = await import("@babel/core");
+          const require = createRequire(import.meta.url);
+          babelPluginPath = require.resolve("@iterate/babel-plugin");
+        } catch {
+          console.warn("[iterate] Babel plugin setup failed — component names will not be available");
+        }
+      },
+
+      async transform(code, id) {
+        if (!babelCore || !babelPluginPath) return null;
+        if (!/\.[jt]sx$/.test(id)) return null;
+        if (id.includes("node_modules")) return null;
+
+        try {
+          const result = await babelCore.transformAsync(code, {
+            filename: id,
+            plugins: [
+              [babelPluginPath, { root: process.cwd() }],
+              // Need JSX syntax plugin to parse JSX without transforming it
+              ["@babel/plugin-syntax-jsx", {}],
+              ...(id.endsWith(".tsx") ? [["@babel/plugin-syntax-typescript", { isTSX: true }]] : []),
+            ],
+            parserOpts: {
+              plugins: [
+                "jsx",
+                ...(id.endsWith(".tsx") ? ["typescript" as const] : []),
+              ],
+            },
+            // Don't transform anything else — just inject attributes
+            presets: [],
+            sourceMaps: true,
+            configFile: false,
+            babelrc: false,
+          });
+
+          if (!result?.code) return null;
+          return { code: result.code, map: result.map };
+        } catch (err) {
+          // Don't break the build if our plugin fails on a file
+          return null;
+        }
+      },
+    });
+  }
+
+  // Main iterate plugin: daemon, overlay, proxy
+  plugins.push({
     name: "iterate",
     apply: "serve", // Only active during dev
 
@@ -131,7 +195,9 @@ export function iterate(options: IteratePluginOptions = {}): Plugin {
 </body>`
       );
     },
-  };
+  });
+
+  return plugins;
 }
 
 function startDaemon(port: number, cwd: string): ChildProcess {

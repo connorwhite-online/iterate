@@ -1,33 +1,45 @@
 import React, { useCallback, useEffect, useState } from "react";
-import type { Rect } from "@iterate/core";
-import { generateSelector, getRelevantStyles } from "./selector.js";
+import type { Rect, SelectedElement } from "@iterate/core";
+import {
+  generateSelector,
+  getRelevantStyles,
+  identifyElement,
+  getElementPath,
+  getNearbyText,
+  getComponentInfo,
+} from "./selector.js";
 
-export interface PickedElement {
-  element: Element;
-  selector: string;
-  rect: Rect;
-  computedStyles: Record<string, string>;
+export interface PickedElement extends SelectedElement {
+  /** The raw DOM element (not serialized) */
+  domElement: Element;
 }
 
 interface ElementPickerProps {
   active: boolean;
   iframeRef: React.RefObject<HTMLIFrameElement | null>;
-  onPick: (picked: PickedElement) => void;
+  selectedElements: PickedElement[];
+  onSelect: (elements: PickedElement[]) => void;
 }
 
 /**
  * Overlay that highlights elements on hover and captures clicks.
- * Works within an iframe's document (same-origin required).
+ * Supports multi-select with Ctrl/Cmd+Click.
+ * Shows React component names and source file paths when available.
  */
-export function ElementPicker({ active, iframeRef, onPick }: ElementPickerProps) {
+export function ElementPicker({
+  active,
+  iframeRef,
+  selectedElements,
+  onSelect,
+}: ElementPickerProps) {
   const [highlight, setHighlight] = useState<Rect | null>(null);
-  const [hoveredSelector, setHoveredSelector] = useState<string>("");
+  const [hoveredLabel, setHoveredLabel] = useState<string>("");
 
   const getIframeDocument = useCallback(() => {
     try {
       return iframeRef.current?.contentDocument ?? null;
     } catch {
-      return null; // Cross-origin
+      return null;
     }
   }, [iframeRef]);
 
@@ -51,7 +63,13 @@ export function ElementPicker({ active, iframeRef, onPick }: ElementPickerProps)
         width: rect.width,
         height: rect.height,
       });
-      setHoveredSelector(generateSelector(target));
+
+      const { component, source } = getComponentInfo(target);
+      if (component) {
+        setHoveredLabel(source ? `<${component}> ${source}` : `<${component}>`);
+      } else {
+        setHoveredLabel(generateSelector(target));
+      }
     };
 
     const handleClick = (e: MouseEvent) => {
@@ -61,13 +79,23 @@ export function ElementPicker({ active, iframeRef, onPick }: ElementPickerProps)
       const target = e.target as Element;
       if (!target) return;
 
-      const rect = target.getBoundingClientRect();
-      onPick({
-        element: target,
-        selector: generateSelector(target),
-        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-        computedStyles: getRelevantStyles(target),
-      });
+      const picked = elementToPicked(target);
+      const isMultiSelect = e.ctrlKey || e.metaKey;
+
+      if (isMultiSelect) {
+        const existingIndex = selectedElements.findIndex(
+          (el) => el.selector === picked.selector
+        );
+        if (existingIndex >= 0) {
+          const updated = [...selectedElements];
+          updated.splice(existingIndex, 1);
+          onSelect(updated);
+        } else {
+          onSelect([...selectedElements, picked]);
+        }
+      } else {
+        onSelect([picked]);
+      }
     };
 
     iframeDoc.addEventListener("mousemove", handleMouseMove);
@@ -77,44 +105,115 @@ export function ElementPicker({ active, iframeRef, onPick }: ElementPickerProps)
       iframeDoc.removeEventListener("mousemove", handleMouseMove);
       iframeDoc.removeEventListener("click", handleClick, { capture: true });
     };
-  }, [active, getIframeDocument, onPick]);
+  }, [active, getIframeDocument, onSelect, selectedElements]);
 
-  if (!active || !highlight) return null;
+  if (!active) return null;
 
   return (
     <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-      {/* Element highlight box */}
-      <div
-        style={{
-          position: "absolute",
-          left: highlight.x,
-          top: highlight.y,
-          width: highlight.width,
-          height: highlight.height,
-          border: "2px solid #2563eb",
-          backgroundColor: "rgba(37, 99, 235, 0.1)",
-          pointerEvents: "none",
-          transition: "all 0.1s ease",
-        }}
-      />
-      {/* Selector label */}
-      <div
-        style={{
-          position: "absolute",
-          left: highlight.x,
-          top: Math.max(0, highlight.y - 24),
-          background: "#2563eb",
-          color: "#fff",
-          padding: "2px 6px",
-          borderRadius: 3,
-          fontSize: 11,
-          fontFamily: "monospace",
-          whiteSpace: "nowrap",
-          pointerEvents: "none",
-        }}
-      >
-        {hoveredSelector}
-      </div>
+      {/* Hover highlight */}
+      {highlight && (
+        <>
+          <div
+            style={{
+              position: "absolute",
+              left: highlight.x,
+              top: highlight.y,
+              width: highlight.width,
+              height: highlight.height,
+              border: "2px solid #2563eb",
+              backgroundColor: "rgba(37, 99, 235, 0.08)",
+              pointerEvents: "none",
+              transition: "all 0.1s ease",
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              left: highlight.x,
+              top: Math.max(0, highlight.y - 26),
+              background: "#2563eb",
+              color: "#fff",
+              padding: "2px 8px",
+              borderRadius: 4,
+              fontSize: 11,
+              fontFamily: "monospace",
+              whiteSpace: "nowrap",
+              pointerEvents: "none",
+              maxWidth: 400,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {hoveredLabel}
+          </div>
+        </>
+      )}
+
+      {/* Selected elements (persistent green highlights) */}
+      {selectedElements.map((el, i) => (
+        <div key={el.selector + i}>
+          <div
+            style={{
+              position: "absolute",
+              left: el.rect.x,
+              top: el.rect.y,
+              width: el.rect.width,
+              height: el.rect.height,
+              border: "2px solid #10b981",
+              backgroundColor: "rgba(16, 185, 129, 0.1)",
+              pointerEvents: "none",
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              left: el.rect.x,
+              top: Math.max(0, el.rect.y - 26),
+              background: "#10b981",
+              color: "#fff",
+              padding: "2px 8px",
+              borderRadius: 4,
+              fontSize: 10,
+              fontFamily: "monospace",
+              whiteSpace: "nowrap",
+              pointerEvents: "none",
+              display: "flex",
+              gap: 6,
+              alignItems: "center",
+              maxWidth: 400,
+              overflow: "hidden",
+            }}
+          >
+            <span style={{ fontWeight: 700 }}>
+              {el.componentName ? `<${el.componentName}>` : el.elementName}
+            </span>
+            {el.sourceLocation && (
+              <span style={{ opacity: 0.7, fontSize: 9 }}>
+                {el.sourceLocation}
+              </span>
+            )}
+          </div>
+        </div>
+      ))}
     </div>
   );
+}
+
+/** Convert a DOM element to a PickedElement with full metadata */
+export function elementToPicked(element: Element): PickedElement {
+  const rect = element.getBoundingClientRect();
+  const { component, source } = getComponentInfo(element);
+
+  return {
+    domElement: element,
+    selector: generateSelector(element),
+    elementName: identifyElement(element),
+    elementPath: getElementPath(element),
+    rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+    computedStyles: getRelevantStyles(element),
+    nearbyText: getNearbyText(element),
+    componentName: component,
+    sourceLocation: source,
+  };
 }

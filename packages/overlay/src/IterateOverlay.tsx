@@ -1,19 +1,20 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import type { AnnotationData, AnnotationIntent, AnnotationSeverity, SVGPathData, Rect } from "@iterate/core";
-import { SVGCanvas } from "./canvas/SVGCanvas.js";
+import type {
+  AnnotationData,
+  AnnotationIntent,
+  AnnotationSeverity,
+  SelectedElement,
+  TextSelection,
+  Rect,
+} from "@iterate/core";
 import { ElementPicker, type PickedElement } from "./inspector/ElementPicker.js";
-import { AnnotationDialog } from "./annotate/AnnotationDialog.js";
+import { MarqueeSelect } from "./inspector/MarqueeSelect.js";
+import { TextSelect } from "./inspector/TextSelect.js";
+import { SelectionPanel } from "./annotate/SelectionPanel.js";
 import { DragHandler } from "./manipulate/DragHandler.js";
 import { DaemonConnection } from "./transport/connection.js";
-import {
-  generateSelector,
-  getRelevantStyles,
-  identifyElement,
-  getElementPath,
-  getNearbyText,
-} from "./inspector/selector.js";
 
-export type ToolMode = "select" | "annotate" | "move";
+export type ToolMode = "select" | "move";
 
 export interface IterateOverlayProps {
   /** Which tool mode is active */
@@ -24,11 +25,24 @@ export interface IterateOverlayProps {
   wsUrl?: string;
   /** Reference to the iteration iframe */
   iframeRef: React.RefObject<HTMLIFrameElement | null>;
+  /** Current pending batch count (passed up for toolbar badge) */
+  onBatchCountChange?: (count: number) => void;
+  /** Callback to submit the pending batch */
+  onSubmitBatch?: () => void;
+}
+
+/** Annotation waiting to be submitted (local-only until batch submit) */
+interface PendingAnnotation {
+  elements: SelectedElement[];
+  textSelection?: TextSelection;
+  comment: string;
+  intent?: AnnotationIntent;
+  severity?: AnnotationSeverity;
 }
 
 /**
  * Main overlay component for iterate.
- * Renders the annotation canvas, element picker, and drag handler
+ * Renders element selection tools, annotation panel, and drag handler
  * on top of an iteration's iframe.
  */
 export function IterateOverlay({
@@ -36,109 +50,102 @@ export function IterateOverlay({
   iteration,
   wsUrl,
   iframeRef,
+  onBatchCountChange,
 }: IterateOverlayProps) {
   const connectionRef = useRef<DaemonConnection | null>(null);
-  const [drawings, setDrawings] = useState<SVGPathData[]>([]);
-  const [pendingAnnotation, setPendingAnnotation] = useState<{
-    drawing: SVGPathData;
-    bounds: { x: number; y: number; width: number; height: number };
-    selector?: string;
-    elementName?: string;
-    elementPath?: string;
-    nearbyText?: string;
-    rect?: Rect;
-    computedStyles?: Record<string, string>;
-  } | null>(null);
+
+  // Selection state
+  const [selectedElements, setSelectedElements] = useState<PickedElement[]>([]);
+  const [textSelection, setTextSelection] = useState<TextSelection | null>(null);
+
+  // Pending batch (accumulated annotations not yet submitted)
+  const [pendingBatch, setPendingBatch] = useState<PendingAnnotation[]>([]);
 
   // Connect to daemon
   useEffect(() => {
     const conn = new DaemonConnection(wsUrl);
     connectionRef.current = conn;
     conn.connect();
-
-    conn.onMessage((msg) => {
-      if (msg.type === "annotation:created") {
-        const annotation = msg.payload as AnnotationData;
-        if (annotation.drawing) {
-          setDrawings((prev) => [...prev, annotation.drawing!]);
-        }
-      }
-    });
-
     return () => conn.disconnect();
   }, [wsUrl]);
 
-  // Handle completed drawing → show annotation dialog
-  const handleDrawingComplete = useCallback(
-    (path: SVGPathData, bounds: { x: number; y: number; width: number; height: number }) => {
-      // Try to find the element at the center of the drawing
-      try {
-        const iframeDoc = iframeRef.current?.contentDocument;
-        if (iframeDoc) {
-          const centerX = bounds.x + bounds.width / 2;
-          const centerY = bounds.y + bounds.height / 2;
-          const element = iframeDoc.elementFromPoint(centerX, centerY);
+  // Notify parent of batch count changes
+  useEffect(() => {
+    onBatchCountChange?.(pendingBatch.length);
+  }, [pendingBatch.length, onBatchCountChange]);
 
-          if (element) {
-            const rect = element.getBoundingClientRect();
-            setPendingAnnotation({
-              drawing: path,
-              bounds,
-              selector: generateSelector(element),
-              elementName: identifyElement(element),
-              elementPath: getElementPath(element),
-              nearbyText: getNearbyText(element),
-              rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-              computedStyles: getRelevantStyles(element),
-            });
-            return;
-          }
-        }
-      } catch {
-        // Cross-origin or other error
-      }
-
-      setPendingAnnotation({ drawing: path, bounds });
-    },
-    [iframeRef]
-  );
-
-  // Submit annotation to daemon
-  const handleAnnotationSubmit = useCallback(
-    (comment: string, intent?: AnnotationIntent, severity?: AnnotationSeverity) => {
-      if (!pendingAnnotation || !connectionRef.current) return;
-
-      connectionRef.current.send({
-        type: "annotation:create",
-        payload: {
-          iteration,
-          selector: pendingAnnotation.selector ?? "",
-          elementName: pendingAnnotation.elementName ?? "",
-          elementPath: pendingAnnotation.elementPath ?? "",
-          nearbyText: pendingAnnotation.nearbyText,
-          rect: pendingAnnotation.rect ?? pendingAnnotation.bounds,
-          computedStyles: pendingAnnotation.computedStyles ?? {},
-          drawing: pendingAnnotation.drawing,
-          comment,
-          intent,
-          severity,
-        },
-      });
-
-      setDrawings((prev) => [...prev, pendingAnnotation.drawing]);
-      setPendingAnnotation(null);
-    },
-    [pendingAnnotation, iteration]
-  );
-
-  // Handle element pick (in select mode)
-  const handleElementPick = useCallback(
-    (picked: PickedElement) => {
-      // For now, log the picked element. In Phase 3, this feeds into MCP context.
-      console.log("[iterate] Selected element:", picked.selector, picked.computedStyles);
+  // Handle element selection from ElementPicker (click / ctrl+click)
+  const handleElementSelect = useCallback(
+    (elements: PickedElement[]) => {
+      setSelectedElements(elements);
     },
     []
   );
+
+  // Handle marquee selection (replaces the current selection)
+  const handleMarqueeSelect = useCallback(
+    (elements: PickedElement[]) => {
+      setSelectedElements(elements);
+    },
+    []
+  );
+
+  // Handle text selection
+  const handleTextSelect = useCallback(
+    (selection: TextSelection | null) => {
+      setTextSelection(selection);
+    },
+    []
+  );
+
+  // Remove a single element from the selection
+  const handleRemoveElement = useCallback(
+    (index: number) => {
+      setSelectedElements((prev) => {
+        const updated = [...prev];
+        updated.splice(index, 1);
+        return updated;
+      });
+    },
+    []
+  );
+
+  // Add current selection as an annotation to the pending batch
+  const handleAddToBatch = useCallback(
+    (comment: string, intent?: AnnotationIntent, severity?: AnnotationSeverity) => {
+      if (selectedElements.length === 0 && !textSelection) return;
+
+      const annotation: PendingAnnotation = {
+        elements: selectedElements.map((el) => ({
+          selector: el.selector,
+          elementName: el.elementName,
+          elementPath: el.elementPath,
+          rect: el.rect,
+          computedStyles: el.computedStyles,
+          nearbyText: el.nearbyText,
+          componentName: el.componentName,
+          sourceLocation: el.sourceLocation,
+        })),
+        textSelection: textSelection ?? undefined,
+        comment,
+        intent,
+        severity,
+      };
+
+      setPendingBatch((prev) => [...prev, annotation]);
+
+      // Clear selection after adding to batch
+      setSelectedElements([]);
+      setTextSelection(null);
+    },
+    [selectedElements, textSelection]
+  );
+
+  // Clear selection
+  const handleClearSelection = useCallback(() => {
+    setSelectedElements([]);
+    setTextSelection(null);
+  }, []);
 
   // Handle drag move
   const handleMove = useCallback(
@@ -156,6 +163,34 @@ export function IterateOverlay({
     [iteration]
   );
 
+  // Expose batch submission to parent (called by Submit button in toolbar)
+  useEffect(() => {
+    const handler = () => {
+      if (pendingBatch.length === 0 || !connectionRef.current) return;
+
+      connectionRef.current.send({
+        type: "batch:submit",
+        payload: {
+          iteration,
+          annotations: pendingBatch.map((a) => ({
+            iteration,
+            elements: a.elements,
+            textSelection: a.textSelection,
+            comment: a.comment,
+            intent: a.intent,
+            severity: a.severity,
+          })),
+          domChanges: [], // DOM changes are already tracked by the daemon
+        },
+      });
+
+      setPendingBatch([]);
+    };
+
+    window.addEventListener("iterate:submit-batch", handler);
+    return () => window.removeEventListener("iterate:submit-batch", handler);
+  }, [pendingBatch, iteration]);
+
   return (
     <div
       style={{
@@ -165,18 +200,26 @@ export function IterateOverlay({
         zIndex: 9999,
       }}
     >
-      {/* SVG annotation canvas */}
-      <SVGCanvas
-        active={mode === "annotate"}
-        drawings={drawings}
-        onDrawingComplete={handleDrawingComplete}
-      />
-
-      {/* Element picker for select mode */}
+      {/* Element picker for click/ctrl+click selection */}
       <ElementPicker
         active={mode === "select"}
         iframeRef={iframeRef}
-        onPick={handleElementPick}
+        selectedElements={selectedElements}
+        onSelect={handleElementSelect}
+      />
+
+      {/* Marquee / rubber-band selection */}
+      <MarqueeSelect
+        active={mode === "select"}
+        iframeRef={iframeRef}
+        onSelect={handleMarqueeSelect}
+      />
+
+      {/* Text selection capture */}
+      <TextSelect
+        active={mode === "select"}
+        iframeRef={iframeRef}
+        onTextSelect={handleTextSelect}
       />
 
       {/* Drag handler for move mode */}
@@ -186,16 +229,41 @@ export function IterateOverlay({
         onMove={handleMove}
       />
 
-      {/* Annotation dialog (after drawing) */}
-      {pendingAnnotation && (
-        <AnnotationDialog
-          position={{
-            x: pendingAnnotation.bounds.x + pendingAnnotation.bounds.width / 2,
-            y: pendingAnnotation.bounds.y + pendingAnnotation.bounds.height,
-          }}
-          onSubmit={handleAnnotationSubmit}
-          onCancel={() => setPendingAnnotation(null)}
-        />
+      {/* Selection panel (shows when elements are selected) */}
+      <SelectionPanel
+        selectedElements={selectedElements}
+        textSelection={textSelection}
+        onRemoveElement={handleRemoveElement}
+        onAddToBatch={handleAddToBatch}
+        onClearSelection={handleClearSelection}
+      />
+
+      {/* Pending batch indicator markers on elements */}
+      {pendingBatch.map((annotation, batchIdx) =>
+        annotation.elements.map((el, elIdx) => (
+          <div
+            key={`batch-${batchIdx}-${elIdx}`}
+            style={{
+              position: "absolute",
+              left: el.rect.x + el.rect.width - 8,
+              top: el.rect.y - 8,
+              width: 18,
+              height: 18,
+              borderRadius: "50%",
+              background: "#f59e0b",
+              color: "#000",
+              fontSize: 10,
+              fontWeight: 700,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              pointerEvents: "none",
+              fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            }}
+          >
+            {batchIdx + 1}
+          </div>
+        ))
       )}
     </div>
   );

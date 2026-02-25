@@ -158,6 +158,31 @@ export function getNearbyText(element: Element): string {
   return parts.join(" | ");
 }
 
+/**
+ * Get React component name and source file path from iterate's babel plugin.
+ * Walks up the DOM tree to find the nearest ancestor with
+ * data-iterate-component and data-iterate-source attributes.
+ */
+export function getComponentInfo(element: Element): {
+  component: string | null;
+  source: string | null;
+} {
+  let current: Element | null = element;
+
+  while (current && current !== document.documentElement) {
+    const component = current.getAttribute("data-iterate-component");
+    const source = current.getAttribute("data-iterate-source");
+
+    if (component) {
+      return { component, source };
+    }
+
+    current = current.parentElement;
+  }
+
+  return { component: null, source: null };
+}
+
 // --- Type-specific style capture (inspired by agentation) ---
 
 const TEXT_ELEMENTS = new Set(["p", "span", "h1", "h2", "h3", "h4", "h5", "h6", "label", "a", "li"]);

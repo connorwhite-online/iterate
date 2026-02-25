@@ -31,7 +31,9 @@ export function getIterationTools(client: DaemonClient) {
         const text = entries
           .map(
             (it) =>
-              `- **${it.name}** (branch: ${it.branch}, port: ${it.port}, status: ${it.status})`
+              `- **${it.name}** (branch: ${it.branch}, port: ${it.port}, status: ${it.status})` +
+              (it.commandPrompt ? `\n  Command: "${it.commandPrompt}"` : "") +
+              (it.commandId ? ` [command: ${it.commandId}]` : "")
           )
           .join("\n");
 

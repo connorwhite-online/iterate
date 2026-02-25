@@ -7,9 +7,18 @@ import type {
   DomChange,
 } from "@iterate/core";
 
+/** Command context for /iterate slash commands */
+export interface CommandContext {
+  commandId: string;
+  prompt: string;
+  iterations: string[];
+  createdAt: number;
+}
+
 /** In-memory state store for the daemon */
 export class StateStore {
   private state: IterateState;
+  private commands: Map<string, CommandContext> = new Map();
 
   constructor(config: IterateConfig) {
     this.state = {
@@ -90,5 +99,34 @@ export class StateStore {
 
   clearDomChanges(): void {
     this.state.domChanges = [];
+  }
+
+  // --- Commands ---
+
+  setCommandContext(commandId: string, prompt: string, iterations: string[]): void {
+    this.commands.set(commandId, {
+      commandId,
+      prompt,
+      iterations,
+      createdAt: Date.now(),
+    });
+  }
+
+  getCommandContext(commandId: string): CommandContext | undefined {
+    return this.commands.get(commandId);
+  }
+
+  getLatestCommand(): CommandContext | undefined {
+    let latest: CommandContext | undefined;
+    for (const cmd of this.commands.values()) {
+      if (!latest || cmd.createdAt > latest.createdAt) {
+        latest = cmd;
+      }
+    }
+    return latest;
+  }
+
+  getAllCommands(): CommandContext[] {
+    return Array.from(this.commands.values());
   }
 }

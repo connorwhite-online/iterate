@@ -1,11 +1,3 @@
-/** SVG path data for freehand drawings (circles, arrows, etc.) */
-export interface SVGPathData {
-  d: string;
-  stroke: string;
-  strokeWidth: number;
-  fill: string;
-}
-
 /** Bounding rectangle */
 export interface Rect {
   x: number;
@@ -23,16 +15,36 @@ export type AnnotationSeverity = "blocking" | "important" | "suggestion";
 /** Agent workflow status */
 export type AnnotationStatus = "pending" | "acknowledged" | "resolved" | "dismissed";
 
-/** An annotation placed on an element in an iteration */
-export interface AnnotationData {
-  id: string;
-  iteration: string;
+/** A single selected element within an annotation */
+export interface SelectedElement {
   selector: string;
   elementName: string;
   elementPath: string;
   rect: Rect;
   computedStyles: Record<string, string>;
-  drawing?: SVGPathData;
+  nearbyText?: string;
+  /** React component name from babel plugin (e.g. "HeroSection") */
+  componentName: string | null;
+  /** Source file location from babel plugin (e.g. "src/Hero.tsx:42") */
+  sourceLocation: string | null;
+}
+
+/** A text selection within an annotation */
+export interface TextSelection {
+  text: string;
+  containingElement: SelectedElement;
+  startOffset: number;
+  endOffset: number;
+}
+
+/** An annotation targeting one or more elements in an iteration */
+export interface AnnotationData {
+  id: string;
+  iteration: string;
+  /** Selected elements this annotation targets */
+  elements: SelectedElement[];
+  /** Optional highlighted text selection */
+  textSelection?: TextSelection;
   comment: string;
   timestamp: number;
 
@@ -44,8 +56,4 @@ export interface AnnotationData {
   status: AnnotationStatus;
   resolvedBy?: "human" | "agent";
   agentReply?: string;
-
-  // Extra context
-  nearbyText?: string;
-  reactComponent?: string;
 }

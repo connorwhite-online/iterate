@@ -95,12 +95,48 @@ export class WebSocketHub {
         break;
       }
 
+      case "batch:submit": {
+        const batchId = crypto.randomUUID();
+        const { annotations, domChanges } = msg.payload;
+
+        // Store all annotations from the batch
+        for (const annotationPayload of annotations) {
+          const annotation: AnnotationData = {
+            ...annotationPayload,
+            id: crypto.randomUUID(),
+            timestamp: Date.now(),
+            status: "pending",
+          };
+          this.store.addAnnotation(annotation);
+          this.broadcast({ type: "annotation:created", payload: annotation });
+        }
+
+        // Store any DOM changes from the batch
+        for (const change of domChanges) {
+          this.store.addDomChange(change);
+          this.broadcast({ type: "dom:changed", payload: change });
+        }
+
+        // Notify all clients (including MCP) that a batch was submitted
+        this.broadcast({
+          type: "batch:submitted",
+          payload: {
+            batchId,
+            annotationCount: annotations.length,
+            domChangeCount: domChanges.length,
+          },
+        });
+        break;
+      }
+
       case "dom:move": {
         const change: DomChange = {
           id: crypto.randomUUID(),
           iteration: msg.payload.iteration,
           selector: msg.payload.selector,
           type: "move",
+          componentName: null,
+          sourceLocation: null,
           before: { rect: msg.payload.from, computedStyles: {} },
           after: { rect: msg.payload.to, computedStyles: {} },
           timestamp: Date.now(),
@@ -116,6 +152,8 @@ export class WebSocketHub {
           iteration: msg.payload.iteration,
           selector: msg.payload.selector,
           type: "reorder",
+          componentName: null,
+          sourceLocation: null,
           before: { rect: { x: 0, y: 0, width: 0, height: 0 }, computedStyles: {} },
           after: { rect: { x: 0, y: 0, width: 0, height: 0 }, computedStyles: {}, siblingIndex: msg.payload.newIndex },
           timestamp: Date.now(),
@@ -129,7 +167,6 @@ export class WebSocketHub {
       case "dom:resize":
       case "iteration:switch":
       case "iteration:compare":
-        // Handled locally by the overlay UI or deferred to Phase 2
         break;
     }
   }

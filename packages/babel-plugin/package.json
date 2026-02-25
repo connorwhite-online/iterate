@@ -1,7 +1,7 @@
 {
-  "name": "@iterate/vite",
+  "name": "@iterate/babel-plugin",
   "version": "0.1.0",
-  "description": "iterate Vite plugin — auto-starts daemon and injects overlay",
+  "description": "Babel plugin that injects React component names and source locations for iterate",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -16,17 +16,13 @@
     "dev": "tsup src/index.ts --format esm --dts --watch",
     "clean": "rm -rf dist"
   },
-  "dependencies": {
-    "@iterate/overlay": "workspace:*",
-    "@iterate/babel-plugin": "workspace:*"
-  },
-  "peerDependencies": {
-    "vite": "^5.0.0 || ^6.0.0"
-  },
   "devDependencies": {
-    "@types/node": "^22.0.0",
-    "vite": "^6.0.0",
+    "@babel/core": "^7.24.0",
+    "@types/babel__core": "^7.20.0",
     "tsup": "^8.3.0",
     "typescript": "^5.7.0"
+  },
+  "peerDependencies": {
+    "@babel/core": "^7.0.0"
   }
 }

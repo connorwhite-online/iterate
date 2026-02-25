@@ -133,6 +133,22 @@ export class DaemonClient {
           this.state.iterations[msg.payload.name]!.status = msg.payload.status;
         }
         break;
+      case "batch:submitted":
+        // Batch was processed — annotations are already in state via annotation:created events
+        // This is a notification that a batch has been submitted
+        break;
+      case "command:started":
+        // A /iterate command was executed — iterations will arrive via iteration:created events
+        // Store the command context for retrieval via iterate_get_command_context
+        if (this.state) {
+          for (const iterName of msg.payload.iterations) {
+            if (this.state.iterations[iterName]) {
+              this.state.iterations[iterName]!.commandPrompt = msg.payload.prompt;
+              this.state.iterations[iterName]!.commandId = msg.payload.commandId;
+            }
+          }
+        }
+        break;
     }
 
     for (const listener of this.stateListeners) {

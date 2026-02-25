@@ -230,6 +230,118 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     return store.getDomChanges();
   });
 
+  app.get("/api/command-context", async () => {
+    const latest = store.getLatestCommand();
+    if (!latest) return { command: null };
+    return { command: latest };
+  });
+
+  app.get("/api/command-context/:commandId", async (request, reply) => {
+    const { commandId } = request.params as { commandId: string };
+    const cmd = store.getCommandContext(commandId);
+    if (!cmd) return reply.status(404).send({ message: "Command not found" });
+    return cmd;
+  });
+
+  /** Submit a command (e.g. /iterate prompt) to create multiple iterations */
+  app.post("/api/command", async (request, reply) => {
+    const { command, prompt, count = 3 } = request.body as {
+      command: string;
+      prompt: string;
+      count?: number;
+    };
+
+    if (command !== "iterate") {
+      return reply.status(400).send({ message: `Unknown command: ${command}` });
+    }
+
+    if (!prompt?.trim()) {
+      return reply.status(400).send({ message: "Prompt is required" });
+    }
+
+    const commandId = crypto.randomUUID();
+    const iterationNames: string[] = [];
+    const clampedCount = Math.min(Math.max(count, 1), config.maxIterations);
+
+    // Create N iterations with the command context
+    for (let i = 1; i <= clampedCount; i++) {
+      const name = `v${i}-${prompt.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 20)}`;
+
+      // Skip if already exists
+      if (store.getIteration(name)) continue;
+
+      const iterationCount = Object.keys(store.getIterations()).length;
+      if (iterationCount >= config.maxIterations) break;
+
+      try {
+        const info: IterationInfo = {
+          name,
+          branch: `iterate/${name}`,
+          worktreePath: "",
+          port: 0,
+          pid: null,
+          status: "creating",
+          createdAt: new Date().toISOString(),
+          commandPrompt: prompt.trim(),
+          commandId,
+        };
+        store.setIteration(name, info);
+        wsHub.broadcast({ type: "iteration:status", payload: { name, status: "creating" } });
+
+        // Create worktree (async — don't await all sequentially for speed)
+        iterationNames.push(name);
+
+        // Fire off the creation pipeline
+        (async () => {
+          try {
+            const { worktreePath, branch } = await worktreeManager.create(name);
+            info.worktreePath = worktreePath;
+            info.branch = branch;
+
+            info.status = "installing";
+            store.setIteration(name, info);
+            wsHub.broadcast({ type: "iteration:status", payload: { name, status: "installing" } });
+
+            const installCmd = getInstallCommand(config.packageManager);
+            const [cmd, ...args] = installCmd.split(" ");
+            await execa(cmd!, args, { cwd: worktreePath });
+
+            info.status = "starting";
+            store.setIteration(name, info);
+            wsHub.broadcast({ type: "iteration:status", payload: { name, status: "starting" } });
+
+            const allocatedPort = await processManager.allocatePort();
+            info.port = allocatedPort;
+
+            const devCommand = buildDevCommand(config.devCommand, allocatedPort);
+            const { pid } = await processManager.start(name, worktreePath, devCommand, allocatedPort);
+            info.pid = pid ?? null;
+            info.status = "ready";
+            store.setIteration(name, info);
+            wsHub.broadcast({ type: "iteration:created", payload: info });
+          } catch (err) {
+            info.status = "error";
+            store.setIteration(name, info);
+            wsHub.broadcast({ type: "iteration:status", payload: { name, status: "error" } });
+          }
+        })();
+      } catch {
+        // Skip this iteration
+      }
+    }
+
+    // Broadcast command started
+    wsHub.broadcast({
+      type: "command:started",
+      payload: { commandId, prompt: prompt.trim(), iterations: iterationNames },
+    });
+
+    // Store command context for MCP retrieval
+    store.setCommandContext(commandId, prompt.trim(), iterationNames);
+
+    return { ok: true, commandId, iterations: iterationNames };
+  });
+
   app.post("/api/shutdown", async (_request, reply) => {
     await processManager.stopAll();
     await reply.send({ ok: true });
@@ -307,7 +419,7 @@ function buildDevCommand(baseCommand: string, port: number): string {
   return baseCommand;
 }
 
-/** Shell HTML for the control UI. Fixes: XSS-safe DOM construction, WebSocket reconnect, correct state merge. */
+/** Shell HTML for the control UI with command bar and updated toolbar. */
 function getShellHTML(): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -328,7 +440,11 @@ function getShellHTML(): string {
     .tab .status-dot.creating, .tab .status-dot.installing, .tab .status-dot.starting { background: #eab308; }
     .tab .status-dot.error { background: #ef4444; }
     .tab .status-dot.stopped { background: #666; }
-    #toolbar { display: flex; gap: 8px; padding: 8px 12px; background: #111; border-bottom: 1px solid #2a2a2a; }
+    #command-bar { display: flex; align-items: center; padding: 6px 12px; background: #111; border-bottom: 1px solid #2a2a2a; }
+    #command-input { flex: 1; background: #0a0a1a; border: 1px solid #2a2a4a; border-radius: 6px; color: #fafafa; padding: 6px 12px; font-size: 13px; font-family: monospace; outline: none; }
+    #command-input:focus { border-color: #2563eb; }
+    #command-input::placeholder { color: #444; }
+    #toolbar { display: flex; gap: 8px; padding: 6px 12px; background: #111; border-bottom: 1px solid #2a2a2a; align-items: center; }
     .tool-btn { padding: 4px 12px; border-radius: 4px; background: #1a1a1a; color: #888; cursor: pointer; font-size: 12px; border: 1px solid #2a2a2a; }
     .tool-btn:hover { color: #ccc; }
     .tool-btn.active { color: #fff; background: #2563eb; border-color: #2563eb; }
@@ -345,21 +461,23 @@ function getShellHTML(): string {
 </head>
 <body>
   <div id="tab-bar"></div>
+  <div id="command-bar">
+    <input id="command-input" type="text" placeholder="/iterate make 3 variations of the hero section..." />
+  </div>
   <div id="toolbar">
     <button class="tool-btn active" data-tool="select">Select</button>
-    <button class="tool-btn" data-tool="annotate">Annotate</button>
     <button class="tool-btn" data-tool="move">Move</button>
     <button id="pick-btn" style="display:none">Pick this iteration</button>
   </div>
   <div id="viewport">
     <div class="empty-state">
       <p>No iterations yet.</p>
-      <p>Run <code>iterate branch &lt;name&gt;</code> to create one.</p>
+      <p>Type <code>/iterate &lt;prompt&gt;</code> above or run <code>iterate branch &lt;name&gt;</code></p>
     </div>
   </div>
   <div id="status-bar">
     <span id="status-text" class="connected">Connected</span>
-    <span>iterate v0.1.0</span>
+    <span>iterate v0.2.0</span>
   </div>
 
   <script>
@@ -368,198 +486,85 @@ function getShellHTML(): string {
     let activeTool = 'select';
     let ws = null;
     let reconnectDelay = 1000;
-
-    // Expose state to the overlay
     window.__iterate_shell__ = { activeTool, activeIteration };
 
     function connect() {
       ws = new WebSocket('ws://' + location.host + '/ws');
-
-      ws.onopen = () => {
-        const el = document.getElementById('status-text');
-        el.textContent = 'Connected';
-        el.className = 'connected';
-        reconnectDelay = 1000;
-      };
-
-      ws.onmessage = (event) => {
-        const msg = JSON.parse(event.data);
-        handleMessage(msg);
-      };
-
-      ws.onerror = () => {
-        // onclose will fire after this
-      };
-
-      ws.onclose = () => {
-        const el = document.getElementById('status-text');
-        el.textContent = 'Disconnected — reconnecting...';
-        el.className = 'disconnected';
-        setTimeout(() => {
-          reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
-          connect();
-        }, reconnectDelay);
-      };
+      ws.onopen = () => { document.getElementById('status-text').textContent = 'Connected'; document.getElementById('status-text').className = 'connected'; reconnectDelay = 1000; };
+      ws.onmessage = (event) => handleMessage(JSON.parse(event.data));
+      ws.onerror = () => {};
+      ws.onclose = () => { document.getElementById('status-text').textContent = 'Disconnected'; document.getElementById('status-text').className = 'disconnected'; setTimeout(() => { reconnectDelay = Math.min(reconnectDelay * 1.5, 10000); connect(); }, reconnectDelay); };
     }
 
     function handleMessage(msg) {
       switch (msg.type) {
-        case 'state:sync':
-          state = msg.payload;
-          render();
-          break;
-        case 'iteration:created':
-          state.iterations[msg.payload.name] = msg.payload;
-          render();
-          break;
-        case 'iteration:status':
-          // Only update the status field, don't overwrite the whole object
-          if (state.iterations[msg.payload.name]) {
-            state.iterations[msg.payload.name].status = msg.payload.status;
-          }
-          render();
-          break;
-        case 'iteration:removed':
-          delete state.iterations[msg.payload.name];
-          if (activeIteration === msg.payload.name) activeIteration = null;
-          render();
-          break;
-        case 'annotation:created':
-          state.annotations.push(msg.payload);
-          break;
-        case 'annotation:deleted':
-          state.annotations = state.annotations.filter(a => a.id !== msg.payload.id);
-          break;
+        case 'state:sync': state = msg.payload; render(); break;
+        case 'iteration:created': state.iterations[msg.payload.name] = msg.payload; render(); break;
+        case 'iteration:status': if (state.iterations[msg.payload.name]) state.iterations[msg.payload.name].status = msg.payload.status; render(); break;
+        case 'iteration:removed': delete state.iterations[msg.payload.name]; if (activeIteration === msg.payload.name) activeIteration = null; render(); break;
+        case 'annotation:created': state.annotations.push(msg.payload); break;
+        case 'annotation:deleted': state.annotations = state.annotations.filter(a => a.id !== msg.payload.id); break;
+        case 'command:started': if (msg.payload.iterations.length > 0 && !activeIteration) switchIteration(msg.payload.iterations[0]); break;
       }
     }
 
-    function render() {
-      renderTabs();
-      renderViewport();
-      renderPickButton();
-    }
+    function render() { renderTabs(); renderViewport(); renderPickButton(); }
 
     function renderTabs() {
-      const bar = document.getElementById('tab-bar');
-      bar.innerHTML = '';
+      const bar = document.getElementById('tab-bar'); bar.innerHTML = '';
       const names = Object.keys(state.iterations);
-
       for (const name of names) {
-        const info = state.iterations[name];
-        const tab = document.createElement('div');
+        const info = state.iterations[name]; const tab = document.createElement('div');
         tab.className = 'tab' + (name === activeIteration ? ' active' : '');
-
-        const dot = document.createElement('span');
-        dot.className = 'status-dot ' + (info.status || 'stopped');
-        tab.appendChild(dot);
-        tab.appendChild(document.createTextNode(name));
-
-        tab.addEventListener('click', () => switchIteration(name));
-        bar.appendChild(tab);
+        const dot = document.createElement('span'); dot.className = 'status-dot ' + (info.status || 'stopped');
+        tab.appendChild(dot); tab.appendChild(document.createTextNode(name));
+        if (info.commandPrompt) tab.title = info.commandPrompt;
+        tab.addEventListener('click', () => switchIteration(name)); bar.appendChild(tab);
       }
-
-      const addTab = document.createElement('div');
-      addTab.className = 'tab add';
-      addTab.textContent = '+';
-      addTab.title = 'Run: iterate branch <name>';
-      bar.appendChild(addTab);
-
-      // Auto-select first iteration
-      if (!activeIteration && names.length > 0) {
-        activeIteration = names[0];
-        window.__iterate_shell__.activeIteration = activeIteration;
-        window.dispatchEvent(new CustomEvent('iterate:iteration-change', { detail: { iteration: activeIteration } }));
-      }
+      const addTab = document.createElement('div'); addTab.className = 'tab add'; addTab.textContent = '+';
+      addTab.title = 'Type /iterate <prompt> in the command bar'; bar.appendChild(addTab);
+      if (!activeIteration && names.length > 0) { activeIteration = names[0]; window.__iterate_shell__.activeIteration = activeIteration; window.dispatchEvent(new CustomEvent('iterate:iteration-change', { detail: { iteration: activeIteration } })); }
     }
 
     function renderViewport() {
-      const viewport = document.getElementById('viewport');
-      const names = Object.keys(state.iterations);
-
-      if (names.length === 0) {
-        viewport.innerHTML = '';
-        const empty = document.createElement('div');
-        empty.className = 'empty-state';
-        empty.innerHTML = '<p>No iterations yet.</p><p>Run <code>iterate branch &lt;name&gt;</code> to create one.</p>';
-        viewport.appendChild(empty);
-        return;
-      }
-
-      if (!activeIteration) return;
-
-      const info = state.iterations[activeIteration];
-      if (!info) return;
-
-      // Check if iframe already shows the correct iteration
+      const viewport = document.getElementById('viewport'); const names = Object.keys(state.iterations);
+      if (names.length === 0) { viewport.innerHTML = '<div class="empty-state"><p>No iterations yet.</p><p>Type <code>/iterate &lt;prompt&gt;</code> above to get started.</p></div>'; return; }
+      if (!activeIteration) return; const info = state.iterations[activeIteration]; if (!info) return;
       const existingIframe = viewport.querySelector('iframe');
-      const expectedSrc = '/' + encodeURIComponent(activeIteration) + '/';
-
-      if (existingIframe && existingIframe.dataset.iteration === activeIteration) {
-        return; // Already showing correct iteration
-      }
-
+      if (existingIframe && existingIframe.dataset.iteration === activeIteration) return;
       viewport.innerHTML = '';
-
-      if (info.status === 'ready') {
-        const iframe = document.createElement('iframe');
-        iframe.src = expectedSrc;
-        iframe.dataset.iteration = activeIteration;
-        iframe.loading = 'lazy';
-        viewport.appendChild(iframe);
-      } else {
-        const empty = document.createElement('div');
-        empty.className = 'empty-state';
-        const p = document.createElement('p');
-        p.textContent = 'Iteration "' + activeIteration + '" is ' + (info.status || 'unknown') + '...';
-        empty.appendChild(p);
-        viewport.appendChild(empty);
-      }
+      if (info.status === 'ready') { const iframe = document.createElement('iframe'); iframe.src = '/' + encodeURIComponent(activeIteration) + '/'; iframe.dataset.iteration = activeIteration; iframe.loading = 'lazy'; viewport.appendChild(iframe); }
+      else { const empty = document.createElement('div'); empty.className = 'empty-state'; empty.textContent = 'Iteration "' + activeIteration + '" is ' + (info.status || 'unknown') + '...'; viewport.appendChild(empty); }
     }
 
-    function renderPickButton() {
-      const btn = document.getElementById('pick-btn');
-      const names = Object.keys(state.iterations);
-      btn.style.display = (activeIteration && names.length > 0) ? 'block' : 'none';
-    }
+    function renderPickButton() { const btn = document.getElementById('pick-btn'); btn.style.display = (activeIteration && Object.keys(state.iterations).length > 0) ? 'block' : 'none'; }
 
-    function switchIteration(name) {
-      activeIteration = name;
-      window.__iterate_shell__.activeIteration = name;
-      window.dispatchEvent(new CustomEvent('iterate:iteration-change', { detail: { iteration: name } }));
-      render();
-    }
+    function switchIteration(name) { activeIteration = name; window.__iterate_shell__.activeIteration = name; window.dispatchEvent(new CustomEvent('iterate:iteration-change', { detail: { iteration: name } })); render(); }
 
-    // Pick button
     document.getElementById('pick-btn').addEventListener('click', async () => {
       if (!activeIteration) return;
       if (!confirm('Pick "' + activeIteration + '"? This will merge it and remove all other iterations.')) return;
-
-      try {
-        const res = await fetch('/api/iterations/pick', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: activeIteration }),
-        });
-        if (res.ok) {
-          activeIteration = null;
-        } else {
-          const err = await res.json();
-          alert('Pick failed: ' + (err.message || 'Unknown error'));
-        }
-      } catch (e) {
-        alert('Pick failed: ' + e.message);
-      }
+      try { const res = await fetch('/api/iterations/pick', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: activeIteration }) }); if (res.ok) activeIteration = null; else { const err = await res.json(); alert('Pick failed: ' + (err.message || 'Unknown error')); } } catch (e) { alert('Pick failed: ' + e.message); }
     });
 
-    // Toolbar
     document.getElementById('toolbar').addEventListener('click', (e) => {
-      const btn = e.target.closest('.tool-btn');
-      if (!btn || btn.id === 'pick-btn') return;
-      activeTool = btn.dataset.tool;
-      window.__iterate_shell__.activeTool = activeTool;
+      const btn = e.target.closest('.tool-btn'); if (!btn || btn.id === 'pick-btn') return;
+      activeTool = btn.dataset.tool; window.__iterate_shell__.activeTool = activeTool;
       window.dispatchEvent(new CustomEvent('iterate:tool-change', { detail: { tool: activeTool } }));
-      document.querySelectorAll('.tool-btn[data-tool]').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
+      document.querySelectorAll('.tool-btn[data-tool]').forEach(b => b.classList.remove('active')); btn.classList.add('active');
+    });
+
+    document.getElementById('command-input').addEventListener('keydown', async (e) => {
+      if (e.key !== 'Enter') return;
+      const input = e.target; const value = input.value.trim(); if (!value) return;
+      const iterateMatch = value.match(/^\\/iterate\\s+(?:--count\\s+(\\d+)\\s+)?(.+)$/);
+      let prompt, count = 3;
+      if (iterateMatch) { count = iterateMatch[1] ? parseInt(iterateMatch[1]) : 3; prompt = iterateMatch[2]; }
+      else { prompt = value.startsWith('/') ? value.slice(1).trim() : value; }
+      if (!prompt) return;
+      input.value = ''; input.disabled = true;
+      try { await fetch('/api/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: 'iterate', prompt, count }) }); } catch (err) { alert('Command failed: ' + err.message); }
+      input.disabled = false; input.focus();
     });
 
     connect();

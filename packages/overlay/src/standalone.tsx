@@ -11,7 +11,8 @@ import { FloatingPanel } from "./panel/FloatingPanel.js";
  * 2. Framework plugin (Vite/Next) — operates directly on the page body
  *
  * Includes a draggable floating toolbar panel with:
- * - Tool mode switching (Select / Annotate / Move)
+ * - Tool mode switching (Select / Move)
+ * - Batch submit button (when annotations are pending)
  * - Drag to any screen corner
  * - Hide/show toggle with Alt+Shift+I hotkey
  */
@@ -20,7 +21,7 @@ function StandaloneOverlay() {
   const [mode, setMode] = useState<ToolMode>("select");
   const [iteration, setIteration] = useState<string>("");
   const [visible, setVisible] = useState(true);
-  const [annotationCount, setAnnotationCount] = useState(0);
+  const [batchCount, setBatchCount] = useState(0);
 
   // Detect context: daemon shell vs framework plugin
   const isDaemonShell = typeof document !== "undefined" && !!document.getElementById("viewport");
@@ -28,7 +29,13 @@ function StandaloneOverlay() {
   // Listen for shell events (daemon shell mode)
   useEffect(() => {
     const onToolChange = (e: Event) => {
-      setMode((e as CustomEvent).detail.tool as ToolMode);
+      const tool = (e as CustomEvent).detail.tool as string;
+      // Map legacy "annotate" to "select" for shell compatibility
+      if (tool === "annotate") {
+        setMode("select");
+      } else if (tool === "select" || tool === "move") {
+        setMode(tool);
+      }
     };
     const onIterationChange = (e: Event) => {
       setIteration((e as CustomEvent).detail.iteration ?? "");
@@ -40,7 +47,8 @@ function StandaloneOverlay() {
     // Read initial state
     const shell = (window as any).__iterate_shell__;
     if (shell) {
-      setMode(shell.activeTool ?? "select");
+      const tool = shell.activeTool ?? "select";
+      setMode(tool === "annotate" ? "select" : tool);
       setIteration(shell.activeIteration ?? "default");
     }
 
@@ -73,11 +81,10 @@ function StandaloneOverlay() {
     return () => observer.disconnect();
   }, [isDaemonShell]);
 
-  // Broadcast mode changes back to the shell (so daemon toolbar stays in sync)
+  // Broadcast mode changes back to the shell
   const handleModeChange = useCallback(
     (newMode: ToolMode) => {
       setMode(newMode);
-      // Sync with shell if present
       const shell = (window as any).__iterate_shell__;
       if (shell) {
         shell.activeTool = newMode;
@@ -89,15 +96,21 @@ function StandaloneOverlay() {
     []
   );
 
+  // Handle batch submission from toolbar
+  const handleSubmitBatch = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("iterate:submit-batch"));
+  }, []);
+
   if (!iteration) return null;
 
   return (
     <>
-      {/* Full-screen canvas layer (pointer-events managed per tool mode) */}
+      {/* Full-screen overlay layer (pointer-events managed per tool mode) */}
       <IterateOverlay
         mode={visible ? mode : "select"}
         iteration={iteration}
         iframeRef={iframeRef}
+        onBatchCountChange={setBatchCount}
       />
 
       {/* Floating toolbar panel */}
@@ -106,7 +119,8 @@ function StandaloneOverlay() {
         onModeChange={handleModeChange}
         visible={visible}
         onVisibilityChange={setVisible}
-        annotationCount={annotationCount}
+        batchCount={batchCount}
+        onSubmitBatch={handleSubmitBatch}
       />
     </>
   );

@@ -16,4 +16,8 @@ export interface IterationInfo {
   pid: number | null;
   status: IterationStatus;
   createdAt: string;
+  /** The prompt that spawned this iteration (from /iterate command) */
+  commandPrompt?: string;
+  /** Groups iterations from the same /iterate command */
+  commandId?: string;
 }

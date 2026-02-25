@@ -1,7 +1,8 @@
 // Types
 export type {
   AnnotationData,
-  SVGPathData,
+  SelectedElement,
+  TextSelection,
   Rect,
   AnnotationIntent,
   AnnotationSeverity,

@@ -6,6 +6,10 @@ export interface DomChange {
   iteration: string;
   selector: string;
   type: "move" | "reorder" | "resize" | "style";
+  /** React component name from babel plugin */
+  componentName: string | null;
+  /** Source file location from babel plugin */
+  sourceLocation: string | null;
   before: DomSnapshot;
   after: DomSnapshot;
   timestamp: number;

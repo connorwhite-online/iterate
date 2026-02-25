@@ -17,7 +17,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@iterate/overlay": "workspace:*"
+    "@iterate/overlay": "workspace:*",
+    "@iterate/babel-plugin": "workspace:*"
   },
   "peerDependencies": {
     "next": "^14.0.0 || ^15.0.0"

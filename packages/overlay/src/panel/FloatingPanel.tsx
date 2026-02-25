@@ -1,12 +1,16 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ToolMode } from "../IterateOverlay.js";
+import { CursorIcon, MoveIcon, SendIcon, MinimizeIcon, LogoIcon } from "./icons.js";
 
 export interface FloatingPanelProps {
   mode: ToolMode;
   onModeChange: (mode: ToolMode) => void;
   visible: boolean;
   onVisibilityChange: (visible: boolean) => void;
-  annotationCount?: number;
+  /** Number of annotations in the pending batch */
+  batchCount?: number;
+  /** Called when user clicks Submit */
+  onSubmitBatch?: () => void;
 }
 
 type Corner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
@@ -15,22 +19,23 @@ const PANEL_MARGIN = 16;
 const HOTKEY = "Alt+Shift+I";
 
 /**
- * Floating toolbar panel that can be dragged to any corner of the screen.
- * Features hide/show with hotkey support.
+ * Floating toolbar panel with icon-based tools.
+ * Can be dragged to any corner of the screen.
+ * Shows a Submit button when there are pending annotations.
  */
 export function FloatingPanel({
   mode,
   onModeChange,
   visible,
   onVisibilityChange,
-  annotationCount = 0,
+  batchCount = 0,
+  onSubmitBatch,
 }: FloatingPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [corner, setCorner] = useState<Corner>("bottom-right");
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
-  const [showReappearMenu, setShowReappearMenu] = useState(false);
 
   // Hotkey: Alt+Shift+I to toggle
   useEffect(() => {
@@ -72,7 +77,6 @@ export function FloatingPanel({
 
     const handleMouseUp = (e: MouseEvent) => {
       setIsDragging(false);
-      // Snap to nearest corner
       const x = e.clientX;
       const y = e.clientY;
       const midX = window.innerWidth / 2;
@@ -97,13 +101,11 @@ export function FloatingPanel({
     };
   }, [isDragging, dragOffset]);
 
-  // Compute position
   const positionStyle = dragPos
     ? { left: dragPos.x, top: dragPos.y }
     : getCornerPosition(corner);
 
   if (!visible) {
-    // Show a tiny "reopen" pill
     return (
       <div
         style={{
@@ -121,16 +123,19 @@ export function FloatingPanel({
             border: "1px solid #2a2a4a",
             borderRadius: 16,
             color: "#5b9bff",
-            padding: "4px 10px",
+            padding: "6px 10px",
             fontSize: 11,
             cursor: "pointer",
             opacity: 0.6,
             transition: "opacity 0.2s",
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
           }}
           onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
           onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.6")}
         >
-          iterate
+          <LogoIcon size={14} color="#5b9bff" />
         </button>
       </div>
     );
@@ -147,30 +152,32 @@ export function FloatingPanel({
         pointerEvents: "auto",
         background: "#1a1a2e",
         border: "1px solid #2a2a4a",
-        borderRadius: 12,
-        padding: "8px 10px",
+        borderRadius: 10,
+        padding: "6px 8px",
         boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
         display: "flex",
-        flexDirection: "column",
-        gap: 6,
+        alignItems: "center",
+        gap: 4,
         cursor: isDragging ? "grabbing" : "grab",
         userSelect: "none",
         transition: isDragging ? "none" : "left 0.3s ease, top 0.3s ease, right 0.3s ease, bottom 0.3s ease",
-        minWidth: 140,
       }}
     >
-      {/* Header */}
+      {/* Brand mark */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          justifyContent: "space-between",
-          gap: 8,
+          gap: 4,
+          paddingRight: 4,
+          borderRight: "1px solid #2a2a4a",
+          marginRight: 2,
         }}
       >
+        <LogoIcon size={14} color="#5b9bff" />
         <span
           style={{
-            fontSize: 11,
+            fontSize: 10,
             fontWeight: 700,
             color: "#5b9bff",
             letterSpacing: "0.04em",
@@ -179,107 +186,102 @@ export function FloatingPanel({
         >
           iterate
         </span>
-
-        <div style={{ display: "flex", gap: 2 }}>
-          {/* Hide button */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowReappearMenu(!showReappearMenu);
-            }}
-            title="Hide panel"
-            style={iconButtonStyle}
-          >
-            {showReappearMenu ? "\u00d7" : "\u2212"}
-          </button>
-        </div>
       </div>
-
-      {/* Reappear menu */}
-      {showReappearMenu && (
-        <div
-          style={{
-            background: "#111128",
-            borderRadius: 6,
-            padding: 6,
-            display: "flex",
-            flexDirection: "column",
-            gap: 2,
-          }}
-        >
-          <span style={{ fontSize: 10, color: "#555", padding: "2px 4px" }}>
-            Hide panel — reopen with:
-          </span>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onVisibilityChange(false);
-              setShowReappearMenu(false);
-            }}
-            style={menuItemStyle}
-          >
-            {HOTKEY} (hotkey)
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onVisibilityChange(false);
-              setShowReappearMenu(false);
-            }}
-            style={menuItemStyle}
-          >
-            Small pill button
-          </button>
-        </div>
-      )}
 
       {/* Tool buttons */}
-      <div style={{ display: "flex", gap: 3 }}>
-        <ToolButton
-          label="Select"
-          icon="S"
-          active={mode === "select"}
-          onClick={() => onModeChange("select")}
-        />
-        <ToolButton
-          label="Annotate"
-          icon="A"
-          active={mode === "annotate"}
-          onClick={() => onModeChange("annotate")}
-        />
-        <ToolButton
-          label="Move"
-          icon="M"
-          active={mode === "move"}
-          onClick={() => onModeChange("move")}
-        />
-      </div>
+      <IconButton
+        icon={<CursorIcon size={14} />}
+        label="Select"
+        active={mode === "select"}
+        onClick={() => onModeChange("select")}
+      />
+      <IconButton
+        icon={<MoveIcon size={14} />}
+        label="Move"
+        active={mode === "move"}
+        onClick={() => onModeChange("move")}
+      />
 
-      {/* Annotation count */}
-      {annotationCount > 0 && (
-        <div
-          style={{
-            fontSize: 10,
-            color: "#666",
-            textAlign: "center",
-            fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-          }}
-        >
-          {annotationCount} annotation{annotationCount !== 1 ? "s" : ""}
-        </div>
+      {/* Submit button (conditional) */}
+      {batchCount > 0 && (
+        <>
+          <div style={{ width: 1, height: 20, background: "#2a2a4a", margin: "0 2px" }} />
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onSubmitBatch?.();
+            }}
+            title={`Submit ${batchCount} annotation${batchCount !== 1 ? "s" : ""}`}
+            style={{
+              position: "relative",
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              padding: "4px 10px",
+              borderRadius: 6,
+              border: "1px solid #10b981",
+              background: "#10b98133",
+              color: "#10b981",
+              cursor: "pointer",
+              fontSize: 11,
+              fontWeight: 600,
+              fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            }}
+          >
+            <SendIcon size={13} color="#10b981" />
+            Submit
+            <span
+              style={{
+                background: "#10b981",
+                color: "#000",
+                fontSize: 9,
+                fontWeight: 700,
+                borderRadius: 8,
+                padding: "0 5px",
+                lineHeight: "16px",
+                minWidth: 16,
+                textAlign: "center",
+              }}
+            >
+              {batchCount}
+            </span>
+          </button>
+        </>
       )}
+
+      {/* Minimize button */}
+      <div style={{ width: 1, height: 20, background: "#2a2a4a", margin: "0 2px" }} />
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onVisibilityChange(false);
+        }}
+        title={`Hide panel (${HOTKEY})`}
+        style={{
+          background: "transparent",
+          border: "none",
+          color: "#555",
+          cursor: "pointer",
+          padding: "2px",
+          display: "flex",
+          alignItems: "center",
+          borderRadius: 4,
+        }}
+      >
+        <MinimizeIcon size={14} color="#555" />
+      </button>
     </div>
   );
 }
 
-function ToolButton({
-  label,
+function IconButton({
   icon,
+  label,
   active,
   onClick,
 }: {
+  icon: React.ReactNode;
   label: string;
-  icon: string;
   active: boolean;
   onClick: () => void;
 }) {
@@ -291,19 +293,20 @@ function ToolButton({
       }}
       title={label}
       style={{
-        flex: 1,
-        padding: "4px 6px",
-        fontSize: 11,
-        fontWeight: active ? 600 : 400,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 30,
+        height: 26,
         borderRadius: 6,
-        border: active ? "1px solid #2563eb" : "1px solid #2a2a4a",
+        border: active ? "1px solid #2563eb" : "1px solid transparent",
         background: active ? "#2563eb33" : "transparent",
-        color: active ? "#5b9bff" : "#777",
+        color: active ? "#5b9bff" : "#666",
         cursor: "pointer",
-        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        transition: "all 0.1s",
       }}
     >
-      {label}
+      {icon}
     </button>
   );
 }
@@ -320,26 +323,3 @@ function getCornerPosition(corner: Corner): React.CSSProperties {
       return { right: PANEL_MARGIN, bottom: PANEL_MARGIN };
   }
 }
-
-const iconButtonStyle: React.CSSProperties = {
-  background: "transparent",
-  border: "none",
-  color: "#555",
-  cursor: "pointer",
-  fontSize: 14,
-  padding: "0 4px",
-  lineHeight: 1,
-  borderRadius: 4,
-};
-
-const menuItemStyle: React.CSSProperties = {
-  background: "transparent",
-  border: "none",
-  color: "#999",
-  cursor: "pointer",
-  fontSize: 11,
-  padding: "4px 8px",
-  textAlign: "left",
-  borderRadius: 4,
-  fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-};

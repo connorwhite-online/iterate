@@ -1,4 +1,4 @@
-import type { AnnotationData, AnnotationStatus, Rect } from "../types/annotations.js";
+import type { AnnotationData, Rect } from "../types/annotations.js";
 import type { IterationInfo, IterationStatus } from "../types/iterations.js";
 import type { DomChange } from "../types/dom.js";
 import type { IterateConfig } from "../types/config.js";
@@ -8,6 +8,11 @@ import type { IterateConfig } from "../types/config.js";
 export type ClientMessage =
   | { type: "annotation:create"; payload: Omit<AnnotationData, "id" | "timestamp" | "status"> }
   | { type: "annotation:delete"; payload: { id: string } }
+  | { type: "batch:submit"; payload: {
+      iteration: string;
+      annotations: Omit<AnnotationData, "id" | "timestamp" | "status">[];
+      domChanges: DomChange[];
+    }}
   | { type: "dom:select"; payload: { iteration: string; selector: string } }
   | { type: "dom:move"; payload: { iteration: string; selector: string; from: Rect; to: Rect } }
   | { type: "dom:reorder"; payload: { iteration: string; selector: string; newIndex: number } }
@@ -25,7 +30,9 @@ export type ServerMessage =
   | { type: "annotation:created"; payload: AnnotationData }
   | { type: "annotation:updated"; payload: AnnotationData }
   | { type: "annotation:deleted"; payload: { id: string } }
+  | { type: "batch:submitted"; payload: { batchId: string; annotationCount: number; domChangeCount: number } }
   | { type: "dom:changed"; payload: DomChange }
+  | { type: "command:started"; payload: { commandId: string; prompt: string; iterations: string[] } }
   | { type: "error"; payload: { message: string } };
 
 /** Full state synced on WebSocket connection */

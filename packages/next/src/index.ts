@@ -5,6 +5,8 @@ import { readFileSync } from "node:fs";
 export interface IterateNextOptions {
   /** Port for the iterate daemon (default: 4000) */
   daemonPort?: number;
+  /** Disable the babel plugin that injects component names/source locations (default: false) */
+  disableBabelPlugin?: boolean;
 }
 
 type NextConfig = Record<string, any>;
@@ -59,15 +61,36 @@ export function withIterate(
 
   // Resolve the overlay bundle path at config time
   let overlayBundlePath: string | undefined;
+  let babelPluginPath: string | undefined;
   try {
     const require = createRequire(import.meta.url);
     overlayBundlePath = require.resolve("@iterate/overlay/standalone");
+    if (!options.disableBabelPlugin) {
+      babelPluginPath = require.resolve("@iterate/babel-plugin");
+    }
   } catch {
-    console.warn("[iterate] Could not resolve overlay bundle");
+    console.warn("[iterate] Could not resolve overlay bundle or babel plugin");
   }
 
   return {
     ...nextConfig,
+
+    // Inject iterate babel plugin for component name/source resolution
+    ...(babelPluginPath ? {
+      experimental: {
+        ...nextConfig.experimental,
+        // Next.js supports custom SWC plugins, but for broadest compatibility
+        // we use the babel config approach
+      },
+      // Add our babel plugin to any existing babel config
+      babel: {
+        ...nextConfig.babel,
+        plugins: [
+          ...(nextConfig.babel?.plugins ?? []),
+          [babelPluginPath, { root: process.cwd() }],
+        ],
+      },
+    } : {}),
 
     // Add rewrites to proxy to the daemon
     async rewrites() {
