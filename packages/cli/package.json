@@ -1,0 +1,23 @@
+{
+  "name": "@iterate/cli",
+  "version": "0.1.0",
+  "description": "CLI for iterate — manage worktree iterations",
+  "type": "module",
+  "bin": {
+    "iterate": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@iterate/core": "workspace:*",
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.0",
+    "typescript": "^5.7.0"
+  }
+}
