@@ -1,4 +1,4 @@
-import type { AnnotationData, Rect } from "../types/annotations.js";
+import type { AnnotationData, AnnotationStatus, Rect } from "../types/annotations.js";
 import type { IterationInfo, IterationStatus } from "../types/iterations.js";
 import type { DomChange } from "../types/dom.js";
 import type { IterateConfig } from "../types/config.js";
@@ -6,7 +6,7 @@ import type { IterateConfig } from "../types/config.js";
 // --- Client → Server messages (browser overlay → daemon) ---
 
 export type ClientMessage =
-  | { type: "annotation:create"; payload: Omit<AnnotationData, "id" | "timestamp"> }
+  | { type: "annotation:create"; payload: Omit<AnnotationData, "id" | "timestamp" | "status"> }
   | { type: "annotation:delete"; payload: { id: string } }
   | { type: "dom:select"; payload: { iteration: string; selector: string } }
   | { type: "dom:move"; payload: { iteration: string; selector: string; from: Rect; to: Rect } }
@@ -23,6 +23,7 @@ export type ServerMessage =
   | { type: "iteration:removed"; payload: { name: string } }
   | { type: "iteration:status"; payload: { name: string; status: IterationStatus } }
   | { type: "annotation:created"; payload: AnnotationData }
+  | { type: "annotation:updated"; payload: AnnotationData }
   | { type: "annotation:deleted"; payload: { id: string } }
   | { type: "dom:changed"; payload: DomChange }
   | { type: "error"; payload: { message: string } };

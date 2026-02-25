@@ -1,6 +1,5 @@
 import { simpleGit, type SimpleGit } from "simple-git";
 import { join } from "node:path";
-import type { IterationInfo, IterateConfig } from "@iterate/core";
 
 export class WorktreeManager {
   private git: SimpleGit;
@@ -23,6 +22,16 @@ export class WorktreeManager {
     baseBranch?: string
   ): Promise<{ worktreePath: string; branch: string }> {
     const base = baseBranch ?? (await this.getCurrentBranch());
+
+    // Verify the base ref exists (handles unborn HEAD, nonexistent branches)
+    try {
+      await this.git.raw(["rev-parse", "--verify", base]);
+    } catch {
+      throw new Error(
+        `Base ref "${base}" does not exist. Make sure you have at least one commit.`
+      );
+    }
+
     const branch = `iterate/${name}`;
     const worktreePath = join(this.cwd, ".iterate", "worktrees", name);
 
@@ -93,24 +102,44 @@ export class WorktreeManager {
     strategy: "merge" | "squash" | "rebase" = "merge"
   ): Promise<void> {
     const winnerBranch = `iterate/${winnerName}`;
-    const baseBranch = await this.getCurrentBranch();
 
-    // Merge the winner into base
-    if (strategy === "squash") {
-      await this.git.raw(["merge", "--squash", winnerBranch]);
-      await this.git.raw(["commit", "-m", `iterate: pick ${winnerName}`]);
-    } else if (strategy === "rebase") {
-      await this.git.raw(["rebase", winnerBranch]);
-    } else {
-      await this.git.raw([
-        "merge",
-        winnerBranch,
-        "-m",
-        `iterate: pick ${winnerName}`,
-      ]);
+    try {
+      if (strategy === "squash") {
+        await this.git.raw(["merge", "--squash", winnerBranch]);
+        // Check if there are staged changes to commit
+        const status = await this.git.status();
+        if (status.staged.length > 0) {
+          await this.git.raw(["commit", "-m", `iterate: pick ${winnerName}`]);
+        }
+      } else if (strategy === "rebase") {
+        await this.git.raw(["rebase", winnerBranch]);
+      } else {
+        await this.git.raw([
+          "merge",
+          winnerBranch,
+          "-m",
+          `iterate: pick ${winnerName}`,
+        ]);
+      }
+    } catch (err) {
+      // Abort on conflict so we don't leave the repo in a broken state
+      try {
+        if (strategy === "rebase") {
+          await this.git.raw(["rebase", "--abort"]);
+        } else {
+          await this.git.raw(["merge", "--abort"]);
+        }
+      } catch {
+        // Already clean
+      }
+      throw new Error(
+        `Merge failed (likely conflicts). Aborted to keep the repo clean. ` +
+        `Resolve manually with: git merge ${winnerBranch}\n` +
+        `Original error: ${(err as Error).message}`
+      );
     }
 
-    // Remove all iteration worktrees
+    // Remove all iteration worktrees (including the winner)
     for (const name of allIterationNames) {
       try {
         await this.remove(name, true);
@@ -119,7 +148,6 @@ export class WorktreeManager {
       }
     }
 
-    // Prune stale worktree references
     await this.git.raw(["worktree", "prune"]);
   }
 

@@ -46,10 +46,7 @@ export class ProcessManager {
       env: {
         ...process.env,
         PORT: String(port),
-        // Next.js specific
-        NEXT_PUBLIC_PORT: String(port),
       },
-      // Pipe stdio so we can see dev server output
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -67,6 +64,12 @@ export class ProcessManager {
       }
     });
 
+    // Clean up map entry if process exits unexpectedly
+    child.then(
+      () => this.processes.delete(name),
+      () => this.processes.delete(name)
+    );
+
     this.processes.set(name, {
       name,
       port,
@@ -77,20 +80,37 @@ export class ProcessManager {
     return { pid: child.pid };
   }
 
-  /** Stop a specific dev server */
+  /** Stop a specific dev server, waiting for exit with SIGKILL fallback */
   async stop(name: string): Promise<void> {
     const managed = this.processes.get(name);
     if (!managed) return;
 
     managed.process.kill("SIGTERM");
+
+    try {
+      // Wait up to 5s for graceful shutdown
+      await Promise.race([
+        managed.process.catch(() => {}),
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error("timeout")), 5000)
+        ),
+      ]);
+    } catch {
+      // Force kill if it didn't shut down
+      try {
+        managed.process.kill("SIGKILL");
+      } catch {
+        // Already dead
+      }
+    }
+
     this.processes.delete(name);
   }
 
   /** Stop all managed dev servers */
   async stopAll(): Promise<void> {
-    for (const [name] of this.processes) {
-      await this.stop(name);
-    }
+    const names = [...this.processes.keys()];
+    await Promise.all(names.map((name) => this.stop(name)));
   }
 
   /** Get info about a running process */

@@ -1,11 +1,17 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import type { AnnotationData, SVGPathData, Rect } from "@iterate/core";
+import type { AnnotationData, AnnotationIntent, AnnotationSeverity, SVGPathData, Rect } from "@iterate/core";
 import { SVGCanvas } from "./canvas/SVGCanvas.js";
 import { ElementPicker, type PickedElement } from "./inspector/ElementPicker.js";
 import { AnnotationDialog } from "./annotate/AnnotationDialog.js";
 import { DragHandler } from "./manipulate/DragHandler.js";
 import { DaemonConnection } from "./transport/connection.js";
-import { generateSelector, getRelevantStyles } from "./inspector/selector.js";
+import {
+  generateSelector,
+  getRelevantStyles,
+  identifyElement,
+  getElementPath,
+  getNearbyText,
+} from "./inspector/selector.js";
 
 export type ToolMode = "select" | "annotate" | "move";
 
@@ -37,6 +43,9 @@ export function IterateOverlay({
     drawing: SVGPathData;
     bounds: { x: number; y: number; width: number; height: number };
     selector?: string;
+    elementName?: string;
+    elementPath?: string;
+    nearbyText?: string;
     rect?: Rect;
     computedStyles?: Record<string, string>;
   } | null>(null);
@@ -76,6 +85,9 @@ export function IterateOverlay({
               drawing: path,
               bounds,
               selector: generateSelector(element),
+              elementName: identifyElement(element),
+              elementPath: getElementPath(element),
+              nearbyText: getNearbyText(element),
               rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
               computedStyles: getRelevantStyles(element),
             });
@@ -93,7 +105,7 @@ export function IterateOverlay({
 
   // Submit annotation to daemon
   const handleAnnotationSubmit = useCallback(
-    (comment: string) => {
+    (comment: string, intent?: AnnotationIntent, severity?: AnnotationSeverity) => {
       if (!pendingAnnotation || !connectionRef.current) return;
 
       connectionRef.current.send({
@@ -101,10 +113,15 @@ export function IterateOverlay({
         payload: {
           iteration,
           selector: pendingAnnotation.selector ?? "",
+          elementName: pendingAnnotation.elementName ?? "",
+          elementPath: pendingAnnotation.elementPath ?? "",
+          nearbyText: pendingAnnotation.nearbyText,
           rect: pendingAnnotation.rect ?? pendingAnnotation.bounds,
           computedStyles: pendingAnnotation.computedStyles ?? {},
           drawing: pendingAnnotation.drawing,
           comment,
+          intent,
+          severity,
         },
       });
 

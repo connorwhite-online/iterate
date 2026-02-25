@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
+import type { AnnotationIntent, AnnotationSeverity } from "@iterate/core";
 
 interface AnnotationDialogProps {
   position: { x: number; y: number };
-  onSubmit: (comment: string) => void;
+  onSubmit: (comment: string, intent?: AnnotationIntent, severity?: AnnotationSeverity) => void;
   onCancel: () => void;
 }
 
@@ -16,6 +17,8 @@ export function AnnotationDialog({
   onCancel,
 }: AnnotationDialogProps) {
   const [comment, setComment] = useState("");
+  const [intent, setIntent] = useState<AnnotationIntent>("change");
+  const [severity, setSeverity] = useState<AnnotationSeverity>("suggestion");
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -25,7 +28,7 @@ export function AnnotationDialog({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (comment.trim()) {
-      onSubmit(comment.trim());
+      onSubmit(comment.trim(), intent, severity);
     }
   };
 
@@ -59,6 +62,46 @@ export function AnnotationDialog({
           width: 280,
         }}
       >
+        {/* Intent & severity chips */}
+        <div style={{ display: "flex", gap: 4, marginBottom: 8, flexWrap: "wrap" }}>
+          {(["fix", "change", "question", "approve"] as const).map((i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => setIntent(i)}
+              style={{
+                padding: "2px 8px",
+                fontSize: 11,
+                borderRadius: 10,
+                border: intent === i ? "1px solid #2563eb" : "1px solid #2a2a4a",
+                background: intent === i ? "#2563eb22" : "transparent",
+                color: intent === i ? "#5b9bff" : "#777",
+                cursor: "pointer",
+              }}
+            >
+              {i}
+            </button>
+          ))}
+          <span style={{ width: 1, background: "#2a2a4a", margin: "0 2px" }} />
+          {(["suggestion", "important", "blocking"] as const).map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setSeverity(s)}
+              style={{
+                padding: "2px 8px",
+                fontSize: 11,
+                borderRadius: 10,
+                border: severity === s ? "1px solid #f59e0b" : "1px solid #2a2a4a",
+                background: severity === s ? "#f59e0b22" : "transparent",
+                color: severity === s ? "#f59e0b" : "#777",
+                cursor: "pointer",
+              }}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
         <textarea
           ref={inputRef}
           value={comment}

@@ -3,6 +3,7 @@ import fastifyWebsocket from "@fastify/websocket";
 import fastifyReplyFrom from "@fastify/reply-from";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { execa } from "execa";
 import { DEFAULT_CONFIG, type IterateConfig, type IterationInfo } from "@iterate/core";
 import { StateStore } from "./state/store.js";
 import { WorktreeManager } from "./worktree/manager.js";
@@ -43,24 +44,23 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
 
   // --- REST API ---
 
-  /** List all iterations */
   app.get("/api/iterations", async () => {
     return store.getIterations();
   });
 
-  /** Create a new iteration */
   app.post("/api/iterations", async (request, reply) => {
     const { name, baseBranch } = request.body as {
       name: string;
       baseBranch?: string;
     };
 
-    if (!name) {
-      return reply.status(400).send({ message: "Name is required" });
+    if (!name || !/^[a-zA-Z0-9_-]+$/.test(name)) {
+      return reply.status(400).send({
+        message: "Name is required and must be alphanumeric (hyphens/underscores allowed)",
+      });
     }
 
-    const existing = store.getIteration(name);
-    if (existing) {
+    if (store.getIteration(name)) {
       return reply.status(409).send({ message: `Iteration "${name}" already exists` });
     }
 
@@ -72,7 +72,6 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     }
 
     try {
-      // Create worktree
       const info: IterationInfo = {
         name,
         branch: `iterate/${name}`,
@@ -85,10 +84,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
       store.setIteration(name, info);
       wsHub.broadcast({ type: "iteration:status", payload: { name, status: "creating" } });
 
-      const { worktreePath, branch } = await worktreeManager.create(
-        name,
-        baseBranch
-      );
+      const { worktreePath, branch } = await worktreeManager.create(name, baseBranch);
       info.worktreePath = worktreePath;
       info.branch = branch;
 
@@ -97,18 +93,9 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
       store.setIteration(name, info);
       wsHub.broadcast({ type: "iteration:status", payload: { name, status: "installing" } });
 
-      const installCmd =
-        config.packageManager === "pnpm"
-          ? "pnpm install --prefer-offline"
-          : config.packageManager === "yarn"
-            ? "yarn install"
-            : config.packageManager === "bun"
-              ? "bun install"
-              : "npm install --prefer-offline";
-
-      const { execa: execaFn } = await import("execa");
+      const installCmd = getInstallCommand(config.packageManager);
       const [cmd, ...args] = installCmd.split(" ");
-      await execaFn(cmd!, args, { cwd: worktreePath });
+      await execa(cmd!, args, { cwd: worktreePath });
 
       // Start dev server
       info.status = "starting";
@@ -118,20 +105,13 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
       const allocatedPort = await processManager.allocatePort();
       info.port = allocatedPort;
 
-      // Construct dev command with port override
       const devCommand = buildDevCommand(config.devCommand, allocatedPort);
-      const { pid } = await processManager.start(
-        name,
-        worktreePath,
-        devCommand,
-        allocatedPort
-      );
+      const { pid } = await processManager.start(name, worktreePath, devCommand, allocatedPort);
       info.pid = pid ?? null;
       info.status = "ready";
       store.setIteration(name, info);
 
       wsHub.broadcast({ type: "iteration:created", payload: info });
-      wsHub.broadcast({ type: "iteration:status", payload: { name, status: "ready" } });
 
       return info;
     } catch (err) {
@@ -147,7 +127,6 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     }
   });
 
-  /** Remove an iteration */
   app.delete("/api/iterations/:name", async (request, reply) => {
     const { name } = request.params as { name: string };
     const iteration = store.getIteration(name);
@@ -157,14 +136,17 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     }
 
     await processManager.stop(name);
-    await worktreeManager.remove(name);
+    try {
+      await worktreeManager.remove(name);
+    } catch {
+      // Worktree may already be removed
+    }
     store.removeIteration(name);
     wsHub.broadcast({ type: "iteration:removed", payload: { name } });
 
     return { ok: true };
   });
 
-  /** Pick a winner */
   app.post("/api/iterations/pick", async (request, reply) => {
     const { name, strategy } = request.body as {
       name: string;
@@ -176,14 +158,18 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
       return reply.status(404).send({ message: `Iteration "${name}" not found` });
     }
 
-    // Stop all dev servers
     await processManager.stopAll();
 
-    // Merge winner and remove all worktrees
     const allNames = Object.keys(store.getIterations());
-    await worktreeManager.pick(name, allNames, strategy);
 
-    // Clear state
+    try {
+      await worktreeManager.pick(name, allNames, strategy);
+    } catch (err) {
+      return reply.status(500).send({
+        message: `Pick failed: ${(err as Error).message}`,
+      });
+    }
+
     for (const n of allNames) {
       store.removeIteration(n);
       wsHub.broadcast({ type: "iteration:removed", payload: { name: n } });
@@ -192,25 +178,68 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     return { ok: true, merged: name };
   });
 
-  /** List annotations */
   app.get("/api/annotations", async () => {
     return store.getAnnotations();
   });
 
-  /** Shutdown */
+  app.get("/api/annotations/pending", async () => {
+    const pending = store.getPendingAnnotations();
+    return { count: pending.length, annotations: pending };
+  });
+
+  /** Acknowledge an annotation (agent has seen it) */
+  app.patch("/api/annotations/:id/acknowledge", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const updated = store.updateAnnotation(id, { status: "acknowledged" });
+    if (!updated) return reply.status(404).send({ message: "Annotation not found" });
+    wsHub.broadcast({ type: "annotation:updated", payload: updated });
+    return updated;
+  });
+
+  /** Resolve an annotation (agent addressed the feedback) */
+  app.patch("/api/annotations/:id/resolve", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { summary } = (request.body as { summary?: string }) ?? {};
+    const updated = store.updateAnnotation(id, {
+      status: "resolved",
+      resolvedBy: "agent",
+      agentReply: summary,
+    });
+    if (!updated) return reply.status(404).send({ message: "Annotation not found" });
+    wsHub.broadcast({ type: "annotation:updated", payload: updated });
+    return updated;
+  });
+
+  /** Dismiss an annotation (agent chose not to address it) */
+  app.patch("/api/annotations/:id/dismiss", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { reason } = (request.body as { reason?: string }) ?? {};
+    const updated = store.updateAnnotation(id, {
+      status: "dismissed",
+      resolvedBy: "agent",
+      agentReply: reason,
+    });
+    if (!updated) return reply.status(404).send({ message: "Annotation not found" });
+    wsHub.broadcast({ type: "annotation:updated", payload: updated });
+    return updated;
+  });
+
+  app.get("/api/dom-changes", async () => {
+    return store.getDomChanges();
+  });
+
   app.post("/api/shutdown", async (_request, reply) => {
     await processManager.stopAll();
     await reply.send({ ok: true });
-    // Graceful shutdown
     setTimeout(() => process.exit(0), 500);
   });
 
-  // Proxy routes for iterations (must be registered last)
+  // Proxy routes (registered last — wildcard catch-all)
   await registerProxyRoutes(app, store);
 
-  // Root route: serve the control UI shell
+  // Root route: control UI shell
   app.get("/", async (_request, reply) => {
-    return reply.type("text/html").send(getShellHTML(config));
+    return reply.type("text/html").send(getShellHTML());
   });
 
   // Start server
@@ -222,11 +251,20 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     process.exit(1);
   }
 
-  // Cleanup on exit
+  // Cleanup on exit — guard against double invocation
+  let isShuttingDown = false;
+
   const cleanup = async () => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+
     console.log("\nShutting down iterate daemon...");
-    await processManager.stopAll();
-    await app.close();
+    try {
+      await processManager.stopAll();
+      await app.close();
+    } catch (err) {
+      console.error("Error during cleanup:", err);
+    }
     process.exit(0);
   };
 
@@ -234,21 +272,23 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   process.on("SIGTERM", cleanup);
 }
 
-/** Build the dev command with port override */
+function getInstallCommand(pm: IterateConfig["packageManager"]): string {
+  switch (pm) {
+    case "pnpm": return "pnpm install --prefer-offline";
+    case "yarn": return "yarn install";
+    case "bun": return "bun install";
+    default: return "npm install --prefer-offline";
+  }
+}
+
 function buildDevCommand(baseCommand: string, port: number): string {
-  // Handle common frameworks' port flags
-  if (baseCommand.includes("next")) {
-    return `${baseCommand} -p ${port}`;
-  }
-  if (baseCommand.includes("vite")) {
-    return `${baseCommand} --port ${port}`;
-  }
-  // Generic: rely on PORT env var (set in ProcessManager)
+  if (baseCommand.includes("next")) return `${baseCommand} -p ${port}`;
+  if (baseCommand.includes("vite")) return `${baseCommand} --port ${port}`;
   return baseCommand;
 }
 
-/** Generate the shell HTML for the control UI */
-function getShellHTML(config: IterateConfig): string {
+/** Shell HTML for the control UI. Fixes: XSS-safe DOM construction, WebSocket reconnect, correct state merge. */
+function getShellHTML(): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -258,139 +298,253 @@ function getShellHTML(config: IterateConfig): string {
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #fafafa; height: 100vh; display: flex; flex-direction: column; }
-    #tab-bar { display: flex; gap: 2px; padding: 8px 12px; background: #141414; border-bottom: 1px solid #2a2a2a; }
-    .tab { padding: 6px 16px; border-radius: 6px 6px 0 0; background: #1a1a1a; color: #888; cursor: pointer; font-size: 13px; border: 1px solid transparent; transition: all 0.15s; }
+    #tab-bar { display: flex; gap: 2px; padding: 8px 12px; background: #141414; border-bottom: 1px solid #2a2a2a; align-items: center; }
+    .tab { padding: 6px 16px; border-radius: 6px 6px 0 0; background: #1a1a1a; color: #888; cursor: pointer; font-size: 13px; border: 1px solid transparent; transition: all 0.15s; user-select: none; }
     .tab:hover { color: #ccc; background: #222; }
     .tab.active { color: #fff; background: #0a0a0a; border-color: #2a2a2a; border-bottom-color: #0a0a0a; }
     .tab.add { color: #555; font-size: 16px; }
+    .tab .status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; }
+    .tab .status-dot.ready { background: #22c55e; }
+    .tab .status-dot.creating, .tab .status-dot.installing, .tab .status-dot.starting { background: #eab308; }
+    .tab .status-dot.error { background: #ef4444; }
+    .tab .status-dot.stopped { background: #666; }
     #toolbar { display: flex; gap: 8px; padding: 8px 12px; background: #111; border-bottom: 1px solid #2a2a2a; }
     .tool-btn { padding: 4px 12px; border-radius: 4px; background: #1a1a1a; color: #888; cursor: pointer; font-size: 12px; border: 1px solid #2a2a2a; }
+    .tool-btn:hover { color: #ccc; }
     .tool-btn.active { color: #fff; background: #2563eb; border-color: #2563eb; }
     #viewport { flex: 1; position: relative; overflow: hidden; }
     #viewport iframe { width: 100%; height: 100%; border: none; }
-    #empty-state { display: flex; align-items: center; justify-content: center; height: 100%; color: #555; font-size: 14px; flex-direction: column; gap: 8px; }
-    #empty-state code { background: #1a1a1a; padding: 4px 8px; border-radius: 4px; font-size: 13px; }
+    .empty-state { display: flex; align-items: center; justify-content: center; height: 100%; color: #555; font-size: 14px; flex-direction: column; gap: 8px; }
+    .empty-state code { background: #1a1a1a; padding: 4px 8px; border-radius: 4px; font-size: 13px; }
     #status-bar { padding: 4px 12px; background: #111; border-top: 1px solid #2a2a2a; font-size: 11px; color: #555; display: flex; justify-content: space-between; }
+    #status-bar .connected { color: #22c55e; }
+    #status-bar .disconnected { color: #ef4444; }
+    #pick-btn { margin-left: auto; padding: 4px 12px; border-radius: 4px; background: #059669; color: #fff; cursor: pointer; font-size: 12px; border: 1px solid #059669; }
+    #pick-btn:hover { background: #047857; }
   </style>
 </head>
 <body>
-  <div id="tab-bar">
-    <div class="tab add" id="add-tab" title="New iteration">+</div>
-  </div>
+  <div id="tab-bar"></div>
   <div id="toolbar">
     <button class="tool-btn active" data-tool="select">Select</button>
     <button class="tool-btn" data-tool="annotate">Annotate</button>
     <button class="tool-btn" data-tool="move">Move</button>
+    <button id="pick-btn" style="display:none">Pick this iteration</button>
   </div>
   <div id="viewport">
-    <div id="empty-state">
+    <div class="empty-state">
       <p>No iterations yet.</p>
       <p>Run <code>iterate branch &lt;name&gt;</code> to create one.</p>
     </div>
   </div>
   <div id="status-bar">
-    <span id="status-text">Connected</span>
+    <span id="status-text" class="connected">Connected</span>
     <span>iterate v0.1.0</span>
   </div>
 
   <script>
-    const ws = new WebSocket(\`ws://\${location.host}/ws\`);
-    let state = { iterations: {}, annotations: [] };
+    let state = { iterations: {}, annotations: [], domChanges: [], config: {} };
     let activeIteration = null;
     let activeTool = 'select';
+    let ws = null;
+    let reconnectDelay = 1000;
 
-    ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
+    function connect() {
+      ws = new WebSocket('ws://' + location.host + '/ws');
+
+      ws.onopen = () => {
+        const el = document.getElementById('status-text');
+        el.textContent = 'Connected';
+        el.className = 'connected';
+        reconnectDelay = 1000;
+      };
+
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        handleMessage(msg);
+      };
+
+      ws.onerror = () => {
+        // onclose will fire after this
+      };
+
+      ws.onclose = () => {
+        const el = document.getElementById('status-text');
+        el.textContent = 'Disconnected — reconnecting...';
+        el.className = 'disconnected';
+        setTimeout(() => {
+          reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
+          connect();
+        }, reconnectDelay);
+      };
+    }
+
+    function handleMessage(msg) {
       switch (msg.type) {
         case 'state:sync':
           state = msg.payload;
-          renderTabs();
+          render();
           break;
         case 'iteration:created':
+          state.iterations[msg.payload.name] = msg.payload;
+          render();
+          break;
         case 'iteration:status':
-          if (msg.payload.name) {
-            state.iterations[msg.payload.name] = { ...state.iterations[msg.payload.name], ...msg.payload };
+          // Only update the status field, don't overwrite the whole object
+          if (state.iterations[msg.payload.name]) {
+            state.iterations[msg.payload.name].status = msg.payload.status;
           }
-          renderTabs();
+          render();
           break;
         case 'iteration:removed':
           delete state.iterations[msg.payload.name];
           if (activeIteration === msg.payload.name) activeIteration = null;
-          renderTabs();
+          render();
+          break;
+        case 'annotation:created':
+          state.annotations.push(msg.payload);
+          break;
+        case 'annotation:deleted':
+          state.annotations = state.annotations.filter(a => a.id !== msg.payload.id);
           break;
       }
-    };
+    }
 
-    ws.onclose = () => {
-      document.getElementById('status-text').textContent = 'Disconnected';
-    };
+    function render() {
+      renderTabs();
+      renderViewport();
+      renderPickButton();
+    }
 
     function renderTabs() {
       const bar = document.getElementById('tab-bar');
-      const names = Object.keys(state.iterations);
       bar.innerHTML = '';
+      const names = Object.keys(state.iterations);
 
       for (const name of names) {
+        const info = state.iterations[name];
         const tab = document.createElement('div');
         tab.className = 'tab' + (name === activeIteration ? ' active' : '');
-        tab.textContent = name;
-        const info = state.iterations[name];
-        if (info.status !== 'ready') tab.textContent += ' (' + info.status + ')';
-        tab.onclick = () => switchIteration(name);
+
+        const dot = document.createElement('span');
+        dot.className = 'status-dot ' + (info.status || 'stopped');
+        tab.appendChild(dot);
+        tab.appendChild(document.createTextNode(name));
+
+        tab.addEventListener('click', () => switchIteration(name));
         bar.appendChild(tab);
       }
 
       const addTab = document.createElement('div');
       addTab.className = 'tab add';
       addTab.textContent = '+';
-      addTab.title = 'New iteration (run iterate branch <name>)';
+      addTab.title = 'Run: iterate branch <name>';
       bar.appendChild(addTab);
 
+      // Auto-select first iteration
       if (!activeIteration && names.length > 0) {
-        switchIteration(names[0]);
+        activeIteration = names[0];
       }
+    }
+
+    function renderViewport() {
+      const viewport = document.getElementById('viewport');
+      const names = Object.keys(state.iterations);
+
       if (names.length === 0) {
-        showEmptyState();
+        viewport.innerHTML = '';
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.innerHTML = '<p>No iterations yet.</p><p>Run <code>iterate branch &lt;name&gt;</code> to create one.</p>';
+        viewport.appendChild(empty);
+        return;
       }
+
+      if (!activeIteration) return;
+
+      const info = state.iterations[activeIteration];
+      if (!info) return;
+
+      // Check if iframe already shows the correct iteration
+      const existingIframe = viewport.querySelector('iframe');
+      const expectedSrc = '/' + encodeURIComponent(activeIteration) + '/';
+
+      if (existingIframe && existingIframe.dataset.iteration === activeIteration) {
+        return; // Already showing correct iteration
+      }
+
+      viewport.innerHTML = '';
+
+      if (info.status === 'ready') {
+        const iframe = document.createElement('iframe');
+        iframe.src = expectedSrc;
+        iframe.dataset.iteration = activeIteration;
+        iframe.loading = 'lazy';
+        viewport.appendChild(iframe);
+      } else {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        const p = document.createElement('p');
+        p.textContent = 'Iteration "' + activeIteration + '" is ' + (info.status || 'unknown') + '...';
+        empty.appendChild(p);
+        viewport.appendChild(empty);
+      }
+    }
+
+    function renderPickButton() {
+      const btn = document.getElementById('pick-btn');
+      const names = Object.keys(state.iterations);
+      btn.style.display = (activeIteration && names.length > 0) ? 'block' : 'none';
     }
 
     function switchIteration(name) {
       activeIteration = name;
-      const info = state.iterations[name];
-      const viewport = document.getElementById('viewport');
+      render();
+    }
 
-      if (info && info.status === 'ready') {
-        viewport.innerHTML = '<iframe src="/' + name + '/" loading="lazy"></iframe>';
-      } else {
-        viewport.innerHTML = '<div id="empty-state"><p>Iteration "' + name + '" is ' + (info?.status ?? 'unknown') + '...</p></div>';
+    // Pick button
+    document.getElementById('pick-btn').addEventListener('click', async () => {
+      if (!activeIteration) return;
+      if (!confirm('Pick "' + activeIteration + '"? This will merge it and remove all other iterations.')) return;
+
+      try {
+        const res = await fetch('/api/iterations/pick', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: activeIteration }),
+        });
+        if (res.ok) {
+          activeIteration = null;
+        } else {
+          const err = await res.json();
+          alert('Pick failed: ' + (err.message || 'Unknown error'));
+        }
+      } catch (e) {
+        alert('Pick failed: ' + e.message);
       }
-
-      renderTabs();
-    }
-
-    function showEmptyState() {
-      document.getElementById('viewport').innerHTML =
-        '<div id="empty-state"><p>No iterations yet.</p><p>Run <code>iterate branch &lt;name&gt;</code> to create one.</p></div>';
-    }
+    });
 
     // Toolbar
     document.getElementById('toolbar').addEventListener('click', (e) => {
       const btn = e.target.closest('.tool-btn');
-      if (!btn) return;
+      if (!btn || btn.id === 'pick-btn') return;
       activeTool = btn.dataset.tool;
-      document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tool-btn[data-tool]').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
     });
+
+    connect();
   </script>
 </body>
 </html>`;
 }
 
 // Run directly if invoked as a script
+const scriptUrl = import.meta.url;
 if (
   typeof process !== "undefined" &&
   process.argv[1] &&
-  import.meta.url.endsWith(process.argv[1].replace(/\\/g, "/"))
+  scriptUrl.endsWith(process.argv[1].replace(/\\/g, "/"))
 ) {
   startDaemon();
 }

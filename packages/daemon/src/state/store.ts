@@ -3,8 +3,8 @@ import type {
   IterateConfig,
   IterationInfo,
   AnnotationData,
+  AnnotationStatus,
   DomChange,
-  DEFAULT_CONFIG,
 } from "@iterate/core";
 
 /** In-memory state store for the daemon */
@@ -52,8 +52,23 @@ export class StateStore {
     return this.state.annotations;
   }
 
+  getAnnotation(id: string): AnnotationData | undefined {
+    return this.state.annotations.find((a) => a.id === id);
+  }
+
+  getPendingAnnotations(): AnnotationData[] {
+    return this.state.annotations.filter((a) => a.status === "pending");
+  }
+
   addAnnotation(annotation: AnnotationData): void {
     this.state.annotations.push(annotation);
+  }
+
+  updateAnnotation(id: string, updates: Partial<AnnotationData>): AnnotationData | null {
+    const annotation = this.state.annotations.find((a) => a.id === id);
+    if (!annotation) return null;
+    Object.assign(annotation, updates);
+    return annotation;
   }
 
   removeAnnotation(id: string): boolean {

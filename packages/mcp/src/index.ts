@@ -128,17 +128,24 @@ async function main() {
 
   server.tool(
     "iterate_list_annotations",
-    "List all user annotations with CSS selectors, positions, styles, and comments",
+    "List all user annotations with element context, intent, severity, and status. Use status filter to find pending annotations that need attention.",
     {
       iteration: z
         .string()
         .optional()
         .describe("Filter by iteration name"),
+      status: z
+        .enum(["pending", "acknowledged", "resolved", "dismissed"])
+        .optional()
+        .describe("Filter by status (default: all)"),
     },
-    async ({ iteration }) => {
+    async ({ iteration, status }) => {
       let annotations = client.getAnnotations();
       if (iteration) {
         annotations = annotations.filter((a) => a.iteration === iteration);
+      }
+      if (status) {
+        annotations = annotations.filter((a) => a.status === status);
       }
 
       if (annotations.length === 0) {
@@ -150,11 +157,17 @@ async function main() {
       const text = annotations
         .map(
           (a) =>
-            `## ${a.comment}\n` +
-            `- Iteration: ${a.iteration}\n` +
-            `- Selector: \`${a.selector}\`\n` +
-            `- Rect: ${a.rect.width.toFixed(0)}x${a.rect.height.toFixed(0)} at (${a.rect.x.toFixed(0)}, ${a.rect.y.toFixed(0)})\n` +
-            `- Key styles: ${Object.entries(a.computedStyles).slice(0, 4).map(([k, v]) => `${k}: ${v}`).join(", ")}`
+            `## ${a.elementName || a.selector}: "${a.comment}"\n` +
+            `- **ID**: ${a.id}\n` +
+            `- **Status**: ${a.status}${a.intent ? ` | Intent: ${a.intent}` : ""}${a.severity ? ` | Severity: ${a.severity}` : ""}\n` +
+            `- **Iteration**: ${a.iteration}\n` +
+            `- **Element**: ${a.elementName || "(unknown)"}` +
+            (a.elementPath ? ` — path: \`${a.elementPath}\`` : "") + "\n" +
+            `- **Selector**: \`${a.selector}\`\n` +
+            `- **Rect**: ${a.rect.width.toFixed(0)}x${a.rect.height.toFixed(0)} at (${a.rect.x.toFixed(0)}, ${a.rect.y.toFixed(0)})\n` +
+            (a.nearbyText ? `- **Nearby text**: ${a.nearbyText}\n` : "") +
+            `- **Key styles**: ${Object.entries(a.computedStyles).slice(0, 4).map(([k, v]) => `${k}: ${v}`).join(", ")}` +
+            (a.agentReply ? `\n- **Agent reply**: ${a.agentReply}` : "")
         )
         .join("\n\n");
 
@@ -190,10 +203,125 @@ async function main() {
             type: "text",
             text:
               `# Annotation: ${annotation.comment}\n\n` +
+              `**Element**: ${annotation.elementName || "(unknown)"}\n` +
+              `**Path**: \`${annotation.elementPath || annotation.selector}\`\n` +
               `**Selector**: \`${annotation.selector}\`\n` +
-              `**Iteration**: ${annotation.iteration}\n\n` +
-              `## Bounding Rect\n\`\`\`json\n${JSON.stringify(annotation.rect, null, 2)}\n\`\`\`\n\n` +
+              `**Iteration**: ${annotation.iteration}\n` +
+              `**Status**: ${annotation.status}${annotation.intent ? ` | Intent: ${annotation.intent}` : ""}${annotation.severity ? ` | Severity: ${annotation.severity}` : ""}\n` +
+              (annotation.nearbyText ? `**Nearby text**: ${annotation.nearbyText}\n` : "") +
+              `\n## Bounding Rect\n\`\`\`json\n${JSON.stringify(annotation.rect, null, 2)}\n\`\`\`\n\n` +
               `## Computed Styles\n\`\`\`json\n${JSON.stringify(annotation.computedStyles, null, 2)}\n\`\`\``,
+          },
+        ],
+      };
+    }
+  );
+
+  // --- Annotation workflow tools ---
+
+  server.tool(
+    "iterate_acknowledge_annotation",
+    "Acknowledge a pending annotation — tells the user you've seen it and are working on it",
+    {
+      annotationId: z.string().describe("Annotation ID to acknowledge"),
+    },
+    async ({ annotationId }) => {
+      const result = await client.callApi(
+        "POST",
+        `/api/annotations/${annotationId}/acknowledge`
+      );
+      return {
+        content: [
+          { type: "text", text: `Acknowledged annotation "${annotationId}".` },
+        ],
+      };
+    }
+  );
+
+  server.tool(
+    "iterate_resolve_annotation",
+    "Mark an annotation as resolved — the requested change has been made",
+    {
+      annotationId: z.string().describe("Annotation ID to resolve"),
+      reply: z
+        .string()
+        .optional()
+        .describe("Brief reply explaining what was done"),
+    },
+    async ({ annotationId, reply }) => {
+      await client.callApi(
+        "POST",
+        `/api/annotations/${annotationId}/resolve`,
+        reply ? { agentReply: reply } : undefined
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Resolved annotation "${annotationId}".${reply ? ` Reply: ${reply}` : ""}`,
+          },
+        ],
+      };
+    }
+  );
+
+  server.tool(
+    "iterate_dismiss_annotation",
+    "Dismiss an annotation — the feedback was noted but won't be acted on",
+    {
+      annotationId: z.string().describe("Annotation ID to dismiss"),
+      reply: z
+        .string()
+        .optional()
+        .describe("Brief reason for dismissal"),
+    },
+    async ({ annotationId, reply }) => {
+      await client.callApi(
+        "POST",
+        `/api/annotations/${annotationId}/dismiss`,
+        reply ? { agentReply: reply } : undefined
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Dismissed annotation "${annotationId}".${reply ? ` Reason: ${reply}` : ""}`,
+          },
+        ],
+      };
+    }
+  );
+
+  server.tool(
+    "iterate_get_pending_annotations",
+    "Get all pending annotations that need attention. Use this to check for new user feedback.",
+    {},
+    async () => {
+      const annotations = client
+        .getAnnotations()
+        .filter((a) => a.status === "pending");
+
+      if (annotations.length === 0) {
+        return {
+          content: [{ type: "text", text: "No pending annotations." }],
+        };
+      }
+
+      const text = annotations
+        .map(
+          (a) =>
+            `- **${a.elementName || a.selector}**: "${a.comment}"` +
+            (a.intent ? ` [${a.intent}]` : "") +
+            (a.severity ? ` (${a.severity})` : "") +
+            ` — ID: ${a.id}`
+        )
+        .join("\n");
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `${annotations.length} pending annotation(s):\n\n${text}`,
           },
         ],
       };

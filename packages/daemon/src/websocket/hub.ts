@@ -1,9 +1,10 @@
 import type { FastifyInstance } from "fastify";
-import type { WebSocket } from "@fastify/websocket";
+import type { WebSocket } from "ws";
 import type {
   ClientMessage,
   ServerMessage,
   AnnotationData,
+  DomChange,
 } from "@iterate/core";
 import type { StateStore } from "../state/store.js";
 
@@ -20,7 +21,7 @@ export class WebSocketHub {
 
   /** Register the WebSocket route on the Fastify server */
   register(app: FastifyInstance): void {
-    app.get("/ws", { websocket: true }, (socket) => {
+    app.get("/ws", { websocket: true }, (socket, _request) => {
       this.clients.add(socket);
 
       // Send initial state sync
@@ -42,6 +43,10 @@ export class WebSocketHub {
       });
 
       socket.on("close", () => {
+        this.clients.delete(socket);
+      });
+
+      socket.on("error", () => {
         this.clients.delete(socket);
       });
     });
@@ -72,6 +77,7 @@ export class WebSocketHub {
           ...msg.payload,
           id: crypto.randomUUID(),
           timestamp: Date.now(),
+          status: "pending",
         };
         this.store.addAnnotation(annotation);
         this.broadcast({ type: "annotation:created", payload: annotation });
@@ -89,20 +95,42 @@ export class WebSocketHub {
         break;
       }
 
-      case "dom:select":
-      case "dom:move":
-      case "dom:reorder":
-      case "dom:resize": {
-        // Store DOM changes and broadcast to all clients
-        // Full implementation in Phase 2
+      case "dom:move": {
+        const change: DomChange = {
+          id: crypto.randomUUID(),
+          iteration: msg.payload.iteration,
+          selector: msg.payload.selector,
+          type: "move",
+          before: { rect: msg.payload.from, computedStyles: {} },
+          after: { rect: msg.payload.to, computedStyles: {} },
+          timestamp: Date.now(),
+        };
+        this.store.addDomChange(change);
+        this.broadcast({ type: "dom:changed", payload: change });
         break;
       }
 
-      case "iteration:switch":
-      case "iteration:compare": {
-        // These are handled by the overlay UI locally
+      case "dom:reorder": {
+        const change: DomChange = {
+          id: crypto.randomUUID(),
+          iteration: msg.payload.iteration,
+          selector: msg.payload.selector,
+          type: "reorder",
+          before: { rect: { x: 0, y: 0, width: 0, height: 0 }, computedStyles: {} },
+          after: { rect: { x: 0, y: 0, width: 0, height: 0 }, computedStyles: {}, siblingIndex: msg.payload.newIndex },
+          timestamp: Date.now(),
+        };
+        this.store.addDomChange(change);
+        this.broadcast({ type: "dom:changed", payload: change });
         break;
       }
+
+      case "dom:select":
+      case "dom:resize":
+      case "iteration:switch":
+      case "iteration:compare":
+        // Handled locally by the overlay UI or deferred to Phase 2
+        break;
     }
   }
 }

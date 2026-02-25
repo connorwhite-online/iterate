@@ -9,4 +9,10 @@ export { DragHandler } from "./manipulate/DragHandler.js";
 export { DaemonConnection } from "./transport/connection.js";
 
 // Utilities
-export { generateSelector, getRelevantStyles } from "./inspector/selector.js";
+export {
+  generateSelector,
+  getRelevantStyles,
+  identifyElement,
+  getElementPath,
+  getNearbyText,
+} from "./inspector/selector.js";

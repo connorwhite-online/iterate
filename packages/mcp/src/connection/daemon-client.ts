@@ -101,6 +101,16 @@ export class DaemonClient {
       case "annotation:created":
         this.state?.annotations.push(msg.payload);
         break;
+      case "annotation:updated":
+        if (this.state) {
+          const idx = this.state.annotations.findIndex(
+            (a) => a.id === msg.payload.id
+          );
+          if (idx !== -1) {
+            this.state.annotations[idx] = msg.payload;
+          }
+        }
+        break;
       case "annotation:deleted":
         if (this.state) {
           this.state.annotations = this.state.annotations.filter(

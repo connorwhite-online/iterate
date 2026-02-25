@@ -6,15 +6,19 @@ import type { StateStore } from "../state/store.js";
  *
  * Routes: /<iteration-name>/* → http://localhost:<port>/*
  *
- * The proxy also injects the overlay script into HTML responses.
+ * The proxy rewrites asset URLs and injects the overlay script into HTML.
  */
 export async function registerProxyRoutes(
   app: FastifyInstance,
   store: StateStore
 ): Promise<void> {
-  // Dynamic proxy: match /<iteration>/<path>
+  // Guard: skip /api and /ws routes
   app.all("/:iteration/*", async (request, reply) => {
     const { iteration } = request.params as { iteration: string };
+
+    // Don't proxy reserved paths
+    if (iteration === "api" || iteration === "ws") return;
+
     const iterationInfo = store.getIteration(iteration);
 
     if (!iterationInfo || iterationInfo.status !== "ready") {
@@ -28,23 +32,11 @@ export async function registerProxyRoutes(
     const url = (request.raw.url ?? "").replace(`/${iteration}`, "") || "/";
 
     try {
-      // Use @fastify/reply-from to proxy the request
       return reply.from(`${target}${url}`, {
-        rewriteRequestHeaders: (_req, headers) => {
-          // Rewrite host header for the upstream dev server
-          return { ...headers, host: `127.0.0.1:${iterationInfo.port}` };
-        },
-        onResponse: (_request, reply, res) => {
-          const contentType = res.headers["content-type"] ?? "";
-
-          // Inject overlay script into HTML responses
-          if (contentType.includes("text/html")) {
-            // We'll handle injection in a separate middleware
-            // For now, just forward the response
-          }
-
-          reply.send(res);
-        },
+        rewriteRequestHeaders: (_req, headers) => ({
+          ...headers,
+          host: `127.0.0.1:${iterationInfo.port}`,
+        }),
       });
     } catch {
       return reply.status(502).send({
