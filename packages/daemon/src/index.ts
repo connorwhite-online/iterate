@@ -2,7 +2,9 @@ import Fastify from "fastify";
 import fastifyWebsocket from "@fastify/websocket";
 import fastifyReplyFrom from "@fastify/reply-from";
 import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import { execa } from "execa";
 import { DEFAULT_CONFIG, type IterateConfig, type IterationInfo } from "@iterate/core";
 import { StateStore } from "./state/store.js";
@@ -234,6 +236,24 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     setTimeout(() => process.exit(0), 500);
   });
 
+  // Serve the overlay standalone bundle
+  let overlayBundle: string | null = null;
+  app.get("/__iterate__/overlay.js", async (_request, reply) => {
+    if (!overlayBundle) {
+      try {
+        const require = createRequire(import.meta.url);
+        const overlayPath = require.resolve("@iterate/overlay/standalone");
+        overlayBundle = readFileSync(overlayPath, "utf-8");
+      } catch {
+        return reply.status(404).send("Overlay bundle not found");
+      }
+    }
+    return reply
+      .type("application/javascript")
+      .header("cache-control", "no-cache")
+      .send(overlayBundle);
+  });
+
   // Proxy routes (registered last — wildcard catch-all)
   await registerProxyRoutes(app, store);
 
@@ -349,6 +369,9 @@ function getShellHTML(): string {
     let ws = null;
     let reconnectDelay = 1000;
 
+    // Expose state to the overlay
+    window.__iterate_shell__ = { activeTool, activeIteration };
+
     function connect() {
       ws = new WebSocket('ws://' + location.host + '/ws');
 
@@ -444,6 +467,8 @@ function getShellHTML(): string {
       // Auto-select first iteration
       if (!activeIteration && names.length > 0) {
         activeIteration = names[0];
+        window.__iterate_shell__.activeIteration = activeIteration;
+        window.dispatchEvent(new CustomEvent('iterate:iteration-change', { detail: { iteration: activeIteration } }));
       }
     }
 
@@ -499,6 +524,8 @@ function getShellHTML(): string {
 
     function switchIteration(name) {
       activeIteration = name;
+      window.__iterate_shell__.activeIteration = name;
+      window.dispatchEvent(new CustomEvent('iterate:iteration-change', { detail: { iteration: name } }));
       render();
     }
 
@@ -529,12 +556,15 @@ function getShellHTML(): string {
       const btn = e.target.closest('.tool-btn');
       if (!btn || btn.id === 'pick-btn') return;
       activeTool = btn.dataset.tool;
+      window.__iterate_shell__.activeTool = activeTool;
+      window.dispatchEvent(new CustomEvent('iterate:tool-change', { detail: { tool: activeTool } }));
       document.querySelectorAll('.tool-btn[data-tool]').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
     });
 
     connect();
   </script>
+  <script src="/__iterate__/overlay.js" defer></script>
 </body>
 </html>`;
 }

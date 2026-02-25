@@ -9,11 +9,12 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    }
+    },
+    "./standalone": "./dist/standalone.global.js"
   },
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --external react --external react-dom",
-    "dev": "tsup src/index.ts --format esm --dts --external react --external react-dom --watch",
+    "build": "tsup",
+    "dev": "tsup --watch",
     "clean": "rm -rf dist"
   },
   "dependencies": {
