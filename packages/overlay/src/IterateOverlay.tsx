@@ -24,6 +24,8 @@ export interface IterateOverlayProps {
   wsUrl?: string;
   /** Reference to the iteration iframe */
   iframeRef: React.RefObject<HTMLIFrameElement | null>;
+  /** Shared daemon connection (if omitted, creates its own) */
+  connection?: DaemonConnection;
 }
 
 /**
@@ -36,8 +38,10 @@ export function IterateOverlay({
   iteration,
   wsUrl,
   iframeRef,
+  connection,
 }: IterateOverlayProps) {
   const connectionRef = useRef<DaemonConnection | null>(null);
+  const ownsConnection = useRef(false);
   const [drawings, setDrawings] = useState<SVGPathData[]>([]);
   const [pendingAnnotation, setPendingAnnotation] = useState<{
     drawing: SVGPathData;
@@ -50,13 +54,20 @@ export function IterateOverlay({
     computedStyles?: Record<string, string>;
   } | null>(null);
 
-  // Connect to daemon
+  // Connect to daemon (use shared connection if provided)
   useEffect(() => {
-    const conn = new DaemonConnection(wsUrl);
+    let conn: DaemonConnection;
+    if (connection) {
+      conn = connection;
+      ownsConnection.current = false;
+    } else {
+      conn = new DaemonConnection(wsUrl);
+      conn.connect();
+      ownsConnection.current = true;
+    }
     connectionRef.current = conn;
-    conn.connect();
 
-    conn.onMessage((msg) => {
+    const unsubscribe = conn.onMessage((msg) => {
       if (msg.type === "annotation:created") {
         const annotation = msg.payload as AnnotationData;
         if (annotation.drawing) {
@@ -65,8 +76,11 @@ export function IterateOverlay({
       }
     });
 
-    return () => conn.disconnect();
-  }, [wsUrl]);
+    return () => {
+      unsubscribe();
+      if (ownsConnection.current) conn.disconnect();
+    };
+  }, [wsUrl, connection]);
 
   // Handle completed drawing → show annotation dialog
   const handleDrawingComplete = useCallback(

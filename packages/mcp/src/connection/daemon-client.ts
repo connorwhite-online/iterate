@@ -15,16 +15,22 @@ export class DaemonClient {
   private state: IterateState | null = null;
   private daemonUrl: string;
   private stateListeners: Set<() => void> = new Set();
+  private messageHandlers: Set<(msg: ServerMessage) => void> = new Set();
+  private closed = false;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(daemonPort: number = 4000) {
     this.daemonUrl = `ws://127.0.0.1:${daemonPort}/ws`;
   }
 
   async connect(): Promise<void> {
+    this.closed = false;
     return new Promise((resolve, reject) => {
       this.ws = new WebSocket(this.daemonUrl);
+      let resolved = false;
 
       this.ws.on("open", () => {
+        resolved = true;
         resolve();
       });
 
@@ -38,16 +44,50 @@ export class DaemonClient {
       });
 
       this.ws.on("error", (err) => {
-        reject(err);
+        if (!resolved) reject(err);
       });
 
       this.ws.on("close", () => {
         this.state = null;
+        if (!this.closed) {
+          this.reconnectTimer = setTimeout(() => this.reconnect(), 2000);
+        }
       });
     });
   }
 
+  private reconnect(): void {
+    if (this.closed) return;
+    const ws = new WebSocket(this.daemonUrl);
+
+    ws.on("open", () => {
+      this.ws = ws;
+    });
+
+    ws.on("message", (data) => {
+      try {
+        const msg: ServerMessage = JSON.parse(data.toString());
+        this.handleMessage(msg);
+      } catch {
+        // Ignore malformed messages
+      }
+    });
+
+    ws.on("error", () => {
+      // Will trigger close, which triggers another reconnect
+    });
+
+    ws.on("close", () => {
+      this.state = null;
+      if (!this.closed) {
+        this.reconnectTimer = setTimeout(() => this.reconnect(), 2000);
+      }
+    });
+  }
+
   disconnect(): void {
+    this.closed = true;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.ws?.close();
     this.ws = null;
   }
@@ -93,6 +133,26 @@ export class DaemonClient {
     return res.json();
   }
 
+  /** Wait for user to click "Submit to Agent" in the overlay */
+  waitForSubmit(timeoutMs: number = 300000): Promise<{ count: number; annotationIds: string[] }> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.messageHandlers.delete(handler);
+        reject(new Error("Timed out waiting for submit"));
+      }, timeoutMs);
+
+      const handler = (msg: ServerMessage) => {
+        if (msg.type === "annotations:submitted") {
+          clearTimeout(timer);
+          this.messageHandlers.delete(handler);
+          resolve(msg.payload);
+        }
+      };
+
+      this.messageHandlers.add(handler);
+    });
+  }
+
   private handleMessage(msg: ServerMessage): void {
     switch (msg.type) {
       case "state:sync":
@@ -133,10 +193,16 @@ export class DaemonClient {
           this.state.iterations[msg.payload.name]!.status = msg.payload.status;
         }
         break;
+      case "annotations:submitted":
+        // Handled by messageHandlers (waitForSubmit)
+        break;
     }
 
     for (const listener of this.stateListeners) {
       listener();
+    }
+    for (const handler of this.messageHandlers) {
+      handler(msg);
     }
   }
 }

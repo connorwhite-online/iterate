@@ -148,6 +148,9 @@ importers:
 
   packages/next:
     dependencies:
+      '@iterate/daemon':
+        specifier: workspace:*
+        version: link:../daemon
       '@iterate/overlay':
         specifier: workspace:*
         version: link:../overlay

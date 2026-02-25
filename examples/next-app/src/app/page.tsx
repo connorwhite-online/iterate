@@ -20,17 +20,17 @@ export default function Home() {
           <Card
             title="Annotations"
             description="Circle elements and add comments. Try switching to Annotate mode in the toolbar."
-            color="#2563eb"
+            color="#888"
           />
           <Card
             title="Element Inspector"
             description="Select mode highlights elements on hover with their CSS selector."
-            color="#7c3aed"
+            color="#aaa"
           />
           <Card
             title="DOM Manipulation"
             description="Move mode lets you drag flex children and absolutely positioned elements."
-            color="#059669"
+            color="#666"
           />
         </div>
 
@@ -47,8 +47,6 @@ export default function Home() {
           </p>
         </div>
 
-        {/* Absolutely positioned element — good for testing drag-to-move */}
-        <div style={styles.floatingBadge}>Drag me (absolute)</div>
       </main>
 
       <footer style={styles.footer}>
@@ -92,9 +90,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 40,
     fontWeight: 700,
     margin: 0,
-    background: "linear-gradient(135deg, #2563eb, #7c3aed)",
-    WebkitBackgroundClip: "text",
-    WebkitTextFillColor: "transparent",
+    color: "#e0e0e0",
   },
   subtitle: {
     color: "#888",
@@ -108,25 +104,25 @@ const styles: Record<string, React.CSSProperties> = {
   },
   cardGrid: {
     display: "flex",
-    gap: 20,
+    gap: 16,
     justifyContent: "center",
     flexWrap: "wrap",
   },
   card: {
-    background: "#141414",
-    borderRadius: 12,
-    padding: 24,
-    width: 280,
-    borderTop: "3px solid",
+    background: "transparent",
+    borderRadius: 8,
+    padding: 16,
+    width: 240,
+    borderTop: "2px solid",
   },
   cardTitle: {
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: 600,
-    margin: "0 0 8px 0",
+    margin: "0 0 6px 0",
   },
   cardDescription: {
-    color: "#999",
-    fontSize: 14,
+    color: "#bbb",
+    fontSize: 13,
     lineHeight: 1.5,
     margin: 0,
   },
@@ -135,7 +131,7 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 48,
   },
   button: {
-    background: "#2563eb",
+    background: "#555",
     color: "#fff",
     border: "none",
     borderRadius: 8,
@@ -148,18 +144,6 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#666",
     fontSize: 13,
     marginTop: 12,
-  },
-  floatingBadge: {
-    position: "absolute" as const,
-    top: 20,
-    right: 40,
-    background: "#7c3aed",
-    color: "#fff",
-    padding: "8px 16px",
-    borderRadius: 20,
-    fontSize: 13,
-    fontWeight: 600,
-    cursor: "grab",
   },
   footer: {
     textAlign: "center" as const,

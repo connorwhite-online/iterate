@@ -7,6 +7,8 @@ export interface FloatingPanelProps {
   visible: boolean;
   onVisibilityChange: (visible: boolean) => void;
   annotationCount?: number;
+  onSubmit?: () => void;
+  submitDisabled?: boolean;
 }
 
 type Corner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
@@ -24,6 +26,8 @@ export function FloatingPanel({
   visible,
   onVisibilityChange,
   annotationCount = 0,
+  onSubmit,
+  submitDisabled,
 }: FloatingPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [corner, setCorner] = useState<Corner>("bottom-right");
@@ -255,17 +259,52 @@ export function FloatingPanel({
         />
       </div>
 
-      {/* Annotation count */}
+      {/* Annotation count + Submit */}
       {annotationCount > 0 && (
         <div
           style={{
-            fontSize: 10,
-            color: "#666",
-            textAlign: "center",
-            fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
           }}
         >
-          {annotationCount} annotation{annotationCount !== 1 ? "s" : ""}
+          <div
+            style={{
+              fontSize: 10,
+              color: "#666",
+              textAlign: "center",
+              fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            }}
+          >
+            {annotationCount} annotation{annotationCount !== 1 ? "s" : ""}
+          </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onSubmit?.();
+            }}
+            disabled={submitDisabled}
+            style={{
+              width: "100%",
+              padding: "5px 8px",
+              fontSize: 11,
+              fontWeight: 600,
+              borderRadius: 6,
+              border: submitDisabled
+                ? "1px solid #2a2a4a"
+                : "1px solid #2563eb",
+              background: submitDisabled
+                ? "transparent"
+                : "#2563eb",
+              color: submitDisabled ? "#555" : "#fff",
+              cursor: submitDisabled ? "default" : "pointer",
+              opacity: submitDisabled ? 0.5 : 1,
+              fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+              transition: "all 0.15s",
+            }}
+          >
+            {submitDisabled ? "Submitted" : "Submit to Agent"}
+          </button>
         </div>
       )}
     </div>

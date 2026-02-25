@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { IterateOverlay, type ToolMode } from "./IterateOverlay.js";
 import { FloatingPanel } from "./panel/FloatingPanel.js";
+import { DaemonConnection } from "./transport/connection.js";
+import type { AnnotationData } from "@iterate/core";
 
 /**
  * Standalone entry point — self-mounts the overlay into any page.
@@ -14,13 +16,19 @@ import { FloatingPanel } from "./panel/FloatingPanel.js";
  * - Tool mode switching (Select / Annotate / Move)
  * - Drag to any screen corner
  * - Hide/show toggle with Alt+Shift+I hotkey
+ * - Submit to Agent button
  */
 function StandaloneOverlay() {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const connectionRef = useRef<DaemonConnection | null>(null);
   const [mode, setMode] = useState<ToolMode>("select");
   const [iteration, setIteration] = useState<string>("");
   const [visible, setVisible] = useState(true);
   const [annotationCount, setAnnotationCount] = useState(0);
+  const [submitted, setSubmitted] = useState(false);
+  const [wsUrl, setWsUrl] = useState<string | undefined>(
+    () => (window as any).__iterate_shell__?.wsUrl
+  );
 
   // Detect context: daemon shell vs framework plugin
   const isDaemonShell = typeof document !== "undefined" && !!document.getElementById("viewport");
@@ -42,6 +50,7 @@ function StandaloneOverlay() {
     if (shell) {
       setMode(shell.activeTool ?? "select");
       setIteration(shell.activeIteration ?? "default");
+      if (shell.wsUrl) setWsUrl(shell.wsUrl);
     }
 
     // If no shell state, default to "default" iteration (framework plugin mode)
@@ -54,6 +63,35 @@ function StandaloneOverlay() {
       window.removeEventListener("iterate:iteration-change", onIterationChange);
     };
   }, []);
+
+  // Connect to daemon and track annotation count
+  useEffect(() => {
+    const conn = new DaemonConnection(wsUrl);
+    connectionRef.current = conn;
+    conn.connect();
+
+    conn.onMessage((msg) => {
+      if (msg.type === "state:sync") {
+        const state = msg.payload as { annotations: AnnotationData[] };
+        setAnnotationCount(state.annotations.filter((a) => a.status === "pending").length);
+      }
+      if (msg.type === "annotation:created") {
+        setAnnotationCount((prev) => prev + 1);
+        setSubmitted(false);
+      }
+      if (msg.type === "annotation:deleted") {
+        setAnnotationCount((prev) => Math.max(0, prev - 1));
+      }
+      if (msg.type === "annotation:updated") {
+        const annotation = msg.payload as AnnotationData;
+        if (annotation.status !== "pending") {
+          setAnnotationCount((prev) => Math.max(0, prev - 1));
+        }
+      }
+    });
+
+    return () => conn.disconnect();
+  }, [wsUrl]);
 
   // Observe viewport for iframe changes (daemon shell mode)
   useEffect(() => {
@@ -89,6 +127,15 @@ function StandaloneOverlay() {
     []
   );
 
+  // Submit annotations to agent
+  const handleSubmit = useCallback(() => {
+    connectionRef.current?.send({
+      type: "annotations:submit",
+      payload: { iteration },
+    });
+    setSubmitted(true);
+  }, [iteration]);
+
   if (!iteration) return null;
 
   return (
@@ -98,6 +145,7 @@ function StandaloneOverlay() {
         mode={visible ? mode : "select"}
         iteration={iteration}
         iframeRef={iframeRef}
+        connection={connectionRef.current ?? undefined}
       />
 
       {/* Floating toolbar panel */}
@@ -107,6 +155,8 @@ function StandaloneOverlay() {
         visible={visible}
         onVisibilityChange={setVisible}
         annotationCount={annotationCount}
+        onSubmit={handleSubmit}
+        submitDisabled={submitted || annotationCount === 0}
       />
     </>
   );

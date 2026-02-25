@@ -1,6 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
-import { readFileSync } from "node:fs";
 
 export interface IterateNextOptions {
   /** Port for the iterate daemon (default: 4000) */
@@ -120,7 +119,7 @@ export function withIterate(
           : originalEntry);
 
         // Add our injector to the main client entry
-        const injectorPath = createIterateInjector(overlayBundlePath);
+        const injectorPath = createIterateInjector(overlayBundlePath, daemonPort);
         if (injectorPath && entries["main-app"]) {
           if (Array.isArray(entries["main-app"])) {
             entries["main-app"].push(injectorPath);
@@ -144,12 +143,19 @@ export function withIterate(
  * Returns the path to write the injector, or writes it inline via data URI.
  */
 function createIterateInjector(
-  _overlayPath: string | undefined
+  _overlayPath: string | undefined,
+  daemonPort: number
 ): string | null {
   // Use a data URI as a virtual module — webpack supports this
+  // Include wsUrl so the overlay connects directly to the daemon WebSocket
+  // (Next.js rewrites only proxy HTTP, not WebSocket)
   const code = `
     if (typeof window !== 'undefined') {
-      window.__iterate_shell__ = { activeTool: 'select', activeIteration: 'default' };
+      window.__iterate_shell__ = {
+        activeTool: 'select',
+        activeIteration: 'default',
+        wsUrl: 'ws://' + window.location.hostname + ':${daemonPort}/ws'
+      };
       var s = document.createElement('script');
       s.src = '/__iterate__/overlay.js';
       s.defer = true;
@@ -161,12 +167,17 @@ function createIterateInjector(
 }
 
 function startDaemon(port: number, cwd: string): ChildProcess {
+  // Resolve the daemon entry point from @iterate/next's dependencies,
+  // since the child process cwd (the user's app) may not have @iterate/daemon installed.
+  // Use import.meta.resolve (ESM) since @iterate/daemon only has an "import" export condition.
+  const daemonPath = import.meta.resolve("@iterate/daemon");
+
   const child = spawn(
     process.execPath,
     [
       "--input-type=module",
       "-e",
-      `import { startDaemon } from "@iterate/daemon"; startDaemon({ port: ${port}, cwd: ${JSON.stringify(cwd)} });`,
+      `import { startDaemon } from ${JSON.stringify(daemonPath)}; startDaemon({ port: ${port}, cwd: ${JSON.stringify(cwd)} });`,
     ],
     {
       cwd,

@@ -125,6 +125,19 @@ export class WebSocketHub {
         break;
       }
 
+      case "annotations:submit": {
+        const pending = this.store.getPendingAnnotations();
+        const filtered = msg.payload.iteration
+          ? pending.filter((a) => a.iteration === msg.payload.iteration)
+          : pending;
+        const annotationIds = filtered.map((a) => a.id);
+        this.broadcast({
+          type: "annotations:submitted",
+          payload: { count: annotationIds.length, annotationIds },
+        });
+        break;
+      }
+
       case "dom:select":
       case "dom:resize":
       case "iteration:switch":

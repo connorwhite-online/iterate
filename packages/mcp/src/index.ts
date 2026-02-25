@@ -328,6 +328,114 @@ async function main() {
     }
   );
 
+  server.tool(
+    "iterate_wait_for_submit",
+    "Wait for the user to click 'Submit to Agent' in the iterate overlay. " +
+    "Blocks until the user submits their annotations, then returns the list. " +
+    "Call this when you want to wait for the user to finish annotating.",
+    {
+      timeoutSeconds: z
+        .number()
+        .default(300)
+        .describe("Max seconds to wait (default: 300)"),
+    },
+    async ({ timeoutSeconds }) => {
+      try {
+        const result = await client.waitForSubmit(timeoutSeconds * 1000);
+        const annotations = client
+          .getAnnotations()
+          .filter((a) => result.annotationIds.includes(a.id));
+
+        if (annotations.length === 0) {
+          return {
+            content: [{ type: "text", text: "Submit received but no pending annotations found." }],
+          };
+        }
+
+        const text = annotations
+          .map(
+            (a) =>
+              `## ${a.elementName || a.selector}: "${a.comment}"\n` +
+              `- **ID**: ${a.id}\n` +
+              `- **Intent**: ${a.intent ?? "none"} | **Severity**: ${a.severity ?? "none"}\n` +
+              `- **Selector**: \`${a.selector}\`\n` +
+              `- **Element path**: \`${a.elementPath || a.selector}\`\n` +
+              (a.nearbyText ? `- **Nearby text**: ${a.nearbyText}\n` : "") +
+              `- **Key styles**: ${Object.entries(a.computedStyles).slice(0, 4).map(([k, v]) => `${k}: ${v}`).join(", ")}`
+          )
+          .join("\n\n");
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `User submitted ${result.count} annotation(s):\n\n${text}`,
+            },
+          ],
+        };
+      } catch (err) {
+        return {
+          content: [
+            { type: "text", text: `No submit received: ${(err as Error).message}` },
+          ],
+        };
+      }
+    }
+  );
+
+  // --- Prompts (slash commands) ---
+
+  server.prompt(
+    "review",
+    "Review pending annotations from the iterate overlay and apply the requested changes.",
+    {},
+    async () => {
+      const annotations = client
+        .getAnnotations()
+        .filter((a) => a.status === "pending");
+
+      if (annotations.length === 0) {
+        return {
+          messages: [
+            {
+              role: "user",
+              content: {
+                type: "text",
+                text: "No pending annotations to review.",
+              },
+            },
+          ],
+        };
+      }
+
+      const summary = annotations
+        .map(
+          (a) =>
+            `- **${a.elementName || a.selector}**: "${a.comment}" [${a.intent ?? "change"}] (ID: ${a.id})`
+        )
+        .join("\n");
+
+      return {
+        messages: [
+          {
+            role: "user",
+            content: {
+              type: "text",
+              text:
+                `Review and apply these ${annotations.length} pending annotation(s) from the iterate overlay:\n\n` +
+                `${summary}\n\n` +
+                `For each annotation:\n` +
+                `1. Call iterate_get_dom_context to understand what element it refers to\n` +
+                `2. Call iterate_acknowledge_annotation so the user sees you're working on it\n` +
+                `3. Find and edit the relevant source code to apply the requested change\n` +
+                `4. Call iterate_resolve_annotation with a brief description of what you did`,
+            },
+          },
+        ],
+      };
+    }
+  );
+
   // Start the MCP server over stdio
   const transport = new StdioServerTransport();
   await server.connect(transport);

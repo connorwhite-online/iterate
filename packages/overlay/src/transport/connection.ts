@@ -15,12 +15,14 @@ export class DaemonConnection {
   private handlers: Set<MessageHandler> = new Set();
   private url: string;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private closed = false;
 
   constructor(url?: string) {
     this.url = url ?? `ws://${window.location.host}/ws`;
   }
 
   connect(): void {
+    this.closed = false;
     this.ws = new WebSocket(this.url);
 
     this.ws.onmessage = (event) => {
@@ -35,6 +37,7 @@ export class DaemonConnection {
     };
 
     this.ws.onclose = () => {
+      if (this.closed) return;
       // Attempt reconnection after 2 seconds
       this.reconnectTimer = setTimeout(() => this.connect(), 2000);
     };
@@ -45,6 +48,7 @@ export class DaemonConnection {
   }
 
   disconnect(): void {
+    this.closed = true;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.ws?.close();
     this.ws = null;
