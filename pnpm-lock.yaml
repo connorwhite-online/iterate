@@ -15,6 +15,28 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  examples/next-app:
+    dependencies:
+      next:
+        specifier: ^15.0.0
+        version: 15.5.12(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.4
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.4(react@19.2.4)
+    devDependencies:
+      '@iterate/next':
+        specifier: workspace:*
+        version: link:../../packages/next
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.14
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   examples/vite-app:
     dependencies:
       react:

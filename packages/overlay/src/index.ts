@@ -7,6 +7,7 @@ export { ElementPicker } from "./inspector/ElementPicker.js";
 export { AnnotationDialog } from "./annotate/AnnotationDialog.js";
 export { DragHandler } from "./manipulate/DragHandler.js";
 export { DaemonConnection } from "./transport/connection.js";
+export { FloatingPanel } from "./panel/FloatingPanel.js";
 
 // Utilities
 export {

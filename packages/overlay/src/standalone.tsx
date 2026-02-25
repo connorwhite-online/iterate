@@ -1,18 +1,31 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { IterateOverlay, type ToolMode } from "./IterateOverlay.js";
+import { FloatingPanel } from "./panel/FloatingPanel.js";
 
 /**
- * Standalone entry point — self-mounts the overlay into the daemon shell.
- * Listens for shell events (tool changes, iteration switches) and
- * observes the viewport for iframe changes.
+ * Standalone entry point — self-mounts the overlay into any page.
+ *
+ * Works in two contexts:
+ * 1. Daemon shell (has #viewport with iframes) — observes iframe changes
+ * 2. Framework plugin (Vite/Next) — operates directly on the page body
+ *
+ * Includes a draggable floating toolbar panel with:
+ * - Tool mode switching (Select / Annotate / Move)
+ * - Drag to any screen corner
+ * - Hide/show toggle with Alt+Shift+I hotkey
  */
 function StandaloneOverlay() {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [mode, setMode] = useState<ToolMode>("select");
   const [iteration, setIteration] = useState<string>("");
+  const [visible, setVisible] = useState(true);
+  const [annotationCount, setAnnotationCount] = useState(0);
 
-  // Listen for shell events
+  // Detect context: daemon shell vs framework plugin
+  const isDaemonShell = typeof document !== "undefined" && !!document.getElementById("viewport");
+
+  // Listen for shell events (daemon shell mode)
   useEffect(() => {
     const onToolChange = (e: Event) => {
       setMode((e as CustomEvent).detail.tool as ToolMode);
@@ -24,11 +37,16 @@ function StandaloneOverlay() {
     window.addEventListener("iterate:tool-change", onToolChange);
     window.addEventListener("iterate:iteration-change", onIterationChange);
 
-    // Read initial state from the shell if it's already set
+    // Read initial state
     const shell = (window as any).__iterate_shell__;
     if (shell) {
       setMode(shell.activeTool ?? "select");
-      setIteration(shell.activeIteration ?? "");
+      setIteration(shell.activeIteration ?? "default");
+    }
+
+    // If no shell state, default to "default" iteration (framework plugin mode)
+    if (!shell) {
+      setIteration("default");
     }
 
     return () => {
@@ -37,11 +55,11 @@ function StandaloneOverlay() {
     };
   }, []);
 
-  // Observe the viewport for iframe insertions/removals
+  // Observe viewport for iframe changes (daemon shell mode)
   useEffect(() => {
-    const viewport = document.getElementById("viewport");
-    if (!viewport) return;
+    if (!isDaemonShell) return;
 
+    const viewport = document.getElementById("viewport")!;
     const sync = () => {
       const iframe = viewport.querySelector("iframe") as HTMLIFrameElement | null;
       iframeRef.current = iframe;
@@ -53,16 +71,44 @@ function StandaloneOverlay() {
     observer.observe(viewport, { childList: true, subtree: true });
 
     return () => observer.disconnect();
-  }, []);
+  }, [isDaemonShell]);
+
+  // Broadcast mode changes back to the shell (so daemon toolbar stays in sync)
+  const handleModeChange = useCallback(
+    (newMode: ToolMode) => {
+      setMode(newMode);
+      // Sync with shell if present
+      const shell = (window as any).__iterate_shell__;
+      if (shell) {
+        shell.activeTool = newMode;
+      }
+      window.dispatchEvent(
+        new CustomEvent("iterate:tool-change", { detail: { tool: newMode } })
+      );
+    },
+    []
+  );
 
   if (!iteration) return null;
 
   return (
-    <IterateOverlay
-      mode={mode}
-      iteration={iteration}
-      iframeRef={iframeRef}
-    />
+    <>
+      {/* Full-screen canvas layer (pointer-events managed per tool mode) */}
+      <IterateOverlay
+        mode={visible ? mode : "select"}
+        iteration={iteration}
+        iframeRef={iframeRef}
+      />
+
+      {/* Floating toolbar panel */}
+      <FloatingPanel
+        mode={mode}
+        onModeChange={handleModeChange}
+        visible={visible}
+        onVisibilityChange={setVisible}
+        annotationCount={annotationCount}
+      />
+    </>
   );
 }
 
