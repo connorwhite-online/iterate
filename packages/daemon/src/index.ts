@@ -541,6 +541,9 @@ function getShellHTML(): string {
 
     function switchIteration(name) { activeIteration = name; window.__iterate_shell__.activeIteration = name; window.dispatchEvent(new CustomEvent('iterate:iteration-change', { detail: { iteration: name } })); render(); }
 
+    // Listen for iteration switch requests from the overlay's FloatingPanel
+    window.addEventListener('iterate:request-switch', (e) => { const name = e.detail?.iteration; if (name && state.iterations[name]) switchIteration(name); });
+
     document.getElementById('pick-btn').addEventListener('click', async () => {
       if (!activeIteration) return;
       if (!confirm('Pick "' + activeIteration + '"? This will merge it and remove all other iterations.')) return;

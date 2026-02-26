@@ -62,6 +62,24 @@ export function TrashIcon({ size = 24, color = "currentColor" }: IconProps) {
   );
 }
 
+/** Undo arrow — Revert last move */
+export function UndoIcon({ size = 24, color = "currentColor" }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <path d="M5.33929 4.46777C7.26804 2.93219 9.74286 2 12.4285 2C18.2505 2 22.9714 6.72086 22.9714 12.5429C22.9714 18.3649 18.2505 23.0857 12.4285 23.0857C7.57484 23.0857 3.46926 19.7966 2.26211 15.3714C2.10642 14.7963 2.44488 14.2009 3.01999 14.0452C3.59509 13.8895 4.19054 14.228 4.34623 14.8031C5.30055 18.3267 8.55498 20.9429 12.4285 20.9429C17.0667 20.9429 20.8286 17.181 20.8286 12.5429C20.8286 7.9047 17.0667 4.14285 12.4285 4.14285C10.2266 4.14285 8.21043 4.93498 6.6587 6.26464L8.82832 8.43426C9.34816 8.9541 8.98167 9.85714 8.24542 9.85714H1.5714C1.25584 9.85714 0.999969 9.60127 0.999969 9.28571V2.61172C0.999969 1.87547 1.90301 1.50898 2.42285 2.02882L5.33929 4.46777Z" fill={color} />
+    </svg>
+  );
+}
+
+/** Eye/preview toggle — Toggle preview vs original */
+export function PreviewIcon({ size = 24, color = "currentColor" }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <path fillRule="evenodd" clipRule="evenodd" d="M12 4.5C7.30558 4.5 3.26048 7.39267 1.25 11.5C3.26048 15.6073 7.30558 18.5 12 18.5C16.6944 18.5 20.7395 15.6073 22.75 11.5C20.7395 7.39267 16.6944 4.5 12 4.5ZM12 16C14.4853 16 16.5 13.9853 16.5 11.5C16.5 9.01472 14.4853 7 12 7C9.51472 7 7.5 9.01472 7.5 11.5C7.5 13.9853 9.51472 16 12 16ZM12 14C13.3807 14 14.5 12.8807 14.5 11.5C14.5 10.1193 13.3807 9 12 9C10.6193 9 9.5 10.1193 9.5 11.5C9.5 12.8807 10.6193 14 12 14Z" fill={color} />
+    </svg>
+  );
+}
+
 /** Overlapping squares — Copy annotations to clipboard */
 export function CopyIcon({ size = 24, color = "currentColor" }: IconProps) {
   return (

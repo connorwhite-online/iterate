@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { IterateOverlay, type ToolMode } from "./IterateOverlay.js";
 import { FloatingPanel } from "./panel/FloatingPanel.js";
+import { DaemonConnection } from "./transport/connection.js";
+import type { IterationInfo } from "@iterate/core";
 
 /**
  * Standalone entry point — self-mounts the overlay into any page.
@@ -11,17 +13,23 @@ import { FloatingPanel } from "./panel/FloatingPanel.js";
  * 2. Framework plugin (Vite/Next) — operates directly on the page body
  *
  * Includes a draggable floating toolbar panel with:
+ * - Iteration selector (pill tabs to switch between worktrees)
  * - Tool mode switching (Select / Move)
- * - Batch submit button (when annotations are pending)
+ * - Live preview toggle + undo for DOM moves
+ * - Batch submit button (when annotations/moves are pending)
  * - Drag to any screen corner
  * - Hide/show toggle with Alt+Shift+I hotkey
  */
 function StandaloneOverlay() {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const connectionRef = useRef<DaemonConnection | null>(null);
   const [mode, setMode] = useState<ToolMode>("select");
   const [iteration, setIteration] = useState<string>("");
   const [visible, setVisible] = useState(true);
   const [batchCount, setBatchCount] = useState(0);
+  const [moveCount, setMoveCount] = useState(0);
+  const [previewMode, setPreviewMode] = useState(true);
+  const [iterations, setIterations] = useState<Record<string, IterationInfo>>({});
 
   // Detect context: daemon shell vs framework plugin
   const isDaemonShell = typeof document !== "undefined" && !!document.getElementById("viewport");
@@ -31,6 +39,24 @@ function StandaloneOverlay() {
   const wsUrl = !isDaemonShell && shell?.daemonPort
     ? `ws://${window.location.hostname}:${shell.daemonPort}/ws`
     : undefined;
+
+  // Set up a separate DaemonConnection for iteration state tracking
+  // (The IterateOverlay has its own connection for annotations/moves)
+  useEffect(() => {
+    const conn = new DaemonConnection(wsUrl);
+    connectionRef.current = conn;
+
+    const unsub = conn.onIterationsChange((iters) => {
+      setIterations(iters);
+    });
+
+    conn.connect();
+
+    return () => {
+      unsub();
+      conn.disconnect();
+    };
+  }, [wsUrl]);
 
   // Listen for shell events (daemon shell mode)
   useEffect(() => {
@@ -102,12 +128,36 @@ function StandaloneOverlay() {
     []
   );
 
+  // Handle iteration switching from the FloatingPanel
+  const handleIterationChange = useCallback(
+    (name: string) => {
+      setIteration(name);
+
+      // Update shell state
+      const shell = (window as any).__iterate_shell__;
+      if (shell) {
+        shell.activeIteration = name;
+      }
+
+      // Notify the shell to switch the iframe
+      window.dispatchEvent(
+        new CustomEvent("iterate:iteration-change", { detail: { iteration: name } })
+      );
+
+      // In daemon shell mode, also request the shell to re-render
+      window.dispatchEvent(
+        new CustomEvent("iterate:request-switch", { detail: { iteration: name } })
+      );
+    },
+    []
+  );
+
   // Handle batch submission from toolbar
   const handleSubmitBatch = useCallback(() => {
     window.dispatchEvent(new CustomEvent("iterate:submit-batch"));
   }, []);
 
-  // Handle clearing all annotations
+  // Handle clearing all annotations and moves
   const handleClearBatch = useCallback(() => {
     window.dispatchEvent(new CustomEvent("iterate:clear-batch"));
   }, []);
@@ -115,6 +165,11 @@ function StandaloneOverlay() {
   // Handle copying annotations to clipboard
   const handleCopyBatch = useCallback(() => {
     window.dispatchEvent(new CustomEvent("iterate:copy-batch"));
+  }, []);
+
+  // Handle undo last move
+  const handleUndoMove = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("iterate:undo-move"));
   }, []);
 
   if (!iteration) return null;
@@ -128,6 +183,8 @@ function StandaloneOverlay() {
         wsUrl={wsUrl}
         iframeRef={iframeRef}
         onBatchCountChange={setBatchCount}
+        onMoveCountChange={setMoveCount}
+        previewMode={previewMode}
       />
 
       {/* Floating toolbar panel */}
@@ -137,9 +194,16 @@ function StandaloneOverlay() {
         visible={visible}
         onVisibilityChange={setVisible}
         batchCount={batchCount}
+        moveCount={moveCount}
         onSubmitBatch={handleSubmitBatch}
         onClearBatch={handleClearBatch}
         onCopyBatch={handleCopyBatch}
+        onUndoMove={handleUndoMove}
+        previewMode={previewMode}
+        onPreviewModeChange={setPreviewMode}
+        iterations={iterations}
+        activeIteration={iteration}
+        onIterationChange={handleIterationChange}
       />
     </>
   );
