@@ -2,7 +2,7 @@
   "mcpServers": {
     "iterate": {
       "command": "node",
-      "args": ["/Users/connorwhite/Documents/Github/iterate/packages/mcp/dist/index.js"],
+      "args": ["./packages/mcp/dist/index.js"],
       "env": {
         "ITERATE_DAEMON_PORT": "4000"
       }
