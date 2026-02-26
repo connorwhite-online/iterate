@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ToolMode } from "../IterateOverlay.js";
-import { CursorIcon, MoveIcon, SendIcon, MinimizeIcon, LogoIcon } from "./icons.js";
+import { CursorIcon, MoveIcon, SendIcon, CloseIcon, LogoIcon, TrashIcon, CopyIcon } from "./icons.js";
 
 export interface FloatingPanelProps {
   mode: ToolMode;
@@ -11,17 +11,25 @@ export interface FloatingPanelProps {
   batchCount?: number;
   /** Called when user clicks Submit */
   onSubmitBatch?: () => void;
+  /** Called when user clicks Trash (clear all annotations) */
+  onClearBatch?: () => void;
+  /** Called when user clicks Copy (copy annotations to clipboard) */
+  onCopyBatch?: () => void;
 }
 
 type Corner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 
 const PANEL_MARGIN = 16;
 const HOTKEY = "Alt+Shift+I";
+const ICON_SIZE = 24;
+
+// Spring-like cubic bezier
+const SPRING = "cubic-bezier(0.34, 1.56, 0.64, 1)";
 
 /**
  * Floating toolbar panel with icon-based tools.
+ * Single container that animates between collapsed (logo only) and expanded states.
  * Can be dragged to any corner of the screen.
- * Shows a Submit button when there are pending annotations.
  */
 export function FloatingPanel({
   mode,
@@ -30,6 +38,8 @@ export function FloatingPanel({
   onVisibilityChange,
   batchCount = 0,
   onSubmitBatch,
+  onClearBatch,
+  onCopyBatch,
 }: FloatingPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [corner, setCorner] = useState<Corner>("bottom-right");
@@ -49,7 +59,7 @@ export function FloatingPanel({
     return () => window.removeEventListener("keydown", handler);
   }, [visible, onVisibilityChange]);
 
-  // Drag start
+  // Drag start — only from the panel background, not buttons
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       if ((e.target as HTMLElement).closest("button")) return;
@@ -105,41 +115,9 @@ export function FloatingPanel({
     ? { left: dragPos.x, top: dragPos.y }
     : getCornerPosition(corner);
 
-  if (!visible) {
-    return (
-      <div
-        style={{
-          position: "fixed",
-          ...getCornerPosition(corner),
-          zIndex: 10001,
-          pointerEvents: "auto",
-        }}
-      >
-        <button
-          onClick={() => onVisibilityChange(true)}
-          title={`Show iterate panel (${HOTKEY})`}
-          style={{
-            background: "#1a1a2e",
-            border: "1px solid #2a2a4a",
-            borderRadius: 16,
-            color: "#5b9bff",
-            padding: "6px 10px",
-            fontSize: 11,
-            cursor: "pointer",
-            opacity: 0.6,
-            transition: "opacity 0.2s",
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
-          onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.6")}
-        >
-          <LogoIcon size={14} color="#5b9bff" />
-        </button>
-      </div>
-    );
-  }
+  const positionTransition = isDragging
+    ? "none"
+    : "left 0.3s ease, top 0.3s ease, right 0.3s ease, bottom 0.3s ease";
 
   return (
     <div
@@ -150,127 +128,156 @@ export function FloatingPanel({
         ...positionStyle,
         zIndex: 10001,
         pointerEvents: "auto",
-        background: "#1a1a2e",
-        border: "1px solid #2a2a4a",
-        borderRadius: 10,
-        padding: "6px 8px",
-        boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
+        background: "#fff",
+        border: "1px solid #e0e0e0",
+        borderRadius: 12,
+        padding: 4,
+        boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
         display: "flex",
         alignItems: "center",
-        gap: 4,
         cursor: isDragging ? "grabbing" : "grab",
         userSelect: "none",
-        transition: isDragging ? "none" : "left 0.3s ease, top 0.3s ease, right 0.3s ease, bottom 0.3s ease",
+        overflow: "hidden",
+        transition: `${positionTransition}`,
       }}
     >
-      {/* Brand mark */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 4,
-          paddingRight: 4,
-          borderRight: "1px solid #2a2a4a",
-          marginRight: 2,
-        }}
-      >
-        <LogoIcon size={14} color="#5b9bff" />
-        <span
-          style={{
-            fontSize: 10,
-            fontWeight: 700,
-            color: "#5b9bff",
-            letterSpacing: "0.04em",
-            fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-          }}
-        >
-          iterate
-        </span>
-      </div>
+      {/* Expandable tool buttons — animate in/out */}
+      <ToolGroup visible={visible}>
+        <IconButton
+          icon={<CursorIcon size={ICON_SIZE} />}
+          label="Select"
+          active={mode === "select"}
+          onClick={() => onModeChange("select")}
+        />
+        <IconButton
+          icon={<MoveIcon size={ICON_SIZE} />}
+          label="Move"
+          active={mode === "move"}
+          onClick={() => onModeChange("move")}
+        />
+      </ToolGroup>
 
-      {/* Tool buttons */}
-      <IconButton
-        icon={<CursorIcon size={14} />}
-        label="Select"
-        active={mode === "select"}
-        onClick={() => onModeChange("select")}
-      />
-      <IconButton
-        icon={<MoveIcon size={14} />}
-        label="Move"
-        active={mode === "move"}
-        onClick={() => onModeChange("move")}
-      />
+      {/* Batch actions — animate in/out */}
+      <ToolGroup visible={visible && batchCount > 0}>
+        <Divider />
+        <IconButton
+          icon={<SendIcon size={ICON_SIZE} />}
+          label={`Submit ${batchCount} annotation${batchCount !== 1 ? "s" : ""}`}
+          onClick={() => onSubmitBatch?.()}
+        />
+        <IconButton
+          icon={<CopyIcon size={ICON_SIZE} />}
+          label="Copy annotations to clipboard"
+          onClick={() => onCopyBatch?.()}
+        />
+        <IconButton
+          icon={<TrashIcon size={ICON_SIZE} />}
+          label="Clear all annotations"
+          onClick={() => onClearBatch?.()}
+        />
+      </ToolGroup>
 
-      {/* Submit button (conditional) */}
-      {batchCount > 0 && (
-        <>
-          <div style={{ width: 1, height: 20, background: "#2a2a4a", margin: "0 2px" }} />
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onSubmitBatch?.();
-            }}
-            title={`Submit ${batchCount} annotation${batchCount !== 1 ? "s" : ""}`}
-            style={{
-              position: "relative",
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-              padding: "4px 10px",
-              borderRadius: 6,
-              border: "1px solid #10b981",
-              background: "#10b98133",
-              color: "#10b981",
-              cursor: "pointer",
-              fontSize: 11,
-              fontWeight: 600,
-              fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-            }}
-          >
-            <SendIcon size={13} color="#10b981" />
-            Submit
-            <span
-              style={{
-                background: "#10b981",
-                color: "#000",
-                fontSize: 9,
-                fontWeight: 700,
-                borderRadius: 8,
-                padding: "0 5px",
-                lineHeight: "16px",
-                minWidth: 16,
-                textAlign: "center",
-              }}
-            >
-              {batchCount}
-            </span>
-          </button>
-        </>
-      )}
-
-      {/* Minimize button */}
-      <div style={{ width: 1, height: 20, background: "#2a2a4a", margin: "0 2px" }} />
+      {/* Logo / Close toggle — always visible, rightmost */}
       <button
         onClick={(e) => {
           e.stopPropagation();
-          onVisibilityChange(false);
+          onVisibilityChange(!visible);
         }}
-        title={`Hide panel (${HOTKEY})`}
+        title={visible ? `Hide panel (${HOTKEY})` : `Show iterate panel (${HOTKEY})`}
         style={{
-          background: "transparent",
-          border: "none",
-          color: "#555",
-          cursor: "pointer",
-          padding: "2px",
+          position: "relative",
           display: "flex",
           alignItems: "center",
-          borderRadius: 4,
+          justifyContent: "center",
+          padding: 4,
+          borderRadius: 8,
+          border: "none",
+          background: "transparent",
+          cursor: "pointer",
+          width: ICON_SIZE + 8,
+          height: ICON_SIZE + 8,
+          flexShrink: 0,
         }}
       >
-        <MinimizeIcon size={14} color="#555" />
+        {/* Logo icon — fades out when open */}
+        <div
+          style={{
+            position: "absolute",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            opacity: visible ? 0 : 1,
+            transform: visible ? "scale(0.6)" : "scale(1)",
+            filter: visible ? "blur(4px)" : "blur(0px)",
+            transition: `opacity 0.25s ${SPRING}, transform 0.3s ${SPRING}, filter 0.25s ease`,
+            color: "#666",
+          }}
+        >
+          <LogoIcon size={ICON_SIZE} />
+        </div>
+        {/* Close icon — fades in when open */}
+        <div
+          style={{
+            position: "absolute",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            opacity: visible ? 1 : 0,
+            transform: visible ? "scale(1)" : "scale(0.6)",
+            filter: visible ? "blur(0px)" : "blur(4px)",
+            transition: `opacity 0.25s ${SPRING}, transform 0.3s ${SPRING}, filter 0.25s ease`,
+            color: "#999",
+          }}
+        >
+          <CloseIcon size={ICON_SIZE} />
+        </div>
       </button>
     </div>
+  );
+}
+
+/**
+ * Animated wrapper that scales/fades its children in and out.
+ * Uses max-width to animate the container width with a spring curve.
+ */
+function ToolGroup({
+  visible,
+  children,
+}: {
+  visible: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 2,
+        overflow: "hidden",
+        maxWidth: visible ? 500 : 0,
+        opacity: visible ? 1 : 0,
+        transform: visible ? "scale(1)" : "scale(0.85)",
+        transformOrigin: "left center",
+        transition: `max-width 0.35s ${SPRING}, opacity 0.2s ease, transform 0.3s ${SPRING}`,
+        pointerEvents: visible ? "auto" : "none",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function Divider() {
+  return (
+    <div
+      style={{
+        width: 1,
+        height: 20,
+        background: "#e0e0e0",
+        margin: "0 2px",
+        flexShrink: 0,
+      }}
+    />
   );
 }
 
@@ -282,7 +289,7 @@ function IconButton({
 }: {
   icon: React.ReactNode;
   label: string;
-  active: boolean;
+  active?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -296,14 +303,14 @@ function IconButton({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        width: 30,
-        height: 26,
-        borderRadius: 6,
-        border: active ? "1px solid #2563eb" : "1px solid transparent",
-        background: active ? "#2563eb33" : "transparent",
-        color: active ? "#5b9bff" : "#666",
+        padding: 4,
+        borderRadius: 8,
+        border: "none",
+        background: active ? "#e8e8e8" : "transparent",
+        color: active ? "#141414" : "#666",
         cursor: "pointer",
-        transition: "all 0.1s",
+        transition: "background 0.1s, color 0.1s",
+        flexShrink: 0,
       }}
     >
       {icon}

@@ -26,6 +26,12 @@ function StandaloneOverlay() {
   // Detect context: daemon shell vs framework plugin
   const isDaemonShell = typeof document !== "undefined" && !!document.getElementById("viewport");
 
+  // In framework plugin mode, connect directly to the daemon port
+  const shell = (window as any).__iterate_shell__;
+  const wsUrl = !isDaemonShell && shell?.daemonPort
+    ? `ws://${window.location.hostname}:${shell.daemonPort}/ws`
+    : undefined;
+
   // Listen for shell events (daemon shell mode)
   useEffect(() => {
     const onToolChange = (e: Event) => {
@@ -101,6 +107,16 @@ function StandaloneOverlay() {
     window.dispatchEvent(new CustomEvent("iterate:submit-batch"));
   }, []);
 
+  // Handle clearing all annotations
+  const handleClearBatch = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("iterate:clear-batch"));
+  }, []);
+
+  // Handle copying annotations to clipboard
+  const handleCopyBatch = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("iterate:copy-batch"));
+  }, []);
+
   if (!iteration) return null;
 
   return (
@@ -109,6 +125,7 @@ function StandaloneOverlay() {
       <IterateOverlay
         mode={visible ? mode : "select"}
         iteration={iteration}
+        wsUrl={wsUrl}
         iframeRef={iframeRef}
         onBatchCountChange={setBatchCount}
       />
@@ -121,6 +138,8 @@ function StandaloneOverlay() {
         onVisibilityChange={setVisible}
         batchCount={batchCount}
         onSubmitBatch={handleSubmitBatch}
+        onClearBatch={handleClearBatch}
+        onCopyBatch={handleCopyBatch}
       />
     </>
   );

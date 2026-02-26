@@ -3,75 +3,73 @@
 import { useState } from "react";
 
 export default function Home() {
-  const [count, setCount] = useState(0);
-
   return (
     <div style={styles.container}>
-      <header style={styles.header}>
-        <h1 style={styles.title}>iterate</h1>
-        <p style={styles.subtitle}>
-          Test app for visual iteration with git worktrees
-        </p>
-      </header>
+      <Header />
 
       <main style={styles.main}>
-        {/* Flex container — good for testing drag-to-reorder */}
-        <div style={styles.cardGrid}>
-          <Card
-            title="Annotations"
-            description="Circle elements and add comments. Try switching to Annotate mode in the toolbar."
-            color="#2563eb"
-          />
-          <Card
-            title="Element Inspector"
-            description="Select mode highlights elements on hover with their CSS selector."
-            color="#7c3aed"
-          />
-          <Card
-            title="DOM Manipulation"
-            description="Move mode lets you drag flex children and absolutely positioned elements."
-            color="#059669"
-          />
-        </div>
+        <CardGrid>
+          <Placeholder />
+          <Placeholder />
+          <Placeholder />
+        </CardGrid>
 
-        {/* Interactive element — good for testing annotations */}
-        <div style={styles.counterSection}>
-          <button
-            onClick={() => setCount((c) => c + 1)}
-            style={styles.button}
-          >
-            Count: {count}
-          </button>
-          <p style={styles.hint}>
-            Try annotating this button with a suggestion like &quot;make this bigger&quot;
-          </p>
-        </div>
-
-        {/* Absolutely positioned element — good for testing drag-to-move */}
-        <div style={styles.floatingBadge}>Drag me (absolute)</div>
+        <Counter />
       </main>
 
-      <footer style={styles.footer}>
-        <p>iterate example app (Next.js)</p>
-      </footer>
+      <Footer />
     </div>
   );
 }
 
-function Card({
-  title,
-  description,
-  color,
+function Header() {
+  return (
+    <header style={styles.header}>
+      <h1 style={styles.title}>iterate</h1>
+      <p style={styles.subtitle}>
+        Test app for visual iteration with git worktrees
+      </p>
+    </header>
+  );
+}
+
+function CardGrid({ children }: { children: React.ReactNode }) {
+  return <div style={styles.cardGrid}>{children}</div>;
+}
+
+function Placeholder() {
+  return <div style={styles.placeholder} />;
+}
+
+function Counter() {
+  const [count, setCount] = useState(0);
+
+  return (
+    <div style={styles.counterSection}>
+      <CounterButton count={count} onClick={() => setCount((c) => c + 1)} />
+    </div>
+  );
+}
+
+function CounterButton({
+  count,
+  onClick,
 }: {
-  title: string;
-  description: string;
-  color: string;
+  count: number;
+  onClick: () => void;
 }) {
   return (
-    <div style={{ ...styles.card, borderTopColor: color }}>
-      <h3 style={{ ...styles.cardTitle, color }}>{title}</h3>
-      <p style={styles.cardDescription}>{description}</p>
-    </div>
+    <button onClick={onClick} style={styles.button}>
+      Count: {count}
+    </button>
+  );
+}
+
+function Footer() {
+  return (
+    <footer style={styles.footer}>
+      <p>iterate example app (Next.js)</p>
+    </footer>
   );
 }
 
@@ -112,23 +110,11 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "center",
     flexWrap: "wrap",
   },
-  card: {
-    background: "#141414",
+  placeholder: {
+    background: "#222",
     borderRadius: 12,
-    padding: 24,
     width: 280,
-    borderTop: "3px solid",
-  },
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: 600,
-    margin: "0 0 8px 0",
-  },
-  cardDescription: {
-    color: "#999",
-    fontSize: 14,
-    lineHeight: 1.5,
-    margin: 0,
+    height: 120,
   },
   counterSection: {
     textAlign: "center" as const,
@@ -143,23 +129,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 18,
     fontWeight: 600,
     cursor: "pointer",
-  },
-  hint: {
-    color: "#666",
-    fontSize: 13,
-    marginTop: 12,
-  },
-  floatingBadge: {
-    position: "absolute" as const,
-    top: 20,
-    right: 40,
-    background: "#7c3aed",
-    color: "#fff",
-    padding: "8px 16px",
-    borderRadius: 20,
-    fontSize: 13,
-    fontWeight: 600,
-    cursor: "grab",
   },
   footer: {
     textAlign: "center" as const,

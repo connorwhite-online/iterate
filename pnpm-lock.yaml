@@ -73,6 +73,9 @@ importers:
       '@types/babel__core':
         specifier: ^7.20.0
         version: 7.20.5
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.11
       tsup:
         specifier: ^8.3.0
         version: 8.5.1(postcss@8.5.6)(typescript@5.9.3)
@@ -175,6 +178,9 @@ importers:
       '@iterate/babel-plugin':
         specifier: workspace:*
         version: link:../babel-plugin
+      '@iterate/daemon':
+        specifier: workspace:*
+        version: link:../daemon
       '@iterate/overlay':
         specifier: workspace:*
         version: link:../overlay
@@ -235,6 +241,12 @@ importers:
         specifier: workspace:*
         version: link:../overlay
     devDependencies:
+      '@babel/core':
+        specifier: ^7.24.0
+        version: 7.29.0
+      '@types/babel__core':
+        specifier: ^7.20.0
+        version: 7.20.5
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.11

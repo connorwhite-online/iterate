@@ -12,21 +12,23 @@
     }
   },
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts",
-    "dev": "tsup src/index.ts --format esm --dts --watch",
+    "build": "tsup src/index.ts --format esm --dts --external @babel/core",
+    "dev": "tsup src/index.ts --format esm --dts --watch --external @babel/core",
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@iterate/overlay": "workspace:*",
-    "@iterate/babel-plugin": "workspace:*"
+    "@iterate/babel-plugin": "workspace:*",
+    "@iterate/overlay": "workspace:*"
   },
   "peerDependencies": {
     "vite": "^5.0.0 || ^6.0.0"
   },
   "devDependencies": {
+    "@babel/core": "^7.24.0",
+    "@types/babel__core": "^7.20.0",
     "@types/node": "^22.0.0",
-    "vite": "^6.0.0",
     "tsup": "^8.3.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0"
   }
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
-import { CursorIcon, MoveIcon, SendIcon, MinimizeIcon, LogoIcon } from "../panel/icons.js";
+import { CursorIcon, MoveIcon, SendIcon, CloseIcon, LogoIcon, TrashIcon, CopyIcon } from "../panel/icons.js";
 
 describe("icon components", () => {
   it("CursorIcon renders an SVG", () => {
@@ -18,13 +18,23 @@ describe("icon components", () => {
     expect(container.querySelector("svg")).not.toBeNull();
   });
 
-  it("MinimizeIcon renders an SVG", () => {
-    const { container } = render(<MinimizeIcon />);
+  it("CloseIcon renders an SVG", () => {
+    const { container } = render(<CloseIcon />);
     expect(container.querySelector("svg")).not.toBeNull();
   });
 
   it("LogoIcon renders an SVG", () => {
     const { container } = render(<LogoIcon />);
+    expect(container.querySelector("svg")).not.toBeNull();
+  });
+
+  it("TrashIcon renders an SVG", () => {
+    const { container } = render(<TrashIcon />);
+    expect(container.querySelector("svg")).not.toBeNull();
+  });
+
+  it("CopyIcon renders an SVG", () => {
+    const { container } = render(<CopyIcon />);
     expect(container.querySelector("svg")).not.toBeNull();
   });
 
@@ -38,7 +48,6 @@ describe("icon components", () => {
   it("accepts custom color prop", () => {
     const { container } = render(<CursorIcon color="red" />);
     const svg = container.querySelector("svg");
-    // The color is applied to either fill or stroke on child elements
     expect(svg).not.toBeNull();
   });
 });

@@ -21,11 +21,11 @@ export function TextSelect({
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
   const [selectedText, setSelectedText] = useState<string>("");
 
-  const getIframeDocument = useCallback(() => {
+  const getTargetDocument = useCallback(() => {
     try {
-      return iframeRef.current?.contentDocument ?? null;
+      return iframeRef.current?.contentDocument ?? document;
     } catch {
-      return null;
+      return document;
     }
   }, [iframeRef]);
 
@@ -36,11 +36,10 @@ export function TextSelect({
       return;
     }
 
-    const iframeDoc = getIframeDocument();
-    if (!iframeDoc) return;
+    const targetDoc = getTargetDocument();
 
     const handleSelectionChange = () => {
-      const selection = iframeDoc.getSelection();
+      const selection = targetDoc.getSelection();
       if (!selection || selection.isCollapsed || !selection.rangeCount) {
         setTooltipPos(null);
         setSelectedText("");
@@ -98,18 +97,20 @@ export function TextSelect({
       timeout = setTimeout(handleSelectionChange, 150);
     };
 
-    iframeDoc.addEventListener("selectionchange", debouncedHandler);
+    targetDoc.addEventListener("selectionchange", debouncedHandler);
 
     // Also listen for mouseup to catch the final selection state
-    iframeDoc.addEventListener("mouseup", () => {
+    const mouseupHandler = () => {
       setTimeout(handleSelectionChange, 50);
-    });
+    };
+    targetDoc.addEventListener("mouseup", mouseupHandler);
 
     return () => {
       clearTimeout(timeout);
-      iframeDoc.removeEventListener("selectionchange", debouncedHandler);
+      targetDoc.removeEventListener("selectionchange", debouncedHandler);
+      targetDoc.removeEventListener("mouseup", mouseupHandler);
     };
-  }, [active, getIframeDocument, onTextSelect]);
+  }, [active, getTargetDocument, onTextSelect]);
 
   if (!active || !tooltipPos || !selectedText) return null;
 

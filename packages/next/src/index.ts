@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { createRequire } from "node:module";
-import { readFileSync } from "node:fs";
+import { createConnection } from "node:net";
+import { fileURLToPath } from "node:url";
 
 export interface IterateNextOptions {
   /** Port for the iterate daemon (default: 4000) */
@@ -12,6 +12,7 @@ export interface IterateNextOptions {
 type NextConfig = Record<string, any>;
 
 let daemon: ChildProcess | null = null;
+let daemonStarting = false;
 
 /**
  * Next.js config wrapper for iterate.
@@ -44,29 +45,33 @@ export function withIterate(
   }
 
   // Start the daemon when the config is loaded (dev only)
-  if (!daemon) {
-    daemon = startDaemon(daemonPort, process.cwd());
+  if (!daemon && !daemonStarting) {
+    daemonStarting = true;
+    startDaemonIfNeeded(daemonPort, process.cwd()).then((child) => {
+      if (child) {
+        daemon = child;
 
-    // Clean up on process exit
-    const cleanup = () => {
-      if (daemon) {
-        stopDaemon(daemon, daemonPort);
-        daemon = null;
+        // Clean up on process exit
+        const cleanup = () => {
+          if (daemon) {
+            stopDaemon(daemon, daemonPort);
+            daemon = null;
+          }
+        };
+        process.on("SIGINT", cleanup);
+        process.on("SIGTERM", cleanup);
+        process.on("exit", cleanup);
       }
-    };
-    process.on("SIGINT", cleanup);
-    process.on("SIGTERM", cleanup);
-    process.on("exit", cleanup);
+    });
   }
 
   // Resolve the overlay bundle path at config time
   let overlayBundlePath: string | undefined;
   let babelPluginPath: string | undefined;
   try {
-    const require = createRequire(import.meta.url);
-    overlayBundlePath = require.resolve("@iterate/overlay/standalone");
+    overlayBundlePath = fileURLToPath(import.meta.resolve("@iterate/overlay/standalone"));
     if (!options.disableBabelPlugin) {
-      babelPluginPath = require.resolve("@iterate/babel-plugin");
+      babelPluginPath = fileURLToPath(import.meta.resolve("@iterate/babel-plugin"));
     }
   } catch {
     console.warn("[iterate] Could not resolve overlay bundle or babel plugin");
@@ -143,7 +148,7 @@ export function withIterate(
           : originalEntry);
 
         // Add our injector to the main client entry
-        const injectorPath = createIterateInjector(overlayBundlePath);
+        const injectorPath = createIterateInjector(overlayBundlePath, daemonPort);
         if (injectorPath && entries["main-app"]) {
           if (Array.isArray(entries["main-app"])) {
             entries["main-app"].push(injectorPath);
@@ -167,12 +172,13 @@ export function withIterate(
  * Returns the path to write the injector, or writes it inline via data URI.
  */
 function createIterateInjector(
-  _overlayPath: string | undefined
+  _overlayPath: string | undefined,
+  daemonPort: number
 ): string | null {
   // Use a data URI as a virtual module — webpack supports this
   const code = `
     if (typeof window !== 'undefined') {
-      window.__iterate_shell__ = { activeTool: 'select', activeIteration: 'default' };
+      window.__iterate_shell__ = { activeTool: 'select', activeIteration: 'default', daemonPort: ${daemonPort} };
       var s = document.createElement('script');
       s.src = '/__iterate__/overlay.js';
       s.defer = true;
@@ -183,13 +189,34 @@ function createIterateInjector(
   return `data:text/javascript;base64,${Buffer.from(code).toString("base64")}`;
 }
 
-function startDaemon(port: number, cwd: string): ChildProcess {
+function isPortInUse(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = createConnection({ port, host: "127.0.0.1" });
+    socket.on("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.on("error", () => {
+      resolve(false);
+    });
+  });
+}
+
+async function startDaemonIfNeeded(port: number, cwd: string): Promise<ChildProcess | null> {
+  if (await isPortInUse(port)) {
+    console.log(`[iterate] daemon already running on port ${port}`);
+    return null;
+  }
+
+  // Resolve @iterate/daemon from this package's location, not the app's cwd
+  const daemonPath = import.meta.resolve("@iterate/daemon");
+
   const child = spawn(
     process.execPath,
     [
       "--input-type=module",
       "-e",
-      `import { startDaemon } from "@iterate/daemon"; startDaemon({ port: ${port}, cwd: ${JSON.stringify(cwd)} });`,
+      `import { startDaemon } from ${JSON.stringify(daemonPath)}; startDaemon({ port: ${port}, cwd: ${JSON.stringify(cwd)} });`,
     ],
     {
       cwd,

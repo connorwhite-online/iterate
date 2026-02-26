@@ -21,11 +21,11 @@ export function MarqueeSelect({
   const [marquee, setMarquee] = useState<Rect | null>(null);
   const [startPoint, setStartPoint] = useState<{ x: number; y: number } | null>(null);
 
-  const getIframeDocument = useCallback(() => {
+  const getTargetDocument = useCallback(() => {
     try {
-      return iframeRef.current?.contentDocument ?? null;
+      return iframeRef.current?.contentDocument ?? document;
     } catch {
-      return null;
+      return document;
     }
   }, [iframeRef]);
 
@@ -36,8 +36,7 @@ export function MarqueeSelect({
       return;
     }
 
-    const iframeDoc = getIframeDocument();
-    if (!iframeDoc) return;
+    const targetDoc = getTargetDocument();
 
     let isDragging = false;
     let start = { x: 0, y: 0 };
@@ -97,23 +96,23 @@ export function MarqueeSelect({
       if (currentMarquee.width < 20 || currentMarquee.height < 20) return;
 
       // Find all elements within the marquee
-      const elements = findElementsInRect(iframeDoc, currentMarquee);
+      const elements = findElementsInRect(targetDoc, currentMarquee);
       if (elements.length > 0) {
         onSelect(elements);
       }
     };
 
     // Use capture phase so we can intercept before ElementPicker
-    iframeDoc.addEventListener("mousedown", handleMouseDown);
-    iframeDoc.addEventListener("mousemove", handleMouseMove);
-    iframeDoc.addEventListener("mouseup", handleMouseUp);
+    targetDoc.addEventListener("mousedown", handleMouseDown);
+    targetDoc.addEventListener("mousemove", handleMouseMove);
+    targetDoc.addEventListener("mouseup", handleMouseUp);
 
     return () => {
-      iframeDoc.removeEventListener("mousedown", handleMouseDown);
-      iframeDoc.removeEventListener("mousemove", handleMouseMove);
-      iframeDoc.removeEventListener("mouseup", handleMouseUp);
+      targetDoc.removeEventListener("mousedown", handleMouseDown);
+      targetDoc.removeEventListener("mousemove", handleMouseMove);
+      targetDoc.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [active, getIframeDocument, onSelect]);
+  }, [active, getTargetDocument, onSelect]);
 
   if (!active || !marquee) return null;
 

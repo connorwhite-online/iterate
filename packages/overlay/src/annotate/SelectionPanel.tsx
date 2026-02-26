@@ -155,7 +155,7 @@ export function SelectionPanel({
                     whiteSpace: "nowrap",
                   }}
                 >
-                  {el.componentName ? `<${el.componentName}>` : el.elementName}
+                  {el.elementName}
                 </div>
                 {el.sourceLocation && (
                   <div

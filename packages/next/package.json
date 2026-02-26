@@ -17,6 +17,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@iterate/daemon": "workspace:*",
     "@iterate/overlay": "workspace:*",
     "@iterate/babel-plugin": "workspace:*"
   },

@@ -61,6 +61,10 @@ export function IterateOverlay({
   // Pending batch (accumulated annotations not yet submitted)
   const [pendingBatch, setPendingBatch] = useState<PendingAnnotation[]>([]);
 
+  // When the selection panel is open, disable pickers so clicks in the panel
+  // don't re-contextualize the selection
+  const isAnnotating = selectedElements.length > 0 || textSelection !== null;
+
   // Connect to daemon
   useEffect(() => {
     const conn = new DaemonConnection(wsUrl);
@@ -191,6 +195,35 @@ export function IterateOverlay({
     return () => window.removeEventListener("iterate:submit-batch", handler);
   }, [pendingBatch, iteration]);
 
+  // Handle clearing all pending annotations
+  useEffect(() => {
+    const handler = () => {
+      setPendingBatch([]);
+      setSelectedElements([]);
+      setTextSelection(null);
+    };
+    window.addEventListener("iterate:clear-batch", handler);
+    return () => window.removeEventListener("iterate:clear-batch", handler);
+  }, []);
+
+  // Handle copying annotations to clipboard
+  useEffect(() => {
+    const handler = () => {
+      if (pendingBatch.length === 0) return;
+      const data = pendingBatch.map((a) => ({
+        iteration,
+        elements: a.elements,
+        textSelection: a.textSelection,
+        comment: a.comment,
+        intent: a.intent,
+        severity: a.severity,
+      }));
+      navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+    };
+    window.addEventListener("iterate:copy-batch", handler);
+    return () => window.removeEventListener("iterate:copy-batch", handler);
+  }, [pendingBatch, iteration]);
+
   return (
     <div
       style={{
@@ -200,24 +233,24 @@ export function IterateOverlay({
         zIndex: 9999,
       }}
     >
-      {/* Element picker for click/ctrl+click selection */}
+      {/* Element picker for click/ctrl+click selection (disabled while annotating) */}
       <ElementPicker
-        active={mode === "select"}
+        active={mode === "select" && !isAnnotating}
         iframeRef={iframeRef}
         selectedElements={selectedElements}
         onSelect={handleElementSelect}
       />
 
-      {/* Marquee / rubber-band selection */}
+      {/* Marquee / rubber-band selection (disabled while annotating) */}
       <MarqueeSelect
-        active={mode === "select"}
+        active={mode === "select" && !isAnnotating}
         iframeRef={iframeRef}
         onSelect={handleMarqueeSelect}
       />
 
-      {/* Text selection capture */}
+      {/* Text selection capture (disabled while annotating) */}
       <TextSelect
-        active={mode === "select"}
+        active={mode === "select" && !isAnnotating}
         iframeRef={iframeRef}
         onTextSelect={handleTextSelect}
       />

@@ -35,11 +35,11 @@ export function ElementPicker({
   const [highlight, setHighlight] = useState<Rect | null>(null);
   const [hoveredLabel, setHoveredLabel] = useState<string>("");
 
-  const getIframeDocument = useCallback(() => {
+  const getTargetDocument = useCallback(() => {
     try {
-      return iframeRef.current?.contentDocument ?? null;
+      return iframeRef.current?.contentDocument ?? document;
     } catch {
-      return null;
+      return document;
     }
   }, [iframeRef]);
 
@@ -49,12 +49,17 @@ export function ElementPicker({
       return;
     }
 
-    const iframeDoc = getIframeDocument();
-    if (!iframeDoc) return;
+    const targetDoc = getTargetDocument();
+
+    const isOverlayElement = (el: Element) =>
+      !!el.closest("#__iterate-overlay-root__");
 
     const handleMouseMove = (e: MouseEvent) => {
       const target = e.target as Element;
-      if (!target || target === iframeDoc.documentElement) return;
+      if (!target || target === targetDoc.documentElement || isOverlayElement(target)) {
+        setHighlight(null);
+        return;
+      }
 
       const rect = target.getBoundingClientRect();
       setHighlight({
@@ -64,8 +69,8 @@ export function ElementPicker({
         height: rect.height,
       });
 
-      const { component, source } = getComponentInfo(target);
-      if (component) {
+      const { component, source, isComponentRoot } = getComponentInfo(target);
+      if (component && isComponentRoot) {
         setHoveredLabel(source ? `<${component}> ${source}` : `<${component}>`);
       } else {
         setHoveredLabel(generateSelector(target));
@@ -73,11 +78,11 @@ export function ElementPicker({
     };
 
     const handleClick = (e: MouseEvent) => {
+      const target = e.target as Element;
+      if (!target || isOverlayElement(target)) return;
+
       e.preventDefault();
       e.stopPropagation();
-
-      const target = e.target as Element;
-      if (!target) return;
 
       const picked = elementToPicked(target);
       const isMultiSelect = e.ctrlKey || e.metaKey;
@@ -98,14 +103,14 @@ export function ElementPicker({
       }
     };
 
-    iframeDoc.addEventListener("mousemove", handleMouseMove);
-    iframeDoc.addEventListener("click", handleClick, { capture: true });
+    targetDoc.addEventListener("mousemove", handleMouseMove);
+    targetDoc.addEventListener("click", handleClick, { capture: true });
 
     return () => {
-      iframeDoc.removeEventListener("mousemove", handleMouseMove);
-      iframeDoc.removeEventListener("click", handleClick, { capture: true });
+      targetDoc.removeEventListener("mousemove", handleMouseMove);
+      targetDoc.removeEventListener("click", handleClick, { capture: true });
     };
-  }, [active, getIframeDocument, onSelect, selectedElements]);
+  }, [active, getTargetDocument, onSelect, selectedElements]);
 
   if (!active) return null;
 
@@ -186,7 +191,7 @@ export function ElementPicker({
             }}
           >
             <span style={{ fontWeight: 700 }}>
-              {el.componentName ? `<${el.componentName}>` : el.elementName}
+              {el.elementName}
             </span>
             {el.sourceLocation && (
               <span style={{ opacity: 0.7, fontSize: 9 }}>

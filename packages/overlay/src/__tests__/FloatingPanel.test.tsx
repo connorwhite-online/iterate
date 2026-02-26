@@ -14,8 +14,8 @@ const defaultProps = {
 describe("FloatingPanel", () => {
   it("renders toolbar when visible", () => {
     const { container } = render(<FloatingPanel {...defaultProps} />);
-    // Should render more than just the minimized button
-    expect(container.textContent).toContain("iterate");
+    // Should render SVG icons (no text in the toolbar)
+    expect(container.querySelectorAll("svg").length).toBeGreaterThan(0);
   });
 
   it("renders minimized button when not visible", () => {
@@ -56,12 +56,16 @@ describe("FloatingPanel", () => {
     expect(submitButton).toBeUndefined();
   });
 
-  it("shows Submit button with badge when batchCount > 0", () => {
+  it("shows batch action buttons when batchCount > 0", () => {
     const { container } = render(
       <FloatingPanel {...defaultProps} batchCount={3} />
     );
-    // Should show the count
-    expect(container.textContent).toContain("3");
+    // Should show submit, copy, and trash buttons
+    const allButtons = container.querySelectorAll("button");
+    const submitButton = Array.from(allButtons).find(
+      (b) => b.getAttribute("title")?.toLowerCase().includes("submit")
+    );
+    expect(submitButton).toBeDefined();
   });
 
   it("calls onSubmitBatch when Submit button clicked", () => {

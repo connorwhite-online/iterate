@@ -24,11 +24,11 @@ export function DragHandler({ active, iframeRef, onMove }: DragHandlerProps) {
   const [currentOffset, setCurrentOffset] = useState({ x: 0, y: 0 });
   const [originalRect, setOriginalRect] = useState<Rect | null>(null);
 
-  const getIframeDocument = useCallback(() => {
+  const getTargetDocument = useCallback(() => {
     try {
-      return iframeRef.current?.contentDocument ?? null;
+      return iframeRef.current?.contentDocument ?? document;
     } catch {
-      return null;
+      return document;
     }
   }, [iframeRef]);
 
@@ -39,8 +39,7 @@ export function DragHandler({ active, iframeRef, onMove }: DragHandlerProps) {
       return;
     }
 
-    const iframeDoc = getIframeDocument();
-    if (!iframeDoc) return;
+    const targetDoc = getTargetDocument();
 
     const handleMouseDown = (e: MouseEvent) => {
       const target = e.target as Element;
@@ -110,16 +109,16 @@ export function DragHandler({ active, iframeRef, onMove }: DragHandlerProps) {
       setCurrentOffset({ x: 0, y: 0 });
     };
 
-    iframeDoc.addEventListener("mousedown", handleMouseDown, { capture: true });
-    iframeDoc.addEventListener("mousemove", handleMouseMove);
-    iframeDoc.addEventListener("mouseup", handleMouseUp);
+    targetDoc.addEventListener("mousedown", handleMouseDown, { capture: true });
+    targetDoc.addEventListener("mousemove", handleMouseMove);
+    targetDoc.addEventListener("mouseup", handleMouseUp);
 
     return () => {
-      iframeDoc.removeEventListener("mousedown", handleMouseDown, { capture: true });
-      iframeDoc.removeEventListener("mousemove", handleMouseMove);
-      iframeDoc.removeEventListener("mouseup", handleMouseUp);
+      targetDoc.removeEventListener("mousedown", handleMouseDown, { capture: true });
+      targetDoc.removeEventListener("mousemove", handleMouseMove);
+      targetDoc.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [active, dragging, dragStart, dragElement, originalRect, getIframeDocument, onMove]);
+  }, [active, dragging, dragStart, dragElement, originalRect, getTargetDocument, onMove]);
 
   if (!dragging || !originalRect) return null;
 

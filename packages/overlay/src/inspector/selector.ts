@@ -159,28 +159,101 @@ export function getNearbyText(element: Element): string {
 }
 
 /**
- * Get React component name and source file path from iterate's babel plugin.
- * Walks up the DOM tree to find the nearest ancestor with
- * data-iterate-component and data-iterate-source attributes.
+ * Get the React fiber node for a DOM element.
+ * React attaches fibers via a `__reactFiber$` prefixed property.
+ */
+function getReactFiber(node: Element): any | null {
+  for (const key of Object.keys(node)) {
+    if (key.startsWith("__reactFiber$") || key.startsWith("__reactInternalInstance$")) {
+      return (node as any)[key];
+    }
+  }
+  return null;
+}
+
+/**
+ * Framework-internal component names to skip when building the ancestry path.
+ * These are React/Next.js/framework plumbing, not user code.
+ */
+const FRAMEWORK_COMPONENTS = new Set([
+  // Next.js internals
+  "AppRouter", "Router", "HotReload", "InnerLayoutRouter", "OuterLayoutRouter",
+  "RenderFromTemplateContext", "ScrollAndFocusHandler", "InnerScrollAndFocusHandler",
+  "ClientPageRoot", "SegmentViewNode", "SegmentStateProvider",
+  "RootErrorBoundary", "AppDevOverlayErrorBoundary",
+  "DevRootHTTPAccessFallbackBoundary",
+  "Root", "ServerRoot",
+  // Generic React/framework patterns
+  "ErrorBoundary", "ErrorBoundaryHandler", "Suspense",
+  "RedirectBoundary", "RedirectErrorBoundary",
+  "HTTPAccessFallbackBoundary", "HTTPAccessFallbackErrorBoundary",
+  "LoadingBoundary",
+]);
+
+/**
+ * Check if a fiber represents a user-defined component.
+ * Must be PascalCase, a function/class (not a host element), and not
+ * a known framework internal.
+ */
+function isUserComponent(fiber: any): boolean {
+  if (!fiber || !fiber.type) return false;
+  if (typeof fiber.type === "string") return false;
+  const name = fiber.type.displayName || fiber.type.name;
+  if (!name) return false;
+  if (!/^[A-Z]/.test(name)) return false;
+  if (FRAMEWORK_COMPONENTS.has(name)) return false;
+  // Skip names that look like framework internals (Context, Provider, etc.)
+  if (/Context$|Provider$/.test(name)) return false;
+  return true;
+}
+
+/**
+ * Get the nearest React component name for a DOM element by walking the
+ * fiber tree. Returns just the innermost user component (e.g. "Header"),
+ * not the full ancestry chain.
+ *
+ * Falls back to data-iterate-component/data-iterate-source attributes
+ * if the babel plugin injected them.
  */
 export function getComponentInfo(element: Element): {
   component: string | null;
   source: string | null;
+  isComponentRoot: boolean;
 } {
-  let current: Element | null = element;
-
-  while (current && current !== document.documentElement) {
-    const component = current.getAttribute("data-iterate-component");
-    const source = current.getAttribute("data-iterate-source");
-
-    if (component) {
-      return { component, source };
+  // Strategy 1: Walk the React fiber tree to nearest user component
+  const fiber = getReactFiber(element);
+  if (fiber) {
+    let current = fiber;
+    let isFirst = true;
+    while (current) {
+      if (isUserComponent(current)) {
+        const name = current.type.displayName || current.type.name;
+        const debugSource = current._debugSource;
+        const source = debugSource
+          ? `${debugSource.fileName}:${debugSource.lineNumber}`
+          : null;
+        // The element is the component root if the component fiber
+        // is the immediate parent of the element's host fiber
+        return { component: name, source, isComponentRoot: isFirst };
+      }
+      // After the first hop from the host fiber, we're no longer at the root
+      if (current === fiber.return) isFirst = false;
+      current = current.return;
     }
-
-    current = current.parentElement;
   }
 
-  return { component: null, source: null };
+  // Strategy 2: Fall back to data attributes from babel plugin
+  let el: Element | null = element;
+  while (el && el !== document.documentElement) {
+    const component = el.getAttribute("data-iterate-component");
+    const source = el.getAttribute("data-iterate-source");
+    if (component) {
+      return { component, source, isComponentRoot: false };
+    }
+    el = el.parentElement;
+  }
+
+  return { component: null, source: null, isComponentRoot: false };
 }
 
 // --- Type-specific style capture (inspired by agentation) ---
