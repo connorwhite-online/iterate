@@ -14,10 +14,12 @@
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts",
     "dev": "tsup src/index.ts --format esm --dts --watch",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",
+    "@babel/preset-react": "^7.28.5",
     "@types/babel__core": "^7.20.0",
     "tsup": "^8.3.0",
     "typescript": "^5.7.0"
