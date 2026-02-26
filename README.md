@@ -117,6 +117,7 @@ Once you favor a direction, the agent calls `iterate_pick_iteration` with a merg
 | `@iterate/mcp` | MCP server for AI agent integration (Claude Code, Cursor, etc.) |
 | `@iterate/vite` | Vite plugin — auto-injects the overlay in dev mode |
 | `@iterate/next` | Next.js plugin — auto-injects the overlay in dev mode |
+| `@iterate/babel-plugin` | Babel plugin — injects React component names + source locations into JSX for element identification |
 
 ## Architecture
 
@@ -135,7 +136,7 @@ Daemon (:4000)
 Browser Overlay (injected via Vite/Next plugin)
   ├── FloatingPanel (toolbar: tool modes, move controls, batch actions)
   ├── SelectionPanel (element list with component names + source locations)
-  ├── AnnotationDialog (intent, severity, comment → structured batch entry)
+  ├── Annotation form within SelectionPanel (intent, severity, comment → structured batch entry)
   ├── Marquee select + click select (multi-element selection)
   ├── Move tool (drag-to-reposition with preview toggle)
   └── Iteration tabs (switch between worktree iframes)
@@ -175,10 +176,10 @@ The agent can then call tools like `iterate_get_pending_batch` to read your anno
 
 ```ts
 // vite.config.ts
-import { iteratePlugin } from '@iterate/vite'
+import { iterate } from '@iterate/vite'
 
 export default defineConfig({
-  plugins: [react(), iteratePlugin()]
+  plugins: [react(), iterate()]
 })
 ```
 
