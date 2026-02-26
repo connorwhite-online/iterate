@@ -6,12 +6,14 @@ import type {
   SelectedElement,
   TextSelection,
   Rect,
+  DomChange,
 } from "@iterate/core";
+import { formatBatchPrompt } from "@iterate/core";
 import { ElementPicker, type PickedElement } from "./inspector/ElementPicker.js";
 import { MarqueeSelect } from "./inspector/MarqueeSelect.js";
 import { TextSelect } from "./inspector/TextSelect.js";
 import { SelectionPanel } from "./annotate/SelectionPanel.js";
-import { DragHandler } from "./manipulate/DragHandler.js";
+import { DragHandler, type PendingMove } from "./manipulate/DragHandler.js";
 import { DaemonConnection } from "./transport/connection.js";
 
 export type ToolMode = "select" | "move";
@@ -27,6 +29,10 @@ export interface IterateOverlayProps {
   iframeRef: React.RefObject<HTMLIFrameElement | null>;
   /** Current pending batch count (passed up for toolbar badge) */
   onBatchCountChange?: (count: number) => void;
+  /** Current pending move count (passed up for toolbar badge) */
+  onMoveCountChange?: (count: number) => void;
+  /** Whether live preview is enabled */
+  previewMode?: boolean;
   /** Callback to submit the pending batch */
   onSubmitBatch?: () => void;
 }
@@ -51,6 +57,8 @@ export function IterateOverlay({
   wsUrl,
   iframeRef,
   onBatchCountChange,
+  onMoveCountChange,
+  previewMode = true,
 }: IterateOverlayProps) {
   const connectionRef = useRef<DaemonConnection | null>(null);
 
@@ -60,6 +68,9 @@ export function IterateOverlay({
 
   // Pending batch (accumulated annotations not yet submitted)
   const [pendingBatch, setPendingBatch] = useState<PendingAnnotation[]>([]);
+
+  // Pending moves (accumulated DOM moves not yet submitted)
+  const [pendingMoves, setPendingMoves] = useState<PendingMove[]>([]);
 
   // When the selection panel is open, disable pickers so clicks in the panel
   // don't re-contextualize the selection
@@ -77,6 +88,11 @@ export function IterateOverlay({
   useEffect(() => {
     onBatchCountChange?.(pendingBatch.length);
   }, [pendingBatch.length, onBatchCountChange]);
+
+  // Notify parent of move count changes
+  useEffect(() => {
+    onMoveCountChange?.(pendingMoves.length);
+  }, [pendingMoves.length, onMoveCountChange]);
 
   // Handle element selection from ElementPicker (click / ctrl+click)
   const handleElementSelect = useCallback(
@@ -151,26 +167,39 @@ export function IterateOverlay({
     setTextSelection(null);
   }, []);
 
-  // Handle drag move
+  // Handle drag move — add to pending moves list
   const handleMove = useCallback(
-    (data: { selector: string; from: Rect; to: Rect; computedStyles: Record<string, string> }) => {
-      connectionRef.current?.send({
-        type: "dom:move",
-        payload: {
-          iteration,
-          selector: data.selector,
-          from: data.from,
-          to: data.to,
-        },
-      });
+    (move: PendingMove) => {
+      setPendingMoves((prev) => [...prev, move]);
     },
-    [iteration]
+    []
   );
+
+  // Convert pending moves to DomChange format for the wire protocol
+  const pendingMovesToDomChanges = useCallback((): DomChange[] => {
+    return pendingMoves.map((move, idx) => ({
+      id: `pending-move-${idx}-${Date.now()}`,
+      iteration,
+      selector: move.selector,
+      type: "move" as const,
+      componentName: move.componentName,
+      sourceLocation: move.sourceLocation,
+      before: {
+        rect: move.from,
+        computedStyles: move.computedStyles,
+      },
+      after: {
+        rect: move.to,
+        computedStyles: move.computedStyles,
+      },
+      timestamp: Date.now(),
+    }));
+  }, [pendingMoves, iteration]);
 
   // Expose batch submission to parent (called by Submit button in toolbar)
   useEffect(() => {
     const handler = () => {
-      if (pendingBatch.length === 0 || !connectionRef.current) return;
+      if ((pendingBatch.length === 0 && pendingMoves.length === 0) || !connectionRef.current) return;
 
       connectionRef.current.send({
         type: "batch:submit",
@@ -184,21 +213,23 @@ export function IterateOverlay({
             intent: a.intent,
             severity: a.severity,
           })),
-          domChanges: [], // DOM changes are already tracked by the daemon
+          domChanges: pendingMovesToDomChanges(),
         },
       });
 
       setPendingBatch([]);
+      setPendingMoves([]);
     };
 
     window.addEventListener("iterate:submit-batch", handler);
     return () => window.removeEventListener("iterate:submit-batch", handler);
-  }, [pendingBatch, iteration]);
+  }, [pendingBatch, pendingMoves, iteration, pendingMovesToDomChanges]);
 
-  // Handle clearing all pending annotations
+  // Handle clearing all pending annotations and moves
   useEffect(() => {
     const handler = () => {
       setPendingBatch([]);
+      setPendingMoves([]);
       setSelectedElements([]);
       setTextSelection(null);
     };
@@ -206,23 +237,38 @@ export function IterateOverlay({
     return () => window.removeEventListener("iterate:clear-batch", handler);
   }, []);
 
-  // Handle copying annotations to clipboard
+  // Handle undoing the last move
   useEffect(() => {
     const handler = () => {
-      if (pendingBatch.length === 0) return;
-      const data = pendingBatch.map((a) => ({
-        iteration,
-        elements: a.elements,
-        textSelection: a.textSelection,
-        comment: a.comment,
-        intent: a.intent,
-        severity: a.severity,
+      setPendingMoves((prev) => {
+        if (prev.length === 0) return prev;
+        return prev.slice(0, -1);
+      });
+    };
+    window.addEventListener("iterate:undo-move", handler);
+    return () => window.removeEventListener("iterate:undo-move", handler);
+  }, []);
+
+  // Handle copying annotations to clipboard as a human-readable prompt
+  useEffect(() => {
+    const handler = () => {
+      if (pendingBatch.length === 0 && pendingMoves.length === 0) return;
+
+      const domChanges = pendingMoves.map((m) => ({
+        type: "move" as const,
+        selector: m.selector,
+        componentName: m.componentName,
+        sourceLocation: m.sourceLocation,
+        before: { rect: m.from },
+        after: { rect: m.to },
       }));
-      navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+
+      const text = formatBatchPrompt(pendingBatch, domChanges, iteration);
+      navigator.clipboard.writeText(text);
     };
     window.addEventListener("iterate:copy-batch", handler);
     return () => window.removeEventListener("iterate:copy-batch", handler);
-  }, [pendingBatch, iteration]);
+  }, [pendingBatch, pendingMoves, iteration]);
 
   return (
     <div
@@ -255,11 +301,13 @@ export function IterateOverlay({
         onTextSelect={handleTextSelect}
       />
 
-      {/* Drag handler for move mode */}
+      {/* Drag handler for move mode with live preview */}
       <DragHandler
         active={mode === "move"}
         iframeRef={iframeRef}
         onMove={handleMove}
+        pendingMoves={pendingMoves}
+        previewMode={previewMode}
       />
 
       {/* Selection panel (shows when elements are selected) */}

@@ -37,9 +37,13 @@ describe("FloatingPanel", () => {
         onVisibilityChange={onVisibilityChange}
       />
     );
-    const button = container.querySelector("button");
-    if (button) {
-      fireEvent.click(button);
+    // Find the logo/close toggle button (has title "Show iterate panel...")
+    const allButtons = container.querySelectorAll("button");
+    const toggleButton = Array.from(allButtons).find(
+      (b) => b.getAttribute("title")?.includes("iterate panel")
+    );
+    if (toggleButton) {
+      fireEvent.click(toggleButton);
       expect(onVisibilityChange).toHaveBeenCalledWith(true);
     }
   });
@@ -48,12 +52,16 @@ describe("FloatingPanel", () => {
     const { container } = render(
       <FloatingPanel {...defaultProps} batchCount={0} />
     );
-    // Look for the Submit-related content
+    // The submit button exists in DOM but its parent ToolGroup should be hidden
+    // (maxWidth: 0, opacity: 0, pointerEvents: none) when there are no pending changes
     const allButtons = container.querySelectorAll("button");
     const submitButton = Array.from(allButtons).find(
       (b) => b.getAttribute("title")?.includes("Submit") || b.textContent?.includes("Submit")
     );
-    expect(submitButton).toBeUndefined();
+    if (submitButton) {
+      const toolGroup = submitButton.closest("div[style]");
+      expect(toolGroup?.style.pointerEvents).toBe("none");
+    }
   });
 
   it("shows batch action buttons when batchCount > 0", () => {

@@ -2,24 +2,54 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { DaemonClient } from "./connection/daemon-client.js";
+import { formatBatchPrompt } from "@iterate/core";
 
 const DAEMON_PORT = parseInt(process.env.ITERATE_DAEMON_PORT ?? "4000", 10);
 
+/** Attempt to connect to the daemon with retries */
+async function connectWithRetry(
+  client: DaemonClient,
+  maxAttempts: number = 10,
+  baseDelay: number = 1000
+): Promise<void> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await client.connect();
+      return;
+    } catch {
+      if (attempt === maxAttempts) {
+        throw new Error(
+          `Failed to connect to iterate daemon on port ${DAEMON_PORT} after ${maxAttempts} attempts. Is 'iterate serve' running?`
+        );
+      }
+      const delay = Math.min(baseDelay * Math.pow(2, attempt - 1), 15000);
+      console.error(
+        `[iterate-mcp] Connection attempt ${attempt}/${maxAttempts} failed, retrying in ${delay}ms...`
+      );
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+}
+
 async function main() {
-  // Connect to the iterate daemon
+  // Connect to the iterate daemon (with retries)
   const client = new DaemonClient(DAEMON_PORT);
 
   try {
-    await client.connect();
+    await connectWithRetry(client);
   } catch (err) {
-    console.error(
-      `Failed to connect to iterate daemon on port ${DAEMON_PORT}. Is 'iterate serve' running?`
-    );
+    console.error(`[iterate-mcp] ${(err as Error).message}`);
     process.exit(1);
   }
 
-  // Wait for initial state
-  await client.waitForState();
+  // Wait for initial state (with timeout)
+  try {
+    await client.waitForState(15000);
+  } catch {
+    console.error(
+      "[iterate-mcp] Warning: Timed out waiting for initial state from daemon. Continuing anyway..."
+    );
+  }
 
   // Create MCP server
   const server = new McpServer({
@@ -244,18 +274,16 @@ async function main() {
       }
 
       // Include related DOM changes for this iteration
-      const state = client.getState();
-      if (state) {
-        const domChanges = state.domChanges.filter(
-          (dc) => dc.iteration === annotation.iteration
-        );
-        if (domChanges.length > 0) {
-          text += `## Related DOM Changes (${domChanges.length})\n\n`;
-          for (const dc of domChanges) {
-            const dcName = dc.componentName ? `<${dc.componentName}>` : dc.selector;
-            const dcSource = dc.sourceLocation ? ` (${dc.sourceLocation})` : "";
-            text += `- **${dc.type}** on ${dcName}${dcSource}: \`${dc.selector}\`\n`;
-          }
+      const domChanges = client
+        .getDomChanges()
+        .filter((dc) => dc.iteration === annotation.iteration);
+      if (domChanges.length > 0) {
+        text += `## Related DOM Changes (${domChanges.length})\n\n`;
+        for (const dc of domChanges) {
+          const dcName = dc.componentName ? `<${dc.componentName}>` : dc.selector;
+          const dcSource = dc.sourceLocation ? ` (${dc.sourceLocation})` : "";
+          text += `- **${dc.type}** on ${dcName}${dcSource}: \`${dc.selector}\`\n`;
+          text += `  Before: ${JSON.stringify(dc.before.rect)} → After: ${JSON.stringify(dc.after.rect)}\n`;
         }
       }
 
@@ -274,7 +302,7 @@ async function main() {
       annotationId: z.string().describe("Annotation ID to acknowledge"),
     },
     async ({ annotationId }) => {
-      const result = await client.callApi(
+      await client.callApi(
         "POST",
         `/api/annotations/${annotationId}/acknowledge`
       );
@@ -367,7 +395,7 @@ async function main() {
             `- **${name}**${source}${extraCount}: "${a.comment}"` +
             (a.intent ? ` [${a.intent}]` : "") +
             (a.severity ? ` (${a.severity})` : "") +
-            (a.textSelection ? ` 📝 "${a.textSelection.text.slice(0, 40)}…"` : "") +
+            (a.textSelection ? ` — text: "${a.textSelection.text.slice(0, 40)}…"` : "") +
             ` — ID: ${a.id}`
           );
         })
@@ -388,7 +416,7 @@ async function main() {
 
   server.tool(
     "iterate_get_pending_batch",
-    "Get all pending annotations and DOM changes from the latest submitted batch. This is the primary tool for reading user-submitted feedback after a batch:submitted notification. Returns annotations with full element context including React component names and source file paths.",
+    "Get all pending annotations and DOM changes from the latest submitted batch. This is the primary tool for reading user-submitted feedback after a batch:submitted notification. Returns annotations with full element context including React component names and source file paths, as well as DOM move/reorder changes with before/after positions.",
     {
       iteration: z
         .string()
@@ -396,15 +424,14 @@ async function main() {
         .describe("Filter by iteration name (optional, returns all if omitted)"),
     },
     async ({ iteration }) => {
-      const state = client.getState();
-      if (!state) {
+      if (!client.connected && !client.getState()) {
         return {
-          content: [{ type: "text", text: "No state available — daemon may not be connected." }],
+          content: [{ type: "text", text: "Not connected to daemon — waiting for reconnection." }],
         };
       }
 
-      let annotations = state.annotations.filter((a) => a.status === "pending");
-      let domChanges = state.domChanges;
+      let annotations = client.getAnnotations().filter((a) => a.status === "pending");
+      let domChanges = client.getDomChanges();
 
       if (iteration) {
         annotations = annotations.filter((a) => a.iteration === iteration);
@@ -524,12 +551,74 @@ async function main() {
     }
   );
 
+  // --- Connection status tool ---
+
+  server.tool(
+    "iterate_connection_status",
+    "Check the connection status to the iterate daemon. Useful for debugging when tools return stale data.",
+    {},
+    async () => {
+      const connected = client.connected;
+      const state = client.getState();
+      const annotations = client.getAnnotations();
+      const domChanges = client.getDomChanges();
+      const iterations = Object.keys(client.getIterations());
+
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `**Connected**: ${connected ? "yes" : "no (reconnecting...)"}\n` +
+              `**State loaded**: ${state ? "yes" : "no"}\n` +
+              `**Iterations**: ${iterations.length} (${iterations.join(", ") || "none"})\n` +
+              `**Annotations**: ${annotations.length} (${annotations.filter((a) => a.status === "pending").length} pending)\n` +
+              `**DOM Changes**: ${domChanges.length}`,
+          },
+        ],
+      };
+    }
+  );
+
+  // --- Prompt templates ---
+
+  server.prompt(
+    "iterate_process_feedback",
+    "Get all pending UI feedback (annotations and DOM changes) formatted as an actionable prompt. Use this after the user submits a batch of feedback from the iterate overlay.",
+    {
+      iteration: z
+        .string()
+        .optional()
+        .describe("Filter by iteration name (optional, returns all if omitted)"),
+    },
+    async ({ iteration }) => {
+      let annotations = client.getAnnotations().filter((a) => a.status === "pending");
+      let domChanges = client.getDomChanges();
+
+      if (iteration) {
+        annotations = annotations.filter((a) => a.iteration === iteration);
+        domChanges = domChanges.filter((dc) => dc.iteration === iteration);
+      }
+
+      const text = formatBatchPrompt(annotations, domChanges, iteration);
+
+      return {
+        messages: [
+          {
+            role: "user" as const,
+            content: { type: "text" as const, text },
+          },
+        ],
+      };
+    }
+  );
+
   // Start the MCP server over stdio
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
 
 main().catch((err) => {
-  console.error("iterate MCP server error:", err);
+  console.error("[iterate-mcp] Fatal error:", err);
   process.exit(1);
 });

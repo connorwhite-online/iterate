@@ -42,11 +42,12 @@ describe("SelectionPanel", () => {
     expect(container.innerHTML).not.toBe("");
   });
 
-  it("shows component names for selected elements", () => {
+  it("shows element names for selected elements", () => {
+    // SelectionPanel displays elementName, not componentName
     const { container } = render(
       <SelectionPanel
         {...defaultProps}
-        selectedElements={[mockPickedElement({ componentName: "HeroSection" })]}
+        selectedElements={[mockPickedElement({ elementName: "HeroSection" })]}
       />
     );
     expect(container.textContent).toContain("HeroSection");

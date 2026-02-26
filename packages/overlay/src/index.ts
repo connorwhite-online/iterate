@@ -8,6 +8,7 @@ export { MarqueeSelect } from "./inspector/MarqueeSelect.js";
 export { TextSelect } from "./inspector/TextSelect.js";
 export { SelectionPanel } from "./annotate/SelectionPanel.js";
 export { DragHandler } from "./manipulate/DragHandler.js";
+export type { PendingMove } from "./manipulate/DragHandler.js";
 export { DaemonConnection } from "./transport/connection.js";
 export { FloatingPanel } from "./panel/FloatingPanel.js";
 

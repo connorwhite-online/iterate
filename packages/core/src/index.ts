@@ -19,3 +19,7 @@ export type {
   ServerMessage,
   IterateState,
 } from "./protocol/messages.js";
+
+// Formatting
+export { formatBatchPrompt } from "./format.js";
+export type { FormatAnnotation, FormatDomChange } from "./format.js";

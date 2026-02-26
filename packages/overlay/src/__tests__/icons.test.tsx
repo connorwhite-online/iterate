@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
-import { CursorIcon, MoveIcon, SendIcon, CloseIcon, LogoIcon, TrashIcon, CopyIcon } from "../panel/icons.js";
+import { CursorIcon, MoveIcon, SendIcon, CloseIcon, LogoIcon, TrashIcon, CopyIcon, UndoIcon, PreviewIcon } from "../panel/icons.js";
 
 describe("icon components", () => {
   it("CursorIcon renders an SVG", () => {
@@ -49,5 +49,15 @@ describe("icon components", () => {
     const { container } = render(<CursorIcon color="red" />);
     const svg = container.querySelector("svg");
     expect(svg).not.toBeNull();
+  });
+
+  it("UndoIcon renders an SVG", () => {
+    const { container } = render(<UndoIcon />);
+    expect(container.querySelector("svg")).not.toBeNull();
+  });
+
+  it("PreviewIcon renders an SVG", () => {
+    const { container } = render(<PreviewIcon />);
+    expect(container.querySelector("svg")).not.toBeNull();
   });
 });
