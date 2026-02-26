@@ -8,6 +8,7 @@ import type {
   Rect,
   DomChange,
 } from "@iterate/core";
+import { formatBatchPrompt } from "@iterate/core";
 import { ElementPicker, type PickedElement } from "./inspector/ElementPicker.js";
 import { MarqueeSelect } from "./inspector/MarqueeSelect.js";
 import { TextSelect } from "./inspector/TextSelect.js";
@@ -248,29 +249,22 @@ export function IterateOverlay({
     return () => window.removeEventListener("iterate:undo-move", handler);
   }, []);
 
-  // Handle copying annotations to clipboard
+  // Handle copying annotations to clipboard as a human-readable prompt
   useEffect(() => {
     const handler = () => {
       if (pendingBatch.length === 0 && pendingMoves.length === 0) return;
-      const data = {
-        annotations: pendingBatch.map((a) => ({
-          iteration,
-          elements: a.elements,
-          textSelection: a.textSelection,
-          comment: a.comment,
-          intent: a.intent,
-          severity: a.severity,
-        })),
-        moves: pendingMoves.map((m) => ({
-          iteration,
-          selector: m.selector,
-          from: m.from,
-          to: m.to,
-          componentName: m.componentName,
-          sourceLocation: m.sourceLocation,
-        })),
-      };
-      navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+
+      const domChanges = pendingMoves.map((m) => ({
+        type: "move" as const,
+        selector: m.selector,
+        componentName: m.componentName,
+        sourceLocation: m.sourceLocation,
+        before: { rect: m.from },
+        after: { rect: m.to },
+      }));
+
+      const text = formatBatchPrompt(pendingBatch, domChanges, iteration);
+      navigator.clipboard.writeText(text);
     };
     window.addEventListener("iterate:copy-batch", handler);
     return () => window.removeEventListener("iterate:copy-batch", handler);

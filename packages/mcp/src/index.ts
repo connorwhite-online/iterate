@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { DaemonClient } from "./connection/daemon-client.js";
+import { formatBatchPrompt } from "@iterate/core";
 
 const DAEMON_PORT = parseInt(process.env.ITERATE_DAEMON_PORT ?? "4000", 10);
 
@@ -573,6 +574,39 @@ async function main() {
               `**Iterations**: ${iterations.length} (${iterations.join(", ") || "none"})\n` +
               `**Annotations**: ${annotations.length} (${annotations.filter((a) => a.status === "pending").length} pending)\n` +
               `**DOM Changes**: ${domChanges.length}`,
+          },
+        ],
+      };
+    }
+  );
+
+  // --- Prompt templates ---
+
+  server.prompt(
+    "iterate_process_feedback",
+    "Get all pending UI feedback (annotations and DOM changes) formatted as an actionable prompt. Use this after the user submits a batch of feedback from the iterate overlay.",
+    {
+      iteration: z
+        .string()
+        .optional()
+        .describe("Filter by iteration name (optional, returns all if omitted)"),
+    },
+    async ({ iteration }) => {
+      let annotations = client.getAnnotations().filter((a) => a.status === "pending");
+      let domChanges = client.getDomChanges();
+
+      if (iteration) {
+        annotations = annotations.filter((a) => a.iteration === iteration);
+        domChanges = domChanges.filter((dc) => dc.iteration === iteration);
+      }
+
+      const text = formatBatchPrompt(annotations, domChanges, iteration);
+
+      return {
+        messages: [
+          {
+            role: "user" as const,
+            content: { type: "text" as const, text },
           },
         ],
       };
