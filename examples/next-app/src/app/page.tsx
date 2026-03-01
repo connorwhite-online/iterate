@@ -121,7 +121,7 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 48,
   },
   button: {
-    background: "#2563eb",
+    background: "#dc2626",
     color: "#fff",
     border: "none",
     borderRadius: 8,
