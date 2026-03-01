@@ -35,6 +35,17 @@ export class WorktreeManager {
     const branch = `iterate/${name}`;
     const worktreePath = join(this.cwd, ".iterate", "worktrees", name);
 
+    // Clean up stale branch/worktree from a previous run
+    try {
+      await this.git.raw(["rev-parse", "--verify", branch]);
+      // Branch exists — remove stale worktree first, then delete branch
+      try { await this.git.raw(["worktree", "remove", "--force", worktreePath]); } catch { /* may not exist */ }
+      await this.git.raw(["worktree", "prune"]);
+      await this.git.raw(["branch", "-D", branch]);
+    } catch {
+      // Branch doesn't exist — good, nothing to clean up
+    }
+
     await this.git.raw([
       "worktree",
       "add",
@@ -102,6 +113,20 @@ export class WorktreeManager {
     strategy: "merge" | "squash" | "rebase" = "merge"
   ): Promise<void> {
     const winnerBranch = `iterate/${winnerName}`;
+
+    // Auto-commit any uncommitted changes in the winner's worktree
+    const winnerPath = join(this.cwd, ".iterate", "worktrees", winnerName);
+    const winnerGit = simpleGit(winnerPath);
+    const winnerStatus = await winnerGit.status();
+    if (
+      winnerStatus.modified.length > 0 ||
+      winnerStatus.not_added.length > 0 ||
+      winnerStatus.created.length > 0 ||
+      winnerStatus.deleted.length > 0
+    ) {
+      await winnerGit.add(".");
+      await winnerGit.commit(`iterate: ${winnerName} changes`);
+    }
 
     try {
       if (strategy === "squash") {

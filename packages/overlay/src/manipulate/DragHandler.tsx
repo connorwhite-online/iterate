@@ -4,6 +4,7 @@ import { generateSelector, getRelevantStyles, getComponentInfo } from "../inspec
 
 /** A completed move with rollback info for live preview */
 export interface PendingMove {
+  iteration?: string;
   selector: string;
   from: Rect;
   to: Rect;

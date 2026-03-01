@@ -46,6 +46,7 @@ export class ProcessManager {
       env: {
         ...process.env,
         PORT: String(port),
+        ITERATE_ITERATION_NAME: name,
       },
       stdout: "pipe",
       stderr: "pipe",

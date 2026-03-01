@@ -9,6 +9,7 @@ export interface FormatAnnotation {
   textSelection?: TextSelection;
   intent?: AnnotationIntent;
   severity?: AnnotationSeverity;
+  iteration?: string;
 }
 
 /**
@@ -38,8 +39,13 @@ export function formatBatchPrompt(
 
   let text = `# UI Feedback from iterate\n\n`;
 
-  if (iteration) {
-    text += `**Iteration**: ${iteration}\n\n`;
+  // Show a single iteration header if all annotations share the same one,
+  // otherwise show per-annotation iteration labels.
+  const uniqueIterations = new Set(annotations.map((a) => a.iteration ?? iteration).filter(Boolean));
+  const singleIteration = uniqueIterations.size === 1 ? [...uniqueIterations][0] : null;
+
+  if (singleIteration) {
+    text += `**Iteration**: ${singleIteration}\n\n`;
   }
 
   text += `I've reviewed the UI and have the following feedback:\n\n`;
@@ -47,6 +53,10 @@ export function formatBatchPrompt(
   for (let i = 0; i < annotations.length; i++) {
     const a = annotations[i];
     text += `## ${i + 1}. "${a.comment}"\n`;
+
+    if (!singleIteration && a.iteration) {
+      text += `- **Iteration**: ${a.iteration}\n`;
+    }
 
     const tags: string[] = [];
     if (a.intent) tags.push(`Intent: ${a.intent}`);

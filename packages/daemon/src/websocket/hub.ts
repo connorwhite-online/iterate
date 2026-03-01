@@ -163,6 +163,12 @@ export class WebSocketHub {
         break;
       }
 
+      case "tool:set-mode": {
+        // Relay tool mode changes to all clients (for cross-iframe sync)
+        this.broadcast({ type: "tool:mode-changed", payload: msg.payload });
+        break;
+      }
+
       case "dom:select":
       case "dom:resize":
       case "iteration:switch":

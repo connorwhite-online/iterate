@@ -11,7 +11,12 @@ import {
   CopyIcon,
   UndoIcon,
   PreviewIcon,
+  ForkIcon,
+  PickIcon,
+  SpinnerIcon,
 } from "./icons.js";
+
+export const ORIGINAL_TAB = "__original__";
 
 export interface FloatingPanelProps {
   mode: ToolMode;
@@ -40,12 +45,17 @@ export interface FloatingPanelProps {
   activeIteration?: string;
   /** Called when user switches iteration */
   onIterationChange?: (name: string) => void;
+  /** Called when user wants to create iterations (fork) */
+  onFork?: () => void;
+  /** Called when user wants to pick the active iteration */
+  onPick?: (name: string) => void;
+  /** Whether currently viewing an iteration (not Original) */
+  isViewingIteration?: boolean;
 }
 
 type Corner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 
 const PANEL_MARGIN = 16;
-const HOTKEY = "Alt+Shift+I";
 const ICON_SIZE = 24;
 
 // Spring-like cubic bezier
@@ -81,16 +91,33 @@ export function FloatingPanel({
   iterations,
   activeIteration,
   onIterationChange,
+  onFork,
+  onPick,
+  isViewingIteration = false,
 }: FloatingPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [corner, setCorner] = useState<Corner>("bottom-right");
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
+  const [forkLoading, setForkLoading] = useState(false);
 
-  const iterationNames = iterations ? Object.keys(iterations) : [];
-  const hasMultipleIterations = iterationNames.length > 1;
+  const iterationNames = iterations
+    ? Object.keys(iterations).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+    : [];
+  const hasIterations = iterationNames.length > 0;
+  const isCreating = hasIterations && iterationNames.some(
+    (n) => {
+      const s = iterations![n]?.status;
+      return s === "creating" || s === "installing" || s === "starting";
+    }
+  );
   const totalPending = batchCount + moveCount;
+
+  // Clear local fork loading state once real iterations appear
+  useEffect(() => {
+    if (hasIterations) setForkLoading(false);
+  }, [hasIterations]);
 
   // Hotkey: Alt+Shift+I to toggle
   useEffect(() => {
@@ -187,72 +214,97 @@ export function FloatingPanel({
         transition: `${positionTransition}`,
       }}
     >
-      {/* Iteration selector row — only when multiple iterations exist */}
-      <ToolGroup visible={visible && hasMultipleIterations}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 2,
-            padding: "2px 4px",
-            width: "100%",
-            overflowX: "auto",
-          }}
-        >
-          {iterationNames.map((name) => {
-            const info = iterations![name];
-            const isActive = name === activeIteration;
-            return (
-              <button
-                key={name}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onIterationChange?.(name);
-                }}
-                title={info?.commandPrompt || name}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 4,
-                  padding: "3px 8px",
-                  borderRadius: 6,
-                  border: isActive ? "1px solid #2563eb" : "1px solid transparent",
-                  background: isActive ? "#eff6ff" : "transparent",
-                  color: isActive ? "#1d4ed8" : "#666",
-                  cursor: "pointer",
-                  fontSize: 11,
-                  fontWeight: isActive ? 600 : 400,
-                  fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-                  whiteSpace: "nowrap",
-                  flexShrink: 0,
-                  transition: "all 0.15s ease",
-                }}
-              >
-                <span
-                  style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: "50%",
-                    background: STATUS_COLORS[info?.status ?? "stopped"],
-                    flexShrink: 0,
+      {/* Iteration selector row — only rendered when iterations exist AND panel is open */}
+      {hasIterations && visible && (
+        <div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 2,
+              padding: "2px 4px",
+              overflowX: "auto",
+            }}
+          >
+            {/* Original tab — switch back to the base page */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onIterationChange?.(ORIGINAL_TAB);
+              }}
+              title="View original page"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                padding: "3px 8px",
+                borderRadius: 6,
+                border: "1px solid transparent",
+                background: activeIteration === ORIGINAL_TAB ? "#e8e8e8" : "transparent",
+                color: activeIteration === ORIGINAL_TAB ? "#141414" : "#666",
+                cursor: "pointer",
+                fontSize: 11,
+                fontWeight: activeIteration === ORIGINAL_TAB ? 600 : 400,
+                fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                whiteSpace: "nowrap",
+                flexShrink: 0,
+                transition: "all 0.15s ease",
+              }}
+            >
+              Original
+            </button>
+            {iterationNames.map((name) => {
+              const info = iterations![name];
+              const isActive = name === activeIteration;
+              return (
+                <button
+                  key={name}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onIterationChange?.(name);
                   }}
-                />
-                {name}
-              </button>
-            );
-          })}
+                  title={info?.commandPrompt || name}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                    padding: "3px 8px",
+                    borderRadius: 6,
+                    border: "1px solid transparent",
+                    background: isActive ? "#e8e8e8" : "transparent",
+                    color: isActive ? "#141414" : "#666",
+                    cursor: "pointer",
+                    fontSize: 11,
+                    fontWeight: isActive ? 600 : 400,
+                    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                    whiteSpace: "nowrap",
+                    flexShrink: 0,
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      background: STATUS_COLORS[info?.status ?? "stopped"],
+                      flexShrink: 0,
+                    }}
+                  />
+                  {name}
+                </button>
+              );
+            })}
+          </div>
+          {/* Separator between iteration selector and tools */}
+          <div
+            style={{
+              height: 1,
+              background: "#e0e0e0",
+              margin: "2px 4px",
+            }}
+          />
         </div>
-      </ToolGroup>
-
-      {/* Separator between iteration selector and tools */}
-      {visible && hasMultipleIterations && (
-        <div
-          style={{
-            height: 1,
-            background: "#e0e0e0",
-            margin: "2px 4px",
-          }}
-        />
       )}
 
       {/* Main toolbar row */}
@@ -263,13 +315,48 @@ export function FloatingPanel({
             icon={<CursorIcon size={ICON_SIZE} />}
             label="Select"
             active={mode === "select"}
-            onClick={() => onModeChange("select")}
+            onClick={() => onModeChange(mode === "select" ? "browse" : "select")}
           />
           <IconButton
             icon={<MoveIcon size={ICON_SIZE} />}
             label="Move"
             active={mode === "move"}
-            onClick={() => onModeChange("move")}
+            onClick={() => onModeChange(mode === "move" ? "browse" : "move")}
+          />
+        </ToolGroup>
+
+        {/* Fork / Iterate button — hidden once iterations exist or loading */}
+        <ToolGroup visible={visible && !hasIterations && !forkLoading}>
+          <Divider />
+          <IconButton
+            icon={<ForkIcon size={ICON_SIZE} />}
+            label="Create iterations"
+            onClick={() => {
+              setForkLoading(true);
+              onFork?.();
+            }}
+          />
+        </ToolGroup>
+
+        {/* Spinner — shown while fork is loading or iterations are being created */}
+        <ToolGroup visible={visible && (forkLoading || isCreating)}>
+          <Divider />
+          <IconButton
+            icon={<SpinnerIcon size={ICON_SIZE} />}
+            label="Creating iterations…"
+            onClick={() => {}}
+          />
+        </ToolGroup>
+
+        {/* Pick iteration button — merge the active iteration */}
+        <ToolGroup visible={visible && hasIterations && isViewingIteration}>
+          <IconButton
+            icon={<PickIcon size={ICON_SIZE} />}
+            label={`Pick "${activeIteration}"`}
+            onClick={() => {
+              if (!activeIteration || activeIteration === ORIGINAL_TAB) return;
+              onPick?.(activeIteration);
+            }}
           />
         </ToolGroup>
 
@@ -316,7 +403,7 @@ export function FloatingPanel({
             e.stopPropagation();
             onVisibilityChange(!visible);
           }}
-          title={visible ? `Hide panel (${HOTKEY})` : `Show iterate panel (${HOTKEY})`}
+          title={undefined}
           style={{
             position: "relative",
             display: "flex",
@@ -419,21 +506,27 @@ function IconButton({
   icon,
   label,
   active,
+  disabled,
   onClick,
 }: {
   icon: React.ReactNode;
   label: string;
   active?: boolean;
+  disabled?: boolean;
   onClick: () => void;
 }) {
+  const [hovered, setHovered] = useState(false);
+
   return (
     <button
       onClick={(e) => {
         e.stopPropagation();
-        onClick();
+        if (!disabled) onClick();
       }}
-      title={label}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
+        position: "relative",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -442,12 +535,37 @@ function IconButton({
         border: "none",
         background: active ? "#e8e8e8" : "transparent",
         color: active ? "#141414" : "#666",
-        cursor: "pointer",
-        transition: "background 0.1s, color 0.1s",
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.35 : 1,
+        transition: "background 0.1s, color 0.1s, opacity 0.15s",
         flexShrink: 0,
       }}
     >
       {icon}
+      {hovered && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: "calc(100% + 6px)",
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "#fff",
+            color: "#333",
+            border: "1px solid #e0e0e0",
+            borderRadius: 6,
+            padding: "4px 8px",
+            fontSize: 11,
+            fontWeight: 500,
+            fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            whiteSpace: "nowrap",
+            pointerEvents: "none",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+            zIndex: 10003,
+          }}
+        >
+          {label}
+        </div>
+      )}
     </button>
   );
 }

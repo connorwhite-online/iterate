@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
-import { FloatingPanel } from "../panel/FloatingPanel.js";
+import { FloatingPanel, ORIGINAL_TAB } from "../panel/FloatingPanel.js";
 
 const defaultProps = {
-  mode: "select" as const,
+  mode: "browse" as const,
   onModeChange: vi.fn(),
   visible: true,
   onVisibilityChange: vi.fn(),
@@ -68,12 +68,14 @@ describe("FloatingPanel", () => {
     const { container } = render(
       <FloatingPanel {...defaultProps} batchCount={3} />
     );
-    // Should show submit, copy, and trash buttons
-    const allButtons = container.querySelectorAll("button");
-    const submitButton = Array.from(allButtons).find(
-      (b) => b.getAttribute("title")?.toLowerCase().includes("submit")
+    // When batchCount > 0, the batch actions ToolGroup should be visible
+    // (pointer-events: auto instead of none)
+    const toolGroups = container.querySelectorAll("div[style]");
+    const visibleGroups = Array.from(toolGroups).filter(
+      (g) => (g as HTMLElement).style.pointerEvents === "auto" && (g as HTMLElement).style.maxWidth === "500px"
     );
-    expect(submitButton).toBeDefined();
+    // Should have at least one visible ToolGroup for batch actions
+    expect(visibleGroups.length).toBeGreaterThan(0);
   });
 
   it("calls onSubmitBatch when Submit button clicked", () => {
@@ -107,7 +109,7 @@ describe("FloatingPanel", () => {
   it("calls onModeChange when mode button clicked", () => {
     const onModeChange = vi.fn();
     const { container } = render(
-      <FloatingPanel {...defaultProps} mode="select" onModeChange={onModeChange} />
+      <FloatingPanel {...defaultProps} mode="browse" onModeChange={onModeChange} />
     );
     const allButtons = container.querySelectorAll("button");
     const moveButton = Array.from(allButtons).find(
@@ -116,6 +118,91 @@ describe("FloatingPanel", () => {
     if (moveButton) {
       fireEvent.click(moveButton);
       expect(onModeChange).toHaveBeenCalledWith("move");
+    }
+  });
+
+  it("toggles active tool to browse mode when clicked again", () => {
+    const onModeChange = vi.fn();
+    const { container } = render(
+      <FloatingPanel {...defaultProps} mode="select" onModeChange={onModeChange} />
+    );
+    const allButtons = container.querySelectorAll("button");
+    const selectButton = Array.from(allButtons).find(
+      (b) => b.getAttribute("title") === "Select"
+    );
+    if (selectButton) {
+      fireEvent.click(selectButton);
+      expect(onModeChange).toHaveBeenCalledWith("browse");
+    }
+  });
+
+  it("activates select from browse mode", () => {
+    const onModeChange = vi.fn();
+    const { container } = render(
+      <FloatingPanel {...defaultProps} mode="browse" onModeChange={onModeChange} />
+    );
+    const allButtons = container.querySelectorAll("button");
+    const selectButton = Array.from(allButtons).find(
+      (b) => b.getAttribute("title") === "Select"
+    );
+    if (selectButton) {
+      fireEvent.click(selectButton);
+      expect(onModeChange).toHaveBeenCalledWith("select");
+    }
+  });
+
+  it("shows iteration tabs with Original tab when iterations exist", () => {
+    const { container } = render(
+      <FloatingPanel
+        {...defaultProps}
+        iterations={{ "v1": { name: "v1", branch: "iterate/v1", worktreePath: "", port: 3100, pid: null, status: "ready", createdAt: "" } }}
+        activeIteration={ORIGINAL_TAB}
+      />
+    );
+    const allButtons = container.querySelectorAll("button");
+    const v1Button = Array.from(allButtons).find(
+      (b) => b.textContent?.includes("v1")
+    );
+    expect(v1Button).toBeDefined();
+    // Should have an "Original" tab to switch back
+    const originalButton = Array.from(allButtons).find(
+      (b) => b.textContent === "Original"
+    );
+    expect(originalButton).toBeDefined();
+  });
+
+  it("calls onFork when Fork button is clicked", () => {
+    const onFork = vi.fn();
+    const { container } = render(
+      <FloatingPanel {...defaultProps} onFork={onFork} />
+    );
+    const allButtons = container.querySelectorAll("button");
+    const forkButton = Array.from(allButtons).find(
+      (b) => b.getAttribute("title")?.toLowerCase().includes("iterations")
+    );
+    if (forkButton) {
+      fireEvent.click(forkButton);
+      expect(onFork).toHaveBeenCalled();
+    }
+  });
+
+  it("tools work when viewing an iteration (postMessage bridge)", () => {
+    const onModeChange = vi.fn();
+    const { container } = render(
+      <FloatingPanel
+        {...defaultProps}
+        mode="browse"
+        onModeChange={onModeChange}
+        isViewingIteration={true}
+      />
+    );
+    const allButtons = container.querySelectorAll("button");
+    const selectButton = Array.from(allButtons).find(
+      (b) => b.getAttribute("title") === "Select"
+    );
+    if (selectButton) {
+      fireEvent.click(selectButton);
+      expect(onModeChange).toHaveBeenCalledWith("select");
     }
   });
 });

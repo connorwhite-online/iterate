@@ -118,6 +118,14 @@ export function withIterate(
           source: "/api/dom-changes",
           destination: `http://127.0.0.1:${daemonPort}/api/dom-changes`,
         },
+        {
+          source: "/api/command",
+          destination: `http://127.0.0.1:${daemonPort}/api/command`,
+        },
+        {
+          source: "/api/command-context/:path*",
+          destination: `http://127.0.0.1:${daemonPort}/api/command-context/:path*`,
+        },
       ];
 
       // Handle both array and object rewrite formats
@@ -175,10 +183,13 @@ function createIterateInjector(
   _overlayPath: string | undefined,
   daemonPort: number
 ): string | null {
-  // Use a data URI as a virtual module — webpack supports this
+  // Use a data URI as a virtual module — webpack supports this.
+  // ITERATE_ITERATION_NAME is set by the daemon's process manager when starting
+  // iteration dev servers — this lets the overlay know which iteration it's in.
+  const iterationName = process.env.ITERATE_ITERATION_NAME ?? "__original__";
   const code = `
     if (typeof window !== 'undefined') {
-      window.__iterate_shell__ = { activeTool: 'select', activeIteration: 'default', daemonPort: ${daemonPort} };
+      window.__iterate_shell__ = { activeTool: 'browse', activeIteration: ${JSON.stringify(iterationName)}, daemonPort: ${daemonPort} };
       var s = document.createElement('script');
       s.src = '/__iterate__/overlay.js';
       s.defer = true;

@@ -186,10 +186,13 @@ export function iterate(options: IteratePluginOptions = {}): Plugin[] {
     // Inject the overlay script into HTML
     transformIndexHtml(html) {
       // Inject right before </body>, includes tool state bootstrap
+      // ITERATE_ITERATION_NAME is set by the daemon's process manager when starting
+      // iteration dev servers — this lets the overlay know which iteration it's in.
+      const iterationName = JSON.stringify(process.env.ITERATE_ITERATION_NAME ?? "__original__");
       return html.replace(
         "</body>",
         `<script>
-  window.__iterate_shell__ = { activeTool: 'select', activeIteration: 'default' };
+  window.__iterate_shell__ = { activeTool: 'select', activeIteration: ${iterationName}, daemonPort: ${daemonPort} };
 </script>
 <script src="/__iterate__/overlay.js" defer></script>
 </body>`

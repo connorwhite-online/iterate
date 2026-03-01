@@ -99,6 +99,12 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
       const [cmd, ...args] = installCmd.split(" ");
       await execa(cmd!, args, { cwd: worktreePath });
 
+      // Run optional build command (e.g., for monorepo workspace deps)
+      if (config.buildCommand) {
+        const [buildCmd, ...buildArgs] = config.buildCommand.split(" ");
+        await execa(buildCmd!, buildArgs, { cwd: worktreePath });
+      }
+
       // Start dev server
       info.status = "starting";
       store.setIteration(name, info);
@@ -247,16 +253,12 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   app.post("/api/command", async (request, reply) => {
     const { command, prompt, count = 3 } = request.body as {
       command: string;
-      prompt: string;
+      prompt?: string;
       count?: number;
     };
 
     if (command !== "iterate") {
       return reply.status(400).send({ message: `Unknown command: ${command}` });
-    }
-
-    if (!prompt?.trim()) {
-      return reply.status(400).send({ message: "Prompt is required" });
     }
 
     const commandId = crypto.randomUUID();
@@ -265,7 +267,10 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
 
     // Create N iterations with the command context
     for (let i = 1; i <= clampedCount; i++) {
-      const name = `v${i}-${prompt.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 20)}`;
+      const suffix = prompt?.trim()
+        ? `-${prompt.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 20)}`
+        : "";
+      const name = `v${i}${suffix}`;
 
       // Skip if already exists
       if (store.getIteration(name)) continue;
@@ -282,11 +287,13 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
           pid: null,
           status: "creating",
           createdAt: new Date().toISOString(),
-          commandPrompt: prompt.trim(),
+          commandPrompt: prompt?.trim() ?? "",
           commandId,
         };
         store.setIteration(name, info);
-        wsHub.broadcast({ type: "iteration:status", payload: { name, status: "creating" } });
+        // Broadcast as iteration:created so overlay tracks all iterations immediately
+        // (enables correct auto-select ordering before async pipelines complete)
+        wsHub.broadcast({ type: "iteration:created", payload: info });
 
         // Create worktree (async — don't await all sequentially for speed)
         iterationNames.push(name);
@@ -306,6 +313,12 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
             const [cmd, ...args] = installCmd.split(" ");
             await execa(cmd!, args, { cwd: worktreePath });
 
+            // Run optional build command (e.g., for monorepo workspace deps)
+            if (config.buildCommand) {
+              const [buildCmd, ...buildArgs] = config.buildCommand.split(" ");
+              await execa(buildCmd!, buildArgs, { cwd: worktreePath });
+            }
+
             info.status = "starting";
             store.setIteration(name, info);
             wsHub.broadcast({ type: "iteration:status", payload: { name, status: "starting" } });
@@ -320,24 +333,25 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
             store.setIteration(name, info);
             wsHub.broadcast({ type: "iteration:created", payload: info });
           } catch (err) {
+            console.error(`[iterate] Failed to create iteration "${name}":`, (err as Error).message);
             info.status = "error";
             store.setIteration(name, info);
             wsHub.broadcast({ type: "iteration:status", payload: { name, status: "error" } });
           }
         })();
-      } catch {
-        // Skip this iteration
+      } catch (err) {
+        console.error(`[iterate] Error setting up iteration:`, (err as Error).message);
       }
     }
 
     // Broadcast command started
     wsHub.broadcast({
       type: "command:started",
-      payload: { commandId, prompt: prompt.trim(), iterations: iterationNames },
+      payload: { commandId, prompt: prompt?.trim() ?? "", iterations: iterationNames },
     });
 
     // Store command context for MCP retrieval
-    store.setCommandContext(commandId, prompt.trim(), iterationNames);
+    store.setCommandContext(commandId, prompt?.trim() ?? "", iterationNames);
 
     return { ok: true, commandId, iterations: iterationNames };
   });
@@ -367,7 +381,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   });
 
   // Proxy routes (registered last — wildcard catch-all)
-  await registerProxyRoutes(app, store);
+  await registerProxyRoutes(app, store, port);
 
   // Root route: control UI shell
   app.get("/", async (_request, reply) => {

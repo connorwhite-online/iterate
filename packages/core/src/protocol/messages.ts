@@ -18,7 +18,8 @@ export type ClientMessage =
   | { type: "dom:reorder"; payload: { iteration: string; selector: string; newIndex: number } }
   | { type: "dom:resize"; payload: { iteration: string; selector: string; from: Rect; to: Rect } }
   | { type: "iteration:switch"; payload: { iteration: string } }
-  | { type: "iteration:compare"; payload: { iterations: [string, string] } };
+  | { type: "iteration:compare"; payload: { iterations: [string, string] } }
+  | { type: "tool:set-mode"; payload: { mode: string } };
 
 // --- Server → Client messages (daemon → browser overlay) ---
 
@@ -33,6 +34,7 @@ export type ServerMessage =
   | { type: "batch:submitted"; payload: { batchId: string; annotationCount: number; domChangeCount: number } }
   | { type: "dom:changed"; payload: DomChange }
   | { type: "command:started"; payload: { commandId: string; prompt: string; iterations: string[] } }
+  | { type: "tool:mode-changed"; payload: { mode: string } }
   | { type: "error"; payload: { message: string } };
 
 /** Full state synced on WebSocket connection */

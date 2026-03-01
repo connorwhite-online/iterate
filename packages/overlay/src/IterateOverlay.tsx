@@ -16,7 +16,7 @@ import { SelectionPanel } from "./annotate/SelectionPanel.js";
 import { DragHandler, type PendingMove } from "./manipulate/DragHandler.js";
 import { DaemonConnection } from "./transport/connection.js";
 
-export type ToolMode = "select" | "move";
+export type ToolMode = "select" | "move" | "browse";
 
 export interface IterateOverlayProps {
   /** Which tool mode is active */
@@ -39,6 +39,7 @@ export interface IterateOverlayProps {
 
 /** Annotation waiting to be submitted (local-only until batch submit) */
 interface PendingAnnotation {
+  iteration: string;
   elements: SelectedElement[];
   textSelection?: TextSelection;
   comment: string;
@@ -136,6 +137,7 @@ export function IterateOverlay({
       if (selectedElements.length === 0 && !textSelection) return;
 
       const annotation: PendingAnnotation = {
+        iteration,
         elements: selectedElements.map((el) => ({
           selector: el.selector,
           elementName: el.elementName,
@@ -158,7 +160,7 @@ export function IterateOverlay({
       setSelectedElements([]);
       setTextSelection(null);
     },
-    [selectedElements, textSelection]
+    [selectedElements, textSelection, iteration]
   );
 
   // Clear selection
@@ -167,19 +169,19 @@ export function IterateOverlay({
     setTextSelection(null);
   }, []);
 
-  // Handle drag move — add to pending moves list
+  // Handle drag move — add to pending moves list with current iteration
   const handleMove = useCallback(
     (move: PendingMove) => {
-      setPendingMoves((prev) => [...prev, move]);
+      setPendingMoves((prev) => [...prev, { ...move, iteration }]);
     },
-    []
+    [iteration]
   );
 
   // Convert pending moves to DomChange format for the wire protocol
   const pendingMovesToDomChanges = useCallback((): DomChange[] => {
     return pendingMoves.map((move, idx) => ({
       id: `pending-move-${idx}-${Date.now()}`,
-      iteration,
+      iteration: move.iteration ?? iteration,
       selector: move.selector,
       type: "move" as const,
       componentName: move.componentName,
@@ -206,7 +208,7 @@ export function IterateOverlay({
         payload: {
           iteration,
           annotations: pendingBatch.map((a) => ({
-            iteration,
+            iteration: a.iteration,
             elements: a.elements,
             textSelection: a.textSelection,
             comment: a.comment,

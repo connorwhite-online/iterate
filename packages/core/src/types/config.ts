@@ -12,6 +12,8 @@ export interface IterateConfig {
   maxIterations: number;
   /** Auto-stop idle servers after this many seconds (0 = disabled) */
   idleTimeout: number;
+  /** Optional build command to run after install (e.g., "pnpm build" for monorepos with workspace deps) */
+  buildCommand?: string;
 }
 
 export const DEFAULT_CONFIG: IterateConfig = {

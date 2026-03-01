@@ -7,6 +7,7 @@ import type { IterationInfo } from "@iterate/core";
 
 type MessageHandler = (msg: ServerMessage) => void;
 type IterationsChangeHandler = (iterations: Record<string, IterationInfo>) => void;
+type ToolModeHandler = (mode: string) => void;
 
 /**
  * WebSocket connection to the iterate daemon.
@@ -16,6 +17,7 @@ export class DaemonConnection {
   private ws: WebSocket | null = null;
   private handlers: Set<MessageHandler> = new Set();
   private iterationsHandlers: Set<IterationsChangeHandler> = new Set();
+  private toolModeHandlers: Set<ToolModeHandler> = new Set();
   private url: string;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private _iterations: Record<string, IterationInfo> = {};
@@ -31,6 +33,7 @@ export class DaemonConnection {
       try {
         const msg: ServerMessage = JSON.parse(event.data);
         this.trackIterations(msg);
+        this.trackToolMode(msg);
         for (const handler of this.handlers) {
           handler(msg);
         }
@@ -79,6 +82,26 @@ export class DaemonConnection {
 
   get connected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN;
+  }
+
+  /** Send a tool mode change to the daemon for relay to all clients */
+  sendToolMode(mode: string): void {
+    this.send({ type: "tool:set-mode", payload: { mode } });
+  }
+
+  /** Subscribe to tool mode changes relayed from other clients */
+  onToolModeChange(handler: ToolModeHandler): () => void {
+    this.toolModeHandlers.add(handler);
+    return () => this.toolModeHandlers.delete(handler);
+  }
+
+  /** Dispatch tool mode changes from server messages */
+  private trackToolMode(msg: ServerMessage): void {
+    if (msg.type === "tool:mode-changed") {
+      for (const handler of this.toolModeHandlers) {
+        handler(msg.payload.mode);
+      }
+    }
   }
 
   /** Update internal iterations state from server messages */

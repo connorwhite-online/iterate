@@ -80,11 +80,65 @@ export function PreviewIcon({ size = 24, color = "currentColor" }: IconProps) {
   );
 }
 
+/** Git fork — Create iterations */
+export function ForkIcon({ size = 24, color = "currentColor" }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M6.5 8C7.88071 8 9 6.88071 9 5.5C9 4.11929 7.88071 3 6.5 3C5.11929 3 4 4.11929 4 5.5C4 6.88071 5.11929 8 6.5 8ZM6.5 8V11C6.5 11.5523 6.94772 12 7.5 12H11C11.5523 12 12 12.4477 12 13M17.5 8C18.8807 8 20 6.88071 20 5.5C20 4.11929 18.8807 3 17.5 3C16.1193 3 15 4.11929 15 5.5C15 6.88071 16.1193 8 17.5 8ZM17.5 8V11C17.5 11.5523 17.0523 12 16.5 12H13C12.4477 12 12 12.4477 12 13M12 16C10.6193 16 9.5 17.1193 9.5 18.5C9.5 19.8807 10.6193 21 12 21C13.3807 21 14.5 19.8807 14.5 18.5C14.5 17.1193 13.3807 16 12 16ZM12 16V13"
+        strokeWidth={2}
+        stroke={color}
+      />
+    </svg>
+  );
+}
+
+/** Merge icon — Pick / accept iteration */
+export function PickIcon({ size = 24, color = "currentColor" }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <path
+        d="M6.5 8C7.88071 8 9 6.88071 9 5.5C9 4.11929 7.88071 3 6.5 3C5.11929 3 4 4.11929 4 5.5C4 6.88071 5.11929 8 6.5 8ZM6.5 8V16M6.5 16C5.11929 16 4 17.1193 4 18.5C4 19.8807 5.11929 21 6.5 21C7.88071 21 9 19.8807 9 18.5C9 17.1193 7.88071 16 6.5 16ZM17.5 16C16.1193 16 15 17.1193 15 18.5C15 19.8807 16.1193 21 17.5 21C18.8807 21 20 19.8807 20 18.5C20 17.1193 18.8807 16 17.5 16ZM17.5 16V6.5C17.5 5.94772 17.0523 5.5 16.5 5.5H12M12 5.5L14.5 3M12 5.5L14.5 8" 
+        stroke={color} 
+        strokeWidth="2" 
+        strokeLinecap="round" 
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 /** Overlapping squares — Copy annotations to clipboard */
 export function CopyIcon({ size = 24, color = "currentColor" }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <path fillRule="evenodd" clipRule="evenodd" d="M22 4.25C22 3.00736 20.9926 2 19.75 2H10.25C9.00736 2 8 3.00736 8 4.25V8H4.25C3.00736 8 2 9.00736 2 10.25V19.75C2 20.9926 3.00736 22 4.25 22H13.75C14.9926 22 16 20.9926 16 19.75V16H19.75C20.9926 16 22 14.9926 22 13.75V4.25ZM16 14H19.75C19.8881 14 20 13.8881 20 13.75V4.25C20 4.11193 19.8881 4 19.75 4H10.25C10.1119 4 10 4.11193 10 4.25V8H13.75C14.9926 8 16 9.00736 16 10.25V14Z" fill={color} />
+    </svg>
+  );
+}
+
+/** Spinning loader — circular arc with CSS animation */
+export function SpinnerIcon({ size = 24, color = "currentColor" }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      style={{ animation: "iterate-spin 0.8s linear infinite" }}
+    >
+      <style>{`@keyframes iterate-spin { to { transform: rotate(360deg); } }`}</style>
+      <circle
+        cx={12}
+        cy={12}
+        r={9}
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeDasharray="42 14"
+      />
     </svg>
   );
 }
