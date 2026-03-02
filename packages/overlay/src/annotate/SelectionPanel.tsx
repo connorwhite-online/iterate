@@ -17,12 +17,12 @@ interface SelectionPanelProps {
 const FONT_STACK = "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 
 /**
- * Flat, greyscale annotation popup.
+ * Flat, greyscale annotation popup with a layered card effect.
  *
- * Layout:
- * 1. Component name header(s) with chevron dropdown for CSS
- * 2. Comment textarea
- * 3. Discard / Add buttons (right-aligned)
+ * The header (component name + CSS drawer) sits on a recessed lower layer.
+ * The main card (textarea + buttons) floats on top with rounded top corners
+ * and a subtle upward drop-shadow, so the CSS drawer feels like it slides
+ * out from behind the main card.
  */
 export function SelectionPanel({
   selectedElements,
@@ -105,164 +105,183 @@ export function SelectionPanel({
         pointerEvents: "auto",
         width: 300,
         maxHeight: "80vh",
-        overflow: "auto",
       }}
     >
       <form
         onSubmit={handleSubmit}
         style={{
-          background: "#fff",
+          borderRadius: 12,
+          overflow: "hidden",
           border: "1px solid #e0e0e0",
-          borderRadius: 10,
-          padding: 12,
           boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
           fontFamily: FONT_STACK,
         }}
       >
-        {/* Component name header(s) with chevron CSS dropdown */}
-        {displayItems.map((item, i) => {
-          const isExpanded = expandedCSS.has(i);
-          const styleEntries = Object.entries(item.styles);
-          return (
-            <div key={item.key}>
-              <button
-                type="button"
-                onClick={() => toggleCSS(i)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  width: "100%",
-                  padding: "4px 0",
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  fontSize: 12,
-                  fontWeight: 500,
-                  color: "#333",
-                  fontFamily: FONT_STACK,
-                  textAlign: "left",
-                }}
-              >
-                <span
-                  style={{
-                    display: "inline-flex",
-                    fontSize: 8,
-                    color: "#999",
-                    transition: "transform 0.15s ease",
-                    transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
-                    flexShrink: 0,
-                  }}
-                >
-                  {"\u25B6"}
-                </span>
-                {item.name}
-              </button>
-
-              {/* CSS properties dropdown */}
-              <div
-                style={{
-                  maxHeight: isExpanded ? 200 : 0,
-                  overflow: isExpanded ? "auto" : "hidden",
-                  transition: "max-height 0.2s ease",
-                }}
-              >
-                <div
-                  style={{
-                    padding: "6px 8px",
-                    marginLeft: 14,
-                    background: "#f5f5f5",
-                    borderRadius: 4,
-                    fontSize: 10,
-                    fontFamily: "monospace",
-                    color: "#666",
-                    lineHeight: 1.7,
-                  }}
-                >
-                  {styleEntries.map(([prop, val]) => (
-                    <div key={prop}>
-                      <span style={{ color: "#999" }}>{prop}:</span> {val}
-                    </div>
-                  ))}
-                  {styleEntries.length === 0 && (
-                    <div style={{ color: "#999", fontStyle: "italic" }}>
-                      No computed styles
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-
-        {/* Comment */}
-        <textarea
-          ref={inputRef}
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="What should change here?"
-          rows={3}
-          style={{
-            width: "100%",
-            background: "#fff",
-            border: "1px solid #e0e0e0",
-            borderRadius: 6,
-            color: "#333",
-            padding: 8,
-            fontSize: 13,
-            fontFamily: FONT_STACK,
-            resize: "vertical",
-            outline: "none",
-            boxSizing: "border-box",
-          }}
-        />
-
-        {/* Actions — right-aligned, 8px padding */}
+        {/* Header layer — recessed lower layer */}
         <div
           style={{
-            display: "flex",
-            gap: 8,
-            justifyContent: "flex-end",
-            padding: 8,
+            background: "#f7f7f7",
+            padding: "8px 12px",
           }}
         >
-          <button
-            type="button"
-            onClick={onClearSelection}
+          {displayItems.map((item, i) => {
+            const isExpanded = expandedCSS.has(i);
+            const styleEntries = Object.entries(item.styles);
+            return (
+              <div key={item.key}>
+                <button
+                  type="button"
+                  onClick={() => toggleCSS(i)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    width: "100%",
+                    padding: "4px 0",
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: 12,
+                    fontWeight: 500,
+                    color: "#333",
+                    fontFamily: FONT_STACK,
+                    textAlign: "left",
+                  }}
+                >
+                  {item.name}
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      fontSize: 8,
+                      color: "#999",
+                      transition: "transform 0.15s ease",
+                      transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)",
+                      flexShrink: 0,
+                      marginLeft: 6,
+                    }}
+                  >
+                    {"\u25BC"}
+                  </span>
+                </button>
+
+                {/* CSS drawer — slides out from behind the main card */}
+                <div
+                  style={{
+                    maxHeight: isExpanded ? 200 : 0,
+                    overflow: "hidden",
+                    transition: "max-height 0.2s ease",
+                  }}
+                >
+                  <div
+                    style={{
+                      padding: "6px 8px",
+                      marginTop: 4,
+                      marginBottom: 4,
+                      background: "#efefef",
+                      borderRadius: 4,
+                      fontSize: 10,
+                      fontFamily: "monospace",
+                      color: "#666",
+                      lineHeight: 1.7,
+                      maxHeight: 180,
+                      overflow: "auto",
+                    }}
+                  >
+                    {styleEntries.map(([prop, val]) => (
+                      <div key={prop}>
+                        <span style={{ color: "#999" }}>{prop}:</span> {val}
+                      </div>
+                    ))}
+                    {styleEntries.length === 0 && (
+                      <div style={{ color: "#999", fontStyle: "italic" }}>
+                        No computed styles
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Main card layer — floats on top with upward shadow */}
+        <div
+          style={{
+            position: "relative",
+            background: "#fff",
+            borderRadius: "12px 12px 0 0",
+            boxShadow: "0 -3px 8px rgba(0,0,0,0.06)",
+            padding: 12,
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
+          {/* Comment */}
+          <textarea
+            ref={inputRef}
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="What should change here?"
+            rows={3}
             style={{
-              padding: "6px 14px",
-              background: "transparent",
+              width: "100%",
+              background: "#fff",
               border: "1px solid #e0e0e0",
               borderRadius: 6,
-              color: "#888",
-              cursor: "pointer",
-              fontSize: 12,
+              color: "#333",
+              padding: 8,
+              fontSize: 13,
               fontFamily: FONT_STACK,
+              resize: "vertical",
+              outline: "none",
+              boxSizing: "border-box",
             }}
-          >
-            Discard
-          </button>
-          <button
-            type="submit"
-            disabled={!comment.trim()}
+          />
+
+          {/* Actions — right-aligned, 8px padding */}
+          <div
             style={{
-              padding: "6px 14px",
-              background: comment.trim() ? "#333" : "#f0f0f0",
-              border: "1px solid " + (comment.trim() ? "#333" : "#e0e0e0"),
-              borderRadius: 6,
-              color: comment.trim() ? "#fff" : "#999",
-              cursor: comment.trim() ? "pointer" : "default",
-              fontSize: 12,
-              fontWeight: 600,
-              fontFamily: FONT_STACK,
+              display: "flex",
+              gap: 8,
+              justifyContent: "flex-end",
+              padding: 8,
             }}
           >
-            Add
-          </button>
+            <button
+              type="button"
+              onClick={onClearSelection}
+              style={{
+                padding: "6px 14px",
+                background: "transparent",
+                border: "1px solid #e0e0e0",
+                borderRadius: 6,
+                color: "#888",
+                cursor: "pointer",
+                fontSize: 12,
+                fontFamily: FONT_STACK,
+              }}
+            >
+              Discard
+            </button>
+            <button
+              type="submit"
+              disabled={!comment.trim()}
+              style={{
+                padding: "6px 14px",
+                background: comment.trim() ? "#333" : "#f0f0f0",
+                border: "1px solid " + (comment.trim() ? "#333" : "#e0e0e0"),
+                borderRadius: 6,
+                color: comment.trim() ? "#fff" : "#999",
+                cursor: comment.trim() ? "pointer" : "default",
+                fontSize: 12,
+                fontWeight: 600,
+                fontFamily: FONT_STACK,
+              }}
+            >
+              Add
+            </button>
+          </div>
         </div>
       </form>
     </div>
