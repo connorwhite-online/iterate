@@ -119,6 +119,20 @@ export function CopyIcon({ size = 24, color = "currentColor" }: IconProps) {
   );
 }
 
+/** X mark — Discard all iterations */
+export function DiscardIcon({ size = 24, color = "currentColor" }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <path
+        d="M18 6L6 18M6 6l12 12"
+        stroke={color}
+        strokeWidth="2.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 /** Spinning loader — circular arc with CSS animation */
 export function SpinnerIcon({ size = 24, color = "currentColor" }: IconProps) {
   return (

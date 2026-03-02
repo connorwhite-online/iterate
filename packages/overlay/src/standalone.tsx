@@ -428,6 +428,26 @@ function StandaloneOverlay() {
     []
   );
 
+  // Handle discarding all iterations (keep original)
+  const handleDiscard = useCallback(
+    async () => {
+      const names = Object.keys(iterations);
+      if (names.length === 0) return;
+      try {
+        await Promise.allSettled(
+          names.map((name) =>
+            fetch(`/api/iterations/${name}`, { method: "DELETE" })
+          )
+        );
+        setIteration(ORIGINAL_TAB);
+        setMode(previousModeRef.current);
+      } catch (err) {
+        console.error("[iterate] Discard failed:", err);
+      }
+    },
+    [iterations]
+  );
+
   // Build the iteration iframe URL (framework plugin mode, parent only).
   // Load directly from the iteration's dev server port — avoids path-prefix
   // issues where absolute asset paths (/_next/...) would 404 through the proxy.
@@ -541,6 +561,7 @@ function StandaloneOverlay() {
         onIterationChange={handleIterationChange}
         onFork={handleFork}
         onPick={handlePick}
+        onDiscard={handleDiscard}
         isViewingIteration={isViewingIteration}
       />
     </>
