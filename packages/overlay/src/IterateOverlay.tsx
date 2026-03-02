@@ -8,8 +8,8 @@ import type {
   DrawingData,
   Rect,
   DomChange,
-} from "@iterate/core";
-import { formatBatchPrompt } from "@iterate/core";
+} from "iterate-ui-core";
+import { formatBatchPrompt } from "iterate-ui-core";
 import { ElementPicker, type PickedElement } from "./inspector/ElementPicker.js";
 import { MarqueeSelect } from "./inspector/MarqueeSelect.js";
 import { TextSelect } from "./inspector/TextSelect.js";

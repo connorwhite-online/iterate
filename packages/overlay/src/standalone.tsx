@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { IterateOverlay, type ToolMode } from "./IterateOverlay.js";
 import { FloatingPanel, ORIGINAL_TAB } from "./panel/FloatingPanel.js";
 import { DaemonConnection } from "./transport/connection.js";
-import type { IterationInfo } from "@iterate/core";
+import type { IterationInfo } from "iterate-ui-core";
 
 /** postMessage types for parent <-> iframe communication */
 interface IterateMessage {

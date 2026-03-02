@@ -1,4 +1,4 @@
-import { withIterate } from "@iterate/next";
+import { withIterate } from "iterate-ui-next";
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {};

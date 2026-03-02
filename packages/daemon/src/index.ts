@@ -6,7 +6,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { execa } from "execa";
-import { DEFAULT_CONFIG, type IterateConfig, type IterationInfo } from "@iterate/core";
+import { DEFAULT_CONFIG, type IterateConfig, type IterationInfo } from "iterate-ui-core";
 import { StateStore } from "./state/store.js";
 import { WorktreeManager } from "./worktree/manager.js";
 import { ProcessManager } from "./process/manager.js";
@@ -368,7 +368,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     if (!overlayBundle) {
       try {
         const require = createRequire(import.meta.url);
-        const overlayPath = require.resolve("@iterate/overlay/standalone");
+        const overlayPath = require.resolve("iterate-ui-overlay/standalone");
         overlayBundle = readFileSync(overlayPath, "utf-8");
       } catch {
         return reply.status(404).send("Overlay bundle not found");

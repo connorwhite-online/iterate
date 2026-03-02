@@ -1,5 +1,5 @@
 {
-  "name": "iterate-monorepo",
+  "name": "iterate-ui-monorepo",
   "private": true,
   "packageManager": "pnpm@9.15.4",
   "scripts": {

@@ -5,7 +5,7 @@ import type {
   AnnotationData,
   AnnotationStatus,
   DomChange,
-} from "@iterate/core";
+} from "iterate-ui-core";
 
 /** Command context for /iterate slash commands */
 export interface CommandContext {

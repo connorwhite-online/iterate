@@ -1,5 +1,5 @@
 {
-  "name": "@iterate/next",
+  "name": "iterate-ui-next",
   "version": "0.1.0",
   "description": "iterate Next.js plugin — auto-starts daemon and injects overlay",
   "type": "module",
@@ -17,9 +17,9 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@iterate/daemon": "workspace:*",
-    "@iterate/overlay": "workspace:*",
-    "@iterate/babel-plugin": "workspace:*"
+    "iterate-ui-daemon": "workspace:*",
+    "iterate-ui-overlay": "workspace:*",
+    "iterate-ui-babel-plugin": "workspace:*"
   },
   "peerDependencies": {
     "next": "^14.0.0 || ^15.0.0"

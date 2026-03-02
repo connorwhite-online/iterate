@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import type { DrawingData, Rect } from "@iterate/core";
+import type { DrawingData, Rect } from "iterate-ui-core";
 import { elementToPicked, type PickedElement } from "./ElementPicker.js";
 
 interface MarkerDrawProps {

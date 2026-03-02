@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import type { Rect } from "@iterate/core";
+import type { Rect } from "iterate-ui-core";
 import { generateSelector, getRelevantStyles, getComponentInfo } from "../inspector/selector.js";
 
 /** A completed move with rollback info for live preview */

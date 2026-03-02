@@ -5,8 +5,8 @@ import type {
   DomChange,
   ServerMessage,
   IterateState,
-} from "@iterate/core";
-import { DEFAULT_CONFIG } from "@iterate/core";
+} from "iterate-ui-core";
+import { DEFAULT_CONFIG } from "iterate-ui-core";
 
 // We test DaemonClient's message handling by accessing internal state.
 // Since DaemonClient.handleMessage is private, we extract its logic via

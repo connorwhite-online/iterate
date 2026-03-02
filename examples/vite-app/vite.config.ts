@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import { iterate } from "@iterate/vite";
+import { iterate } from "iterate-ui-vite";
 
 export default defineConfig({
   plugins: [react(), iterate()],

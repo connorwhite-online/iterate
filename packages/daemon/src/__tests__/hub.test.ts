@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { WebSocketHub } from "../websocket/hub.js";
 import { StateStore } from "../state/store.js";
-import { DEFAULT_CONFIG } from "@iterate/core";
-import type { ClientMessage, ServerMessage } from "@iterate/core";
+import { DEFAULT_CONFIG } from "iterate-ui-core";
+import type { ClientMessage, ServerMessage } from "iterate-ui-core";
 
 function createHub() {
   const store = new StateStore({ ...DEFAULT_CONFIG });

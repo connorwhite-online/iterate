@@ -20,7 +20,7 @@ let daemonStarting = false;
  * Usage:
  * ```js
  * // next.config.mjs
- * import { withIterate } from '@iterate/next'
+ * import { withIterate } from 'iterate-ui-next'
  * export default withIterate({
  *   // ...your Next.js config
  * })
@@ -69,9 +69,9 @@ export function withIterate(
   let overlayBundlePath: string | undefined;
   let babelPluginPath: string | undefined;
   try {
-    overlayBundlePath = fileURLToPath(import.meta.resolve("@iterate/overlay/standalone"));
+    overlayBundlePath = fileURLToPath(import.meta.resolve("iterate-ui-overlay/standalone"));
     if (!options.disableBabelPlugin) {
-      babelPluginPath = fileURLToPath(import.meta.resolve("@iterate/babel-plugin"));
+      babelPluginPath = fileURLToPath(import.meta.resolve("iterate-ui-babel-plugin"));
     }
   } catch {
     console.warn("[iterate] Could not resolve overlay bundle or babel plugin");
@@ -219,8 +219,8 @@ async function startDaemonIfNeeded(port: number, cwd: string): Promise<ChildProc
     return null;
   }
 
-  // Resolve @iterate/daemon from this package's location, not the app's cwd
-  const daemonPath = import.meta.resolve("@iterate/daemon");
+  // Resolve iterate-ui-daemon from this package's location, not the app's cwd
+  const daemonPath = import.meta.resolve("iterate-ui-daemon");
 
   const child = spawn(
     process.execPath,

@@ -1,5 +1,5 @@
 {
-  "name": "@iterate/core",
+  "name": "iterate-ui-core",
   "version": "0.1.0",
   "description": "Shared types and protocol for iterate",
   "type": "module",

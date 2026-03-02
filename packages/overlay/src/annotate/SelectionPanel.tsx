@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import type { AnnotationIntent, AnnotationSeverity, TextSelection } from "@iterate/core";
+import type { AnnotationIntent, AnnotationSeverity, TextSelection } from "iterate-ui-core";
 import type { PickedElement } from "../inspector/ElementPicker.js";
 
 interface SelectionPanelProps {

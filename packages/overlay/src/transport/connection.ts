@@ -2,8 +2,8 @@ import type {
   ClientMessage,
   ServerMessage,
   IterateState,
-} from "@iterate/core";
-import type { IterationInfo } from "@iterate/core";
+} from "iterate-ui-core";
+import type { IterationInfo } from "iterate-ui-core";
 
 type MessageHandler = (msg: ServerMessage) => void;
 type IterationsChangeHandler = (iterations: Record<string, IterationInfo>) => void;

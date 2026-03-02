@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_CONFIG, type IterateConfig } from "@iterate/core";
+import { DEFAULT_CONFIG, type IterateConfig } from "iterate-ui-core";
 
 export const initCommand = new Command("init")
   .description("Initialize iterate in the current project")

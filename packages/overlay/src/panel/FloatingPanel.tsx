@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ToolMode } from "../IterateOverlay.js";
-import type { IterationInfo, IterationStatus } from "@iterate/core";
+import type { IterationInfo, IterationStatus } from "iterate-ui-core";
 import {
   CursorIcon,
   MoveIcon,

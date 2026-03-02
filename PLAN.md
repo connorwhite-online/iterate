@@ -9,7 +9,7 @@ Overhaul the iterate tool from a "draw-a-line-then-annotate" workflow to a profe
 ## 1. Babel Plugin for React Component Names + File Paths
 
 ### What
-A new package `@iterate/babel-plugin` that injects `data-iterate-component` and `data-iterate-source` attributes onto every JSX element during development builds. This gives the overlay runtime access to component names and source file paths for any DOM node.
+A new package `iterate-ui-babel-plugin` that injects `data-iterate-component` and `data-iterate-source` attributes onto every JSX element during development builds. This gives the overlay runtime access to component names and source file paths for any DOM node.
 
 ### New package: `packages/babel-plugin/`
 
@@ -29,7 +29,7 @@ A new package `@iterate/babel-plugin` that injects `data-iterate-component` and 
 ```
 
 **Integration points:**
-- `packages/vite/src/index.ts` — Add `babel: { plugins: ['@iterate/babel-plugin'] }` to the Vite React plugin config. Needs to detect if user uses `@vitejs/plugin-react` or `@vitejs/plugin-react-swc` and configure accordingly.
+- `packages/vite/src/index.ts` — Add `babel: { plugins: ['iterate-ui-babel-plugin'] }` to the Vite React plugin config. Needs to detect if user uses `@vitejs/plugin-react` or `@vitejs/plugin-react-swc` and configure accordingly.
 - `packages/next/src/index.ts` — Add the plugin to `experimental.babel` or via a custom `.babelrc` injection.
 - Only active in development mode (`process.env.NODE_ENV !== 'production'`).
 

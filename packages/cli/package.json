@@ -1,5 +1,5 @@
 {
-  "name": "@iterate/cli",
+  "name": "iterate-ui-cli",
   "version": "0.1.0",
   "description": "CLI for iterate — manage worktree iterations",
   "type": "module",
@@ -18,7 +18,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@iterate/core": "workspace:*",
+    "iterate-ui-core": "workspace:*",
     "commander": "^12.1.0"
   },
   "devDependencies": {

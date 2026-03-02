@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import type { Rect, SelectedElement } from "@iterate/core";
+import type { Rect, SelectedElement } from "iterate-ui-core";
 import {
   generateSelector,
   getRelevantStyles,

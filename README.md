@@ -25,7 +25,7 @@ This creates:
 **Next.js:**
 ```js
 // next.config.mjs
-import { withIterate } from '@iterate/next'
+import { withIterate } from 'iterate-ui-next'
 
 const nextConfig = {}
 export default withIterate(nextConfig)
@@ -34,7 +34,7 @@ export default withIterate(nextConfig)
 **Vite:**
 ```ts
 // vite.config.ts
-import { iterate } from '@iterate/vite'
+import { iterate } from 'iterate-ui-vite'
 
 export default defineConfig({
   plugins: [react(), iterate()]
@@ -160,14 +160,14 @@ Once you favor a direction, the agent calls `iterate_pick_iteration` with a merg
 
 | Package | Description |
 |---------|-------------|
-| `@iterate/core` | Shared types, WebSocket protocol, batch prompt formatter |
-| `@iterate/cli` | CLI commands: `init`, `branch`, `list`, `pick`, `serve`, `stop` |
-| `@iterate/daemon` | Fastify server: worktree manager, process manager, reverse proxy, WebSocket hub, state store |
-| `@iterate/overlay` | React overlay: FloatingPanel, SelectionPanel, annotation badges, move tool, marquee select |
-| `@iterate/mcp` | MCP server for AI agent integration (Claude Code, Cursor, etc.) |
-| `@iterate/vite` | Vite plugin — auto-injects the overlay in dev mode |
-| `@iterate/next` | Next.js plugin — auto-injects the overlay in dev mode |
-| `@iterate/babel-plugin` | Babel plugin — injects React component names + source locations into JSX for element identification |
+| `iterate-ui-core` | Shared types, WebSocket protocol, batch prompt formatter |
+| `iterate-ui-cli` | CLI commands: `init`, `branch`, `list`, `pick`, `serve`, `stop` |
+| `iterate-ui-daemon` | Fastify server: worktree manager, process manager, reverse proxy, WebSocket hub, state store |
+| `iterate-ui-overlay` | React overlay: FloatingPanel, SelectionPanel, annotation badges, move tool, marquee select |
+| `iterate-ui-mcp` | MCP server for AI agent integration (Claude Code, Cursor, etc.) |
+| `iterate-ui-vite` | Vite plugin — auto-injects the overlay in dev mode |
+| `iterate-ui-next` | Next.js plugin — auto-injects the overlay in dev mode |
+| `iterate-ui-babel-plugin` | Babel plugin — injects React component names + source locations into JSX for element identification |
 
 ## Architecture
 

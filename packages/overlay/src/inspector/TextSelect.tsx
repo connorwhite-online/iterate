@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import type { TextSelection } from "@iterate/core";
+import type { TextSelection } from "iterate-ui-core";
 import { elementToPicked, type PickedElement } from "./ElementPicker.js";
 
 interface TextSelectProps {
