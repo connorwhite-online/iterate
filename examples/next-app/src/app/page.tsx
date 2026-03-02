@@ -218,7 +218,7 @@ const styles: Record<string, React.CSSProperties> = {
     height: 12,
   },
   cardBadge: {
-    background: "#1e3a2f",
+    background: "#1e2d5f",
     borderRadius: 10,
     width: 48,
     height: 20,
