@@ -1,20 +1,18 @@
 "use client";
 
-import { useState } from "react";
-
 export default function Home() {
   return (
     <div style={styles.container}>
       <Header />
 
       <main style={styles.main}>
-        <CardGrid>
-          <Placeholder />
-          <Placeholder />
-          <Placeholder />
-        </CardGrid>
-
-        <Counter />
+        <div style={styles.dashboardGrid}>
+          <PlaceholderA />
+          <PlaceholderB />
+          <PlaceholderC />
+          <PlaceholderD />
+          <PlaceholderE />
+        </div>
       </main>
 
       <Footer />
@@ -25,43 +23,112 @@ export default function Home() {
 function Header() {
   return (
     <header style={styles.header}>
-      <h1 style={styles.title}>iterate</h1>
-      <p style={styles.subtitle}>
-        Test app for visual iteration with git worktrees
-      </p>
+      <div style={styles.headerLeft}>
+        <div style={styles.logo} />
+        <div style={styles.headerTitle} />
+      </div>
+      <div style={styles.headerRight}>
+        <div style={styles.headerNav} />
+        <div style={styles.headerNav} />
+        <div style={styles.avatar} />
+      </div>
     </header>
   );
 }
 
-function CardGrid({ children }: { children: React.ReactNode }) {
-  return <div style={styles.cardGrid}>{children}</div>;
-}
-
-function Placeholder() {
-  return <div style={styles.placeholder} />;
-}
-
-function Counter() {
-  const [count, setCount] = useState(0);
-
+function PlaceholderA() {
   return (
-    <div style={styles.counterSection}>
-      <CounterButton count={count} onClick={() => setCount((c) => c + 1)} />
+    <div style={{ ...styles.card, gridColumn: "span 2" }}>
+      <div style={styles.cardHeader}>
+        <div style={styles.cardTitle} />
+        <div style={styles.cardBadge} />
+      </div>
+      <div style={styles.chartPlaceholder}>
+        <div style={{ ...styles.chartBar, height: "55%" }} />
+        <div style={{ ...styles.chartBar, height: "40%" }} />
+        <div style={{ ...styles.chartBar, height: "70%" }} />
+        <div style={{ ...styles.chartBar, height: "45%" }} />
+        <div style={{ ...styles.chartBar, height: "80%" }} />
+        <div style={{ ...styles.chartBar, height: "50%" }} />
+        <div style={{ ...styles.chartBar, height: "65%" }} />
+      </div>
     </div>
   );
 }
 
-function CounterButton({
-  count,
-  onClick,
-}: {
-  count: number;
-  onClick: () => void;
-}) {
+function PlaceholderB() {
   return (
-    <button onClick={onClick} style={styles.button}>
-      Count: {count}
-    </button>
+    <div style={styles.card}>
+      <div style={styles.cardHeader}>
+        <div style={styles.cardTitle} />
+      </div>
+      <div style={styles.statValue} />
+      <div style={styles.statLabel} />
+    </div>
+  );
+}
+
+function PlaceholderC() {
+  return (
+    <div style={styles.card}>
+      <div style={styles.cardHeader}>
+        <div style={styles.cardTitle} />
+      </div>
+      <div style={styles.statValue} />
+      <div style={styles.statLabel} />
+    </div>
+  );
+}
+
+function PlaceholderD() {
+  return (
+    <div style={{ ...styles.card, gridColumn: "span 2" }}>
+      <div style={styles.cardHeader}>
+        <div style={styles.cardTitle} />
+      </div>
+      <div style={styles.listPlaceholder}>
+        <div style={styles.listRow} />
+        <div style={styles.listRow} />
+        <div style={styles.listRow} />
+        <div style={styles.listRow} />
+      </div>
+    </div>
+  );
+}
+
+function PlaceholderE() {
+  const rows = [
+    { label: 60, offset: "0%", width: "45%" },
+    { label: 80, offset: "15%", width: "55%" },
+    { label: 50, offset: "40%", width: "30%" },
+    { label: 70, offset: "10%", width: "65%" },
+    { label: 40, offset: "55%", width: "35%" },
+    { label: 90, offset: "20%", width: "50%" },
+  ];
+
+  return (
+    <div style={{ ...styles.card, gridColumn: "span 2" }}>
+      <div style={styles.cardHeader}>
+        <div style={styles.cardTitle} />
+        <div style={styles.cardBadge} />
+      </div>
+      <div style={styles.ganttChart}>
+        {rows.map((row, i) => (
+          <div key={i} style={styles.ganttRow}>
+            <div style={{ ...styles.ganttLabel, width: row.label }} />
+            <div style={styles.ganttTrack}>
+              <div
+                style={{
+                  ...styles.ganttBar,
+                  marginLeft: row.offset,
+                  width: row.width,
+                }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -83,52 +150,140 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: "column",
   },
   header: {
-    textAlign: "center",
-    padding: "48px 24px 24px",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "16px 32px",
+    borderBottom: "1px solid #1a1a1a",
   },
-  title: {
-    fontSize: 40,
-    fontWeight: 700,
-    margin: 0,
+  headerLeft: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+  },
+  logo: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
     background: "linear-gradient(135deg, #2563eb, #7c3aed)",
-    WebkitBackgroundClip: "text",
-    WebkitTextFillColor: "transparent",
   },
-  subtitle: {
-    color: "#888",
-    marginTop: 8,
-    fontSize: 16,
+  headerTitle: {
+    width: 80,
+    height: 12,
+    borderRadius: 4,
+    background: "#333",
+  },
+  headerRight: {
+    display: "flex",
+    alignItems: "center",
+    gap: 16,
+  },
+  headerNav: {
+    width: 56,
+    height: 10,
+    borderRadius: 4,
+    background: "#262626",
+  },
+  avatar: {
+    width: 28,
+    height: 28,
+    borderRadius: "50%",
+    background: "#333",
   },
   main: {
     flex: 1,
-    padding: "24px 48px",
-    position: "relative",
+    padding: "16px 32px",
   },
-  cardGrid: {
-    display: "flex",
-    gap: 20,
-    justifyContent: "center",
-    flexWrap: "wrap",
+  dashboardGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(4, 1fr)",
+    gap: 16,
   },
-  placeholder: {
-    background: "#222",
+  card: {
+    background: "#161616",
     borderRadius: 12,
-    width: 280,
-    height: 120,
+    border: "1px solid #222",
+    padding: 20,
   },
-  counterSection: {
-    textAlign: "center" as const,
-    marginTop: 48,
+  cardHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
   },
-  button: {
-    background: "#dc2626",
-    color: "#fff",
-    border: "none",
-    borderRadius: 8,
-    padding: "12px 32px",
-    fontSize: 18,
-    fontWeight: 600,
-    cursor: "pointer",
+  cardTitle: {
+    background: "#333",
+    borderRadius: 4,
+    width: 100,
+    height: 12,
+  },
+  cardBadge: {
+    background: "#1e3a2f",
+    borderRadius: 10,
+    width: 48,
+    height: 20,
+  },
+  chartPlaceholder: {
+    display: "flex",
+    alignItems: "flex-end",
+    gap: 8,
+    height: 100,
+  },
+  chartBar: {
+    flex: 1,
+    background: "linear-gradient(180deg, #2563eb, #1e40af)",
+    borderRadius: 4,
+  },
+  statValue: {
+    background: "#333",
+    borderRadius: 4,
+    width: 80,
+    height: 28,
+    marginBottom: 8,
+  },
+  statLabel: {
+    background: "#262626",
+    borderRadius: 4,
+    width: 60,
+    height: 10,
+  },
+  listPlaceholder: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+  },
+  listRow: {
+    background: "#1a1a1a",
+    borderRadius: 6,
+    height: 32,
+  },
+  ganttChart: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  },
+  ganttRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+  },
+  ganttLabel: {
+    height: 10,
+    borderRadius: 4,
+    background: "#333",
+    flexShrink: 0,
+  },
+  ganttTrack: {
+    flex: 1,
+    height: 20,
+    background: "#1a1a1a",
+    borderRadius: 6,
+    overflow: "hidden",
+  },
+  ganttBar: {
+    height: "100%",
+    background: "linear-gradient(90deg, #2563eb, #7c3aed)",
+    borderRadius: 6,
   },
   footer: {
     textAlign: "center" as const,
