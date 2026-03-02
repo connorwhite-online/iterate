@@ -239,7 +239,6 @@ export function FloatingPanel({
           background: "#fff",
           border: "1px solid #e0e0e0",
           borderRadius: 12,
-          padding: 4,
           boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
           display: "flex",
           flexDirection: "column",
@@ -250,15 +249,19 @@ export function FloatingPanel({
           transition: `${positionTransition}`,
         }}
       >
-        {/* Iteration selector row — only rendered when iterations exist AND panel is open */}
+        {/* Iteration tab layer — recessed lower layer behind the main toolbar */}
         {hasIterations && visible && (
-          <div>
+          <div
+            style={{
+              background: "#f7f7f7",
+              padding: "4px 4px 6px 4px",
+            }}
+          >
             <div
               style={{
                 display: "flex",
                 alignItems: "center",
                 gap: 2,
-                padding: "2px 4px",
                 overflowX: "auto",
               }}
             >
@@ -332,19 +335,21 @@ export function FloatingPanel({
                 );
               })}
             </div>
-            {/* Separator between iteration selector and tools */}
-            <div
-              style={{
-                height: 1,
-                background: "#e0e0e0",
-                margin: "2px 4px",
-              }}
-            />
           </div>
         )}
 
-        {/* Main toolbar row */}
-        <div style={{ display: "flex", alignItems: "center" }}>
+        {/* Main toolbar row — upper layer with top radii and upward shadow */}
+        <div
+          style={{
+            position: "relative",
+            display: "flex",
+            alignItems: "center",
+            background: "#fff",
+            borderRadius: "12px 12px 0 0",
+            boxShadow: "0 -3px 8px rgba(0,0,0,0.06)",
+            padding: 4,
+          }}
+        >
           {/* === Section 1: Annotation tools === */}
           <ToolGroup visible={visible}>
             <IconButton
