@@ -37,6 +37,18 @@ export interface TextSelection {
   endOffset: number;
 }
 
+/** A freehand drawing annotation (marker tool) */
+export interface DrawingData {
+  /** SVG path data string (d attribute) */
+  path: string;
+  /** Bounding box of the drawing */
+  bounds: Rect;
+  /** Stroke color used */
+  strokeColor: string;
+  /** Stroke width used */
+  strokeWidth: number;
+}
+
 /** An annotation targeting one or more elements in an iteration */
 export interface AnnotationData {
   id: string;
@@ -45,6 +57,8 @@ export interface AnnotationData {
   elements: SelectedElement[];
   /** Optional highlighted text selection */
   textSelection?: TextSelection;
+  /** Optional freehand drawing (marker tool) */
+  drawing?: DrawingData;
   comment: string;
   timestamp: number;
 

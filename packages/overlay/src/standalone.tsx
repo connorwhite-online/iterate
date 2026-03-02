@@ -89,7 +89,7 @@ function StandaloneOverlay() {
     connectionRef.current = conn;
 
     const unsub = conn.onToolModeChange((newMode) => {
-      if (newMode === "select" || newMode === "move" || newMode === "browse") {
+      if (newMode === "select" || newMode === "move" || newMode === "draw" || newMode === "browse") {
         setMode(newMode as ToolMode);
       }
     });
@@ -237,7 +237,7 @@ function StandaloneOverlay() {
       const tool = (e as CustomEvent).detail.tool as string;
       if (tool === "annotate") {
         setMode("select");
-      } else if (tool === "select" || tool === "move" || tool === "browse") {
+      } else if (tool === "select" || tool === "move" || tool === "draw" || tool === "browse") {
         setMode(tool);
       }
     };

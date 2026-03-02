@@ -6,6 +6,7 @@ export { ElementPicker } from "./inspector/ElementPicker.js";
 export type { PickedElement } from "./inspector/ElementPicker.js";
 export { MarqueeSelect } from "./inspector/MarqueeSelect.js";
 export { TextSelect } from "./inspector/TextSelect.js";
+export { MarkerDraw } from "./inspector/MarkerDraw.js";
 export { SelectionPanel } from "./annotate/SelectionPanel.js";
 export { DragHandler } from "./manipulate/DragHandler.js";
 export type { PendingMove } from "./manipulate/DragHandler.js";

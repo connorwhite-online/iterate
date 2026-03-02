@@ -3,6 +3,7 @@ export type {
   AnnotationData,
   SelectedElement,
   TextSelection,
+  DrawingData,
   Rect,
   AnnotationIntent,
   AnnotationSeverity,
