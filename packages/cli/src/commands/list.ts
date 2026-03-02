@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { IterateConfig, IterationInfo } from "@iterate/core";
+import type { IterateConfig, IterationInfo } from "iterate-ui-core";
 
 export const listCommand = new Command("list")
   .description("List all active iterations")

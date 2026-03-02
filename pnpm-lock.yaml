@@ -33,12 +33,12 @@ importers:
         specifier: ^19.0.0
         version: 19.2.4(react@19.2.4)
     devDependencies:
-      '@iterate/next':
-        specifier: workspace:*
-        version: link:../../packages/next
       '@types/react':
         specifier: ^19.0.0
         version: 19.2.14
+      iterate-ui-next:
+        specifier: workspace:*
+        version: link:../../packages/next
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -52,12 +52,12 @@ importers:
         specifier: ^19.0.0
         version: 19.2.4(react@19.2.4)
     devDependencies:
-      '@iterate/vite':
-        specifier: workspace:*
-        version: link:../../packages/vite
       '@vitejs/plugin-react':
         specifier: ^4.3.0
         version: 4.7.0(vite@6.4.1(@types/node@22.19.11))
+      iterate-ui-vite:
+        specifier: workspace:*
+        version: link:../../packages/vite
       vite:
         specifier: ^6.0.0
         version: 6.4.1(@types/node@22.19.11)
@@ -85,12 +85,12 @@ importers:
 
   packages/cli:
     dependencies:
-      '@iterate/core':
-        specifier: workspace:*
-        version: link:../core
       commander:
         specifier: ^12.1.0
         version: 12.1.0
+      iterate-ui-core:
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
       tsup:
         specifier: ^8.3.0
@@ -119,18 +119,18 @@ importers:
       '@fastify/websocket':
         specifier: ^11.0.0
         version: 11.2.0
-      '@iterate/core':
-        specifier: workspace:*
-        version: link:../core
-      '@iterate/overlay':
-        specifier: workspace:*
-        version: link:../overlay
       execa:
         specifier: ^9.5.0
         version: 9.6.1
       fastify:
         specifier: ^5.2.0
         version: 5.7.4
+      iterate-ui-core:
+        specifier: workspace:*
+        version: link:../core
+      iterate-ui-overlay:
+        specifier: workspace:*
+        version: link:../overlay
       simple-git:
         specifier: ^3.27.0
         version: 3.32.2
@@ -147,12 +147,12 @@ importers:
 
   packages/mcp:
     dependencies:
-      '@iterate/core':
-        specifier: workspace:*
-        version: link:../core
       '@modelcontextprotocol/sdk':
         specifier: ^1.0.0
         version: 1.27.1(zod@3.25.76)
+      iterate-ui-core:
+        specifier: workspace:*
+        version: link:../core
       ws:
         specifier: ^8.18.0
         version: 8.19.0
@@ -175,13 +175,13 @@ importers:
 
   packages/next:
     dependencies:
-      '@iterate/babel-plugin':
+      iterate-ui-babel-plugin:
         specifier: workspace:*
         version: link:../babel-plugin
-      '@iterate/daemon':
+      iterate-ui-daemon:
         specifier: workspace:*
         version: link:../daemon
-      '@iterate/overlay':
+      iterate-ui-overlay:
         specifier: workspace:*
         version: link:../overlay
       next:
@@ -200,7 +200,7 @@ importers:
 
   packages/overlay:
     dependencies:
-      '@iterate/core':
+      iterate-ui-core:
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -234,10 +234,10 @@ importers:
 
   packages/vite:
     dependencies:
-      '@iterate/babel-plugin':
+      iterate-ui-babel-plugin:
         specifier: workspace:*
         version: link:../babel-plugin
-      '@iterate/overlay':
+      iterate-ui-overlay:
         specifier: workspace:*
         version: link:../overlay
     devDependencies:

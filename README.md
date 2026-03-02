@@ -4,29 +4,79 @@ A visual feedback tool for AI-assisted development. Select elements, annotate in
 
 ## Quick Start
 
+### Install
+
 ```bash
-# 1. Clone and install
-git clone https://github.com/connorwhite-online/iterate.git
-cd iterate
-pnpm install
-
-# 2. Build all packages
-pnpm run build
-
-# 3. Try the example app
-cd examples/vite-app
-pnpm install
-pnpm run dev
-# → opens on http://localhost:5173 with the overlay injected
+npm install -D iterate
 ```
 
-## How it works
+### Setup
+
+```bash
+npx iterate init
+```
+
+This creates:
+- `.iterate/config.json` — auto-detects your package manager and dev command
+- `.mcp.json` — registers the iterate MCP server for Claude Code
+
+### Framework Config
+
+**Next.js:**
+```js
+// next.config.mjs
+import { withIterate } from 'iterate-ui-next'
+
+const nextConfig = {}
+export default withIterate(nextConfig)
+```
+
+**Vite:**
+```ts
+// vite.config.ts
+import { iterate } from 'iterate-ui-vite'
+
+export default defineConfig({
+  plugins: [react(), iterate()]
+})
+```
+
+Both plugins auto-inject the overlay and start the daemon in development mode only. No production impact.
+
+### Run
+
+```bash
+npm run dev
+```
+
+Open your app in the browser — you'll see the iterate overlay (toggle with **Alt+Shift+I**).
+
+## Claude Code Slash Commands
+
+After setup, three slash commands are available in your Claude Code session:
+
+| Command | What it does |
+|---------|-------------|
+| `/iterate:go` | Fetch all pending UI annotations and implement them |
+| `/iterate:prompt <text>` | Create multiple variations from a design prompt |
+| `/iterate:keep <name>` | Pick a winning iteration and merge it to your base branch |
+
+### Typical flow
+
+1. Browse your app, use the overlay to select elements, annotate feedback, drag things around
+2. Click **Send** to submit the batch
+3. In Claude Code, type `/iterate:go` — Claude reads your annotations, makes the code changes, and resolves each one
+4. Dev server hot-reloads, you see the results immediately
+5. Repeat until satisfied, then `/iterate:keep v2` to merge the winner
+
+## CLI Commands
 
 ```
-iterate init              # detect package manager + dev command, create .iterate/ config
+iterate init              # detect package manager + dev command, create config
+iterate serve             # launch daemon on :4000
 iterate branch feature-a  # git worktree + npm install + start dev server on port 3101
 iterate branch feature-b  # another worktree on port 3102
-iterate serve             # launch daemon on :4000 — opens browser UI
+iterate list              # show all active iterations with status
 iterate pick feature-a    # merge feature-a to main, remove all other worktrees
 iterate stop              # shut down daemon + all dev servers
 ```
@@ -83,10 +133,10 @@ The overlay injects a floating panel (bottom-right, draggable to any corner, tog
 
 1. **Same annotation flow** — select, annotate, move, build up a batch.
 2. **Submit** — click the Send button. The batch is sent to the daemon over WebSocket, which stores annotations as `pending` and broadcasts to all connected clients.
-3. **Prompt your agent** — in your Claude Code session (or any MCP-connected agent), say "process the pending iterate feedback". The agent calls `iterate_get_pending_batch` or uses the `iterate_process_feedback` prompt to retrieve the full batch with element context.
-4. **Agent processes** — acknowledges each annotation, makes code changes, then resolves with a reply. Dev server hot-reloads and you see the result in the overlay immediately.
+3. **Trigger the agent** — in your Claude Code session, type `/iterate:go`. Claude fetches all pending annotations, acknowledges each one, reads the source files, implements the changes, and resolves each annotation with a summary.
+4. **See results** — dev server hot-reloads and you see the changes in the browser immediately. The overlay shows annotations transitioning from pending to resolved.
 
-> **Note:** The Submit button stores the batch centrally and saves you from manual copying, but the agent still needs to be prompted to pick it up. MCP is a tool-pull protocol — the agent must initiate tool calls; the server cannot push work to it.
+> **Note:** The Submit button stores the batch centrally and saves you from manual copying, but the agent still needs to be triggered to pick it up. MCP is a tool-pull protocol — the agent must initiate tool calls. The `/iterate:go` slash command is the quickest way to kick this off.
 
 ## The Iterate Lifecycle
 
@@ -110,14 +160,14 @@ Once you favor a direction, the agent calls `iterate_pick_iteration` with a merg
 
 | Package | Description |
 |---------|-------------|
-| `@iterate/core` | Shared types, WebSocket protocol, batch prompt formatter |
-| `@iterate/cli` | CLI commands: `init`, `branch`, `list`, `pick`, `serve`, `stop` |
-| `@iterate/daemon` | Fastify server: worktree manager, process manager, reverse proxy, WebSocket hub, state store |
-| `@iterate/overlay` | React overlay: FloatingPanel, SelectionPanel, annotation badges, move tool, marquee select |
-| `@iterate/mcp` | MCP server for AI agent integration (Claude Code, Cursor, etc.) |
-| `@iterate/vite` | Vite plugin — auto-injects the overlay in dev mode |
-| `@iterate/next` | Next.js plugin — auto-injects the overlay in dev mode |
-| `@iterate/babel-plugin` | Babel plugin — injects React component names + source locations into JSX for element identification |
+| `iterate-ui-core` | Shared types, WebSocket protocol, batch prompt formatter |
+| `iterate-ui-cli` | CLI commands: `init`, `branch`, `list`, `pick`, `serve`, `stop` |
+| `iterate-ui-daemon` | Fastify server: worktree manager, process manager, reverse proxy, WebSocket hub, state store |
+| `iterate-ui-overlay` | React overlay: FloatingPanel, SelectionPanel, annotation badges, move tool, marquee select |
+| `iterate-ui-mcp` | MCP server for AI agent integration (Claude Code, Cursor, etc.) |
+| `iterate-ui-vite` | Vite plugin — auto-injects the overlay in dev mode |
+| `iterate-ui-next` | Next.js plugin — auto-injects the overlay in dev mode |
+| `iterate-ui-babel-plugin` | Babel plugin — injects React component names + source locations into JSX for element identification |
 
 ## Architecture
 
@@ -151,48 +201,21 @@ MCP Server (stdio sidecar to your agent)
 
 ## MCP Integration
 
-Register iterate as an MCP server with your agent:
+`iterate init` automatically generates a `.mcp.json` that registers the MCP server with Claude Code:
 
-```bash
-# Claude Code
-claude mcp add iterate -- node /path/to/iterate/packages/mcp/dist/index.js
-
-# Or in .mcp.json for project-level config
+```json
 {
   "mcpServers": {
     "iterate": {
-      "command": "node",
-      "args": ["/path/to/iterate/packages/mcp/dist/index.js"]
+      "command": "npx",
+      "args": ["iterate-mcp"],
+      "env": { "ITERATE_DAEMON_PORT": "4000" }
     }
   }
 }
 ```
 
-The agent can then call tools like `iterate_get_pending_batch` to read your annotations with full element context (React component names, source file locations, CSS selectors, computed styles), and `iterate_pick_iteration` to merge the winning direction.
-
-## Framework Setup
-
-### Vite
-
-```ts
-// vite.config.ts
-import { iterate } from '@iterate/vite'
-
-export default defineConfig({
-  plugins: [react(), iterate()]
-})
-```
-
-### Next.js
-
-```ts
-// next.config.ts
-import { withIterate } from '@iterate/next'
-
-export default withIterate(nextConfig)
-```
-
-Both plugins auto-inject the overlay in development mode only. No production impact.
+If you're using a different MCP-compatible agent, point it at the `iterate-mcp` binary. The agent can call tools like `iterate_get_pending_batch` to read annotations with full element context (React component names, source file locations, CSS selectors, computed styles), and `iterate_pick_iteration` to merge the winning direction.
 
 ## Status
 

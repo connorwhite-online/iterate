@@ -2,7 +2,7 @@ import { Command } from "commander";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import type { IterateConfig } from "@iterate/core";
+import type { IterateConfig } from "iterate-ui-core";
 
 export const serveCommand = new Command("serve")
   .description("Start the iterate daemon (control server + proxy)")
@@ -40,11 +40,11 @@ export const serveCommand = new Command("serve")
     } else {
       // Fallback: try to import and run daemon directly
       try {
-        const { startDaemon } = await import("@iterate/daemon");
+        const { startDaemon } = await import("iterate-ui-daemon");
         await startDaemon({ port, cwd });
       } catch {
         console.error(
-          "Error: @iterate/daemon not found. Run `pnpm install` first."
+          "Error: iterate-ui-daemon not found. Run `pnpm install` first."
         );
         process.exit(1);
       }

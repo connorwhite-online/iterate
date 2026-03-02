@@ -4,7 +4,7 @@ import type {
   IterationInfo,
   DomChange,
   ServerMessage,
-} from "@iterate/core";
+} from "iterate-ui-core";
 import { WebSocket } from "ws";
 
 /** Callback fired whenever a batch:submitted notification arrives */

@@ -5,7 +5,7 @@ import type {
   ServerMessage,
   AnnotationData,
   DomChange,
-} from "@iterate/core";
+} from "iterate-ui-core";
 import type { StateStore } from "../state/store.js";
 
 /**

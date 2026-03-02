@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { IterateConfig } from "@iterate/core";
+import type { IterateConfig } from "iterate-ui-core";
 
 export const stopCommand = new Command("stop")
   .description("Stop the iterate daemon and all dev servers")

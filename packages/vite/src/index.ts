@@ -17,7 +17,7 @@ export interface IteratePluginOptions {
  * Usage:
  * ```ts
  * // vite.config.ts
- * import { iterate } from '@iterate/vite'
+ * import { iterate } from 'iterate-ui-vite'
  * export default defineConfig({
  *   plugins: [iterate()]
  * })
@@ -52,7 +52,7 @@ export function iterate(options: IteratePluginOptions = {}): Plugin[] {
           // Dynamically import @babel/core — available via @vitejs/plugin-react
           babelCore = await import("@babel/core");
           const require = createRequire(import.meta.url);
-          babelPluginPath = require.resolve("@iterate/babel-plugin");
+          babelPluginPath = require.resolve("iterate-ui-babel-plugin");
         } catch {
           console.warn("[iterate] Babel plugin setup failed — component names will not be available");
         }
@@ -109,7 +109,7 @@ export function iterate(options: IteratePluginOptions = {}): Plugin[] {
         if (!overlayJS) {
           try {
             const require = createRequire(import.meta.url);
-            const overlayPath = require.resolve("@iterate/overlay/standalone");
+            const overlayPath = require.resolve("iterate-ui-overlay/standalone");
             overlayJS = readFileSync(overlayPath, "utf-8");
           } catch {
             res.statusCode = 404;
@@ -206,7 +206,7 @@ export function iterate(options: IteratePluginOptions = {}): Plugin[] {
 function startDaemon(port: number, cwd: string): ChildProcess {
   const child = spawn(
     process.execPath,
-    ["--input-type=module", "-e", `import { startDaemon } from "@iterate/daemon"; startDaemon({ port: ${port}, cwd: ${JSON.stringify(cwd)} });`],
+    ["--input-type=module", "-e", `import { startDaemon } from "iterate-ui-daemon"; startDaemon({ port: ${port}, cwd: ${JSON.stringify(cwd)} });`],
     {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],

@@ -1,5 +1,5 @@
 {
-  "name": "@iterate/vite",
+  "name": "iterate-ui-vite",
   "version": "0.1.0",
   "description": "iterate Vite plugin — auto-starts daemon and injects overlay",
   "type": "module",
@@ -17,8 +17,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@iterate/babel-plugin": "workspace:*",
-    "@iterate/overlay": "workspace:*"
+    "iterate-ui-babel-plugin": "workspace:*",
+    "iterate-ui-overlay": "workspace:*"
   },
   "peerDependencies": {
     "vite": "^5.0.0 || ^6.0.0"

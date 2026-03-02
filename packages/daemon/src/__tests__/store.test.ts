@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { StateStore } from "../state/store.js";
-import { DEFAULT_CONFIG } from "@iterate/core";
-import type { AnnotationData, IterationInfo, DomChange } from "@iterate/core";
+import { DEFAULT_CONFIG } from "iterate-ui-core";
+import type { AnnotationData, IterationInfo, DomChange } from "iterate-ui-core";
 
 function createStore() {
   return new StateStore({ ...DEFAULT_CONFIG });

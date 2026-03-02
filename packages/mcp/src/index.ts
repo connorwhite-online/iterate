@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { DaemonClient } from "./connection/daemon-client.js";
-import { formatBatchPrompt } from "@iterate/core";
+import { formatBatchPrompt } from "iterate-ui-core";
 
 const DAEMON_PORT = parseInt(process.env.ITERATE_DAEMON_PORT ?? "4000", 10);
 

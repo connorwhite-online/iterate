@@ -1,5 +1,5 @@
 {
-  "name": "@iterate/babel-plugin",
+  "name": "iterate-ui-babel-plugin",
   "version": "0.1.0",
   "description": "Babel plugin that injects React component names and source locations for iterate",
   "type": "module",

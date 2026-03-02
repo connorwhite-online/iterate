@@ -1,5 +1,5 @@
 {
-  "name": "@iterate/mcp",
+  "name": "iterate-ui-mcp",
   "version": "0.1.0",
   "description": "MCP server for iterate — AI agent integration",
   "type": "module",
@@ -21,7 +21,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@iterate/core": "workspace:*",
+    "iterate-ui-core": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "ws": "^8.18.0",
     "zod": "^3.24.0"

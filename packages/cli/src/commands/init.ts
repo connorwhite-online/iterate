@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_CONFIG, type IterateConfig } from "@iterate/core";
+import { DEFAULT_CONFIG, type IterateConfig } from "iterate-ui-core";
 
 export const initCommand = new Command("init")
   .description("Initialize iterate in the current project")
@@ -43,12 +43,33 @@ export const initCommand = new Command("init")
       JSON.stringify(config, null, 2)
     );
 
-    console.log("Initialized iterate:");
+    // Generate .mcp.json for Claude Code integration
+    const mcpPath = join(cwd, ".mcp.json");
+    if (!existsSync(mcpPath)) {
+      const mcpConfig = {
+        mcpServers: {
+          iterate: {
+            command: "npx",
+            args: ["iterate-mcp"],
+            env: {
+              ITERATE_DAEMON_PORT: String(config.daemonPort),
+            },
+          },
+        },
+      };
+      writeFileSync(mcpPath, JSON.stringify(mcpConfig, null, 2) + "\n");
+      console.log("Created .mcp.json for Claude Code integration.");
+    } else {
+      console.log("Note: .mcp.json already exists — add the iterate MCP server manually if needed.");
+    }
+
+    console.log("\nInitialized iterate:");
     console.log(`  Package manager: ${config.packageManager}`);
     console.log(`  Dev command: ${config.devCommand}`);
     console.log(`  Daemon port: ${config.daemonPort}`);
     console.log(`  Max iterations: ${config.maxIterations}`);
     console.log(`\nRun \`iterate serve\` to start the control server.`);
+    console.log(`Claude Code slash commands: /iterate:go, /iterate:prompt, /iterate:keep`);
   });
 
 function detectPackageManager(cwd: string): IterateConfig["packageManager"] {

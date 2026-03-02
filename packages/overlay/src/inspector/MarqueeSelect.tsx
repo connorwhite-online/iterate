@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import type { Rect } from "@iterate/core";
+import type { Rect } from "iterate-ui-core";
 import { elementToPicked, type PickedElement } from "./ElementPicker.js";
 
 interface MarqueeSelectProps {

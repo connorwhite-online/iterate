@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DaemonClient } from "../connection/daemon-client.js";
-import type { ServerMessage, IterateState, AnnotationData, IterationInfo } from "@iterate/core";
-import { DEFAULT_CONFIG } from "@iterate/core";
+import type { ServerMessage, IterateState, AnnotationData, IterationInfo } from "iterate-ui-core";
+import { DEFAULT_CONFIG } from "iterate-ui-core";
 
 function createClient(): DaemonClient {
   return new DaemonClient(4000);
