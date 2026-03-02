@@ -129,6 +129,7 @@ export function FloatingPanel({
     }
   );
   const totalPending = batchCount + moveCount;
+  const isLeftSide = corner === "top-left" || corner === "bottom-left";
 
   // Clear local fork loading state once real iterations appear
   useEffect(() => {
@@ -250,13 +251,21 @@ export function FloatingPanel({
         }}
       >
         {/* Iteration tab layer — recessed lower layer behind the main toolbar */}
-        {hasIterations && visible && (
+        {hasIterations && (
           <div
             style={{
               background: "#f7f7f7",
-              padding: "4px 4px 6px 4px",
+              maxHeight: visible ? 40 : 0,
+              opacity: visible ? 1 : 0,
+              overflow: "hidden",
+              transition: `max-height 0.25s ease ${visible ? "0s" : "0.15s"}, opacity 0.2s ease ${visible ? "0s" : "0.1s"}`,
             }}
           >
+            <div
+              style={{
+                padding: "4px 4px 6px 4px",
+              }}
+            >
             <div
               style={{
                 display: "flex",
@@ -335,6 +344,7 @@ export function FloatingPanel({
                 );
               })}
             </div>
+            </div>
           </div>
         )}
 
@@ -343,6 +353,7 @@ export function FloatingPanel({
           style={{
             position: "relative",
             display: "flex",
+            flexDirection: isLeftSide ? "row-reverse" : "row",
             alignItems: "center",
             background: "#fff",
             borderRadius: "12px 12px 0 0",
@@ -351,7 +362,7 @@ export function FloatingPanel({
           }}
         >
           {/* === Section 1: Annotation tools === */}
-          <ToolGroup visible={visible}>
+          <ToolGroup reversed={isLeftSide} visible={visible}>
             <IconButton
               icon={<CursorIcon size={ICON_SIZE} />}
               label="Select"
@@ -367,7 +378,7 @@ export function FloatingPanel({
           </ToolGroup>
 
           {/* === Section 2: Revision tools === */}
-          <ToolGroup visible={visible && (moveCount > 0 || totalPending > 0)}>
+          <ToolGroup reversed={isLeftSide} visible={visible && (moveCount > 0 || totalPending > 0)}>
             <Divider />
             {moveCount > 0 && (
               <IconButton
@@ -393,7 +404,7 @@ export function FloatingPanel({
           </ToolGroup>
 
           {/* === Section 3: Agent context tools === */}
-          <ToolGroup visible={visible && totalPending > 0}>
+          <ToolGroup reversed={isLeftSide} visible={visible && totalPending > 0}>
             <Divider />
             <IconButton
               icon={<SendIcon size={ICON_SIZE} />}
@@ -410,7 +421,7 @@ export function FloatingPanel({
           {/* === Section 4: Branching tools === */}
 
           {/* Fork / Iterate button — shown when no iterations exist and not loading */}
-          <ToolGroup visible={visible && !hasIterations && !forkLoading && !isCreating}>
+          <ToolGroup reversed={isLeftSide} visible={visible && !hasIterations && !forkLoading && !isCreating}>
             <Divider />
             <IconButton
               icon={<ForkIcon size={ICON_SIZE} />}
@@ -423,7 +434,7 @@ export function FloatingPanel({
           </ToolGroup>
 
           {/* Fork/Create spinner — shown while creating iterations */}
-          <ToolGroup visible={visible && (forkLoading || isCreating)}>
+          <ToolGroup reversed={isLeftSide} visible={visible && (forkLoading || isCreating)}>
             <Divider />
             <IconButton
               icon={<SpinnerIcon size={ICON_SIZE} />}
@@ -433,7 +444,7 @@ export function FloatingPanel({
           </ToolGroup>
 
           {/* Pick/Merge button — merge the active iteration */}
-          <ToolGroup visible={visible && hasIterations && isViewingIteration && !pickLoading && !isCreating}>
+          <ToolGroup reversed={isLeftSide} visible={visible && hasIterations && isViewingIteration && !pickLoading && !isCreating}>
             <Divider />
             <IconButton
               icon={<PickIcon size={ICON_SIZE} />}
@@ -451,7 +462,7 @@ export function FloatingPanel({
           </ToolGroup>
 
           {/* Pick/Merge spinner — shown while merging */}
-          <ToolGroup visible={visible && pickLoading}>
+          <ToolGroup reversed={isLeftSide} visible={visible && pickLoading}>
             <Divider />
             <IconButton
               icon={<SpinnerIcon size={ICON_SIZE} />}
@@ -461,7 +472,7 @@ export function FloatingPanel({
           </ToolGroup>
 
           {/* Discard button — discard all iterations, keep original */}
-          <ToolGroup visible={visible && hasIterations && !isViewingIteration && !discardLoading && !isCreating}>
+          <ToolGroup reversed={isLeftSide} visible={visible && hasIterations && !isViewingIteration && !discardLoading && !isCreating}>
             <Divider />
             <IconButton
               icon={<DiscardIcon size={ICON_SIZE} />}
@@ -478,7 +489,7 @@ export function FloatingPanel({
           </ToolGroup>
 
           {/* Discard spinner — shown while discarding */}
-          <ToolGroup visible={visible && discardLoading}>
+          <ToolGroup reversed={isLeftSide} visible={visible && discardLoading}>
             <Divider />
             <IconButton
               icon={<SpinnerIcon size={ICON_SIZE} />}
@@ -488,7 +499,7 @@ export function FloatingPanel({
           </ToolGroup>
 
           {/* === Divider before close/open button === */}
-          <ToolGroup visible={visible}>
+          <ToolGroup reversed={isLeftSide} visible={visible}>
             <Divider />
           </ToolGroup>
 
@@ -633,9 +644,11 @@ function SuspenseOverlay({ active, message }: { active: boolean; message: string
  */
 function ToolGroup({
   visible,
+  reversed,
   children,
 }: {
   visible: boolean;
+  reversed?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -648,7 +661,7 @@ function ToolGroup({
         maxWidth: visible ? 500 : 0,
         opacity: visible ? 1 : 0,
         transform: visible ? "scale(1)" : "scale(0.85)",
-        transformOrigin: "left center",
+        transformOrigin: reversed ? "right center" : "left center",
         transition: `max-width 0.35s ${SPRING}, opacity 0.2s ease, transform 0.3s ${SPRING}`,
         pointerEvents: visible ? "auto" : "none",
       }}
@@ -686,6 +699,7 @@ function IconButton({
   onClick: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
+  const [pressed, setPressed] = useState(false);
 
   return (
     <button
@@ -694,7 +708,9 @@ function IconButton({
         if (!disabled) onClick();
       }}
       onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onMouseLeave={() => { setHovered(false); setPressed(false); }}
+      onMouseDown={() => { if (!disabled) setPressed(true); }}
+      onMouseUp={() => setPressed(false)}
       style={{
         position: "relative",
         display: "flex",
@@ -704,10 +720,11 @@ function IconButton({
         borderRadius: 8,
         border: "none",
         background: active ? "#e8e8e8" : "transparent",
-        color: active ? "#141414" : "#666",
+        color: (active || hovered) ? "#141414" : "#666",
         cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.35 : 1,
-        transition: "background 0.1s, color 0.1s, opacity 0.15s",
+        transform: pressed ? "scale(0.97)" : "scale(1)",
+        transition: "background 0.1s, color 0.1s, opacity 0.15s, transform 0.1s ease",
         flexShrink: 0,
       }}
     >

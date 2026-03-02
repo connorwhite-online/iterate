@@ -328,8 +328,8 @@ export function IterateOverlay({
             key={`batch-${batchIdx}-${elIdx}`}
             style={{
               position: "absolute",
-              left: el.rect.x + el.rect.width - 8,
-              top: el.rect.y - 8,
+              left: el.rect.x + el.rect.width / 2 - 9,
+              top: el.rect.y + el.rect.height / 2 - 9,
               width: 18,
               height: 18,
               borderRadius: "50%",
