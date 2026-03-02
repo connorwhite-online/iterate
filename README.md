@@ -7,7 +7,7 @@ A visual feedback tool for AI-assisted development. Select elements, annotate in
 ### Install
 
 ```bash
-npm install iterate
+npm install -D iterate
 ```
 
 ### Setup
