@@ -7,6 +7,5 @@
   },
   "repository": "https://github.com/connorwhite-online/iterate",
   "license": "MIT",
-  "skills": "./skills/",
-  "mcpServers": "./.mcp.json"
+  "skills": "./skills/"
 }

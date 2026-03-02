@@ -7,6 +7,11 @@
     "iterate": "./dist/index.js"
   },
   "main": "./dist/index.js",
+  "files": [
+    "dist",
+    "skills",
+    ".claude-plugin"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
