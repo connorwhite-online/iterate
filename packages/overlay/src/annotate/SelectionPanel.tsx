@@ -14,28 +14,30 @@ interface SelectionPanelProps {
   onClearSelection: () => void;
 }
 
+const FONT_STACK = "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+
 /**
- * Panel showing selected elements with component names, source paths,
- * and a comment form for creating annotations.
- * Replaces the old AnnotationDialog.
+ * Flat, greyscale annotation popup.
+ *
+ * Layout:
+ * 1. Component name header(s) with chevron dropdown for CSS
+ * 2. Comment textarea
+ * 3. Discard / Add buttons (right-aligned)
  */
 export function SelectionPanel({
   selectedElements,
   textSelection,
-  onRemoveElement,
   onAddToBatch,
   onClearSelection,
 }: SelectionPanelProps) {
   const [comment, setComment] = useState("");
-  const [intent, setIntent] = useState<AnnotationIntent>("change");
-  const [severity, setSeverity] = useState<AnnotationSeverity>("suggestion");
+  const [expandedCSS, setExpandedCSS] = useState<Set<number>>(new Set());
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const hasSelection = selectedElements.length > 0 || textSelection !== null;
 
   useEffect(() => {
     if (hasSelection) {
-      // Small delay to let the panel render before focusing
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   }, [hasSelection]);
@@ -45,8 +47,9 @@ export function SelectionPanel({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!comment.trim()) return;
-    onAddToBatch(comment.trim(), intent, severity);
+    onAddToBatch(comment.trim());
     setComment("");
+    setExpandedCSS(new Set());
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -58,6 +61,39 @@ export function SelectionPanel({
     }
   };
 
+  const toggleCSS = (index: number) => {
+    setExpandedCSS((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  };
+
+  // Build display items from selected elements + text selection fallback
+  const displayItems: Array<{
+    name: string;
+    styles: Record<string, string>;
+    key: string;
+  }> = [];
+
+  selectedElements.forEach((el, i) => {
+    displayItems.push({
+      name: el.componentName || el.elementName,
+      styles: el.computedStyles || {},
+      key: el.selector + i,
+    });
+  });
+
+  if (textSelection && selectedElements.length === 0) {
+    const ce = textSelection.containingElement;
+    displayItems.push({
+      name: ce.componentName || ce.elementName,
+      styles: ce.computedStyles || {},
+      key: "text-selection",
+    });
+  }
+
   return (
     <div
       style={{
@@ -67,7 +103,7 @@ export function SelectionPanel({
         transform: "translateY(-50%)",
         zIndex: 10002,
         pointerEvents: "auto",
-        width: 320,
+        width: 300,
         maxHeight: "80vh",
         overflow: "auto",
       }}
@@ -75,196 +111,92 @@ export function SelectionPanel({
       <form
         onSubmit={handleSubmit}
         style={{
-          background: "#1a1a2e",
-          border: "1px solid #2a2a4a",
+          background: "#fff",
+          border: "1px solid #e0e0e0",
           borderRadius: 10,
-          padding: 14,
-          boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
+          padding: 12,
+          boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
           display: "flex",
           flexDirection: "column",
-          gap: 10,
+          gap: 8,
+          fontFamily: FONT_STACK,
         }}
       >
-        {/* Header */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <span
-            style={{
-              fontSize: 12,
-              fontWeight: 600,
-              color: "#e0e0e0",
-              fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-            }}
-          >
-            {selectedElements.length} element{selectedElements.length !== 1 ? "s" : ""} selected
-            {textSelection ? " + text" : ""}
-          </span>
-          <button
-            type="button"
-            onClick={onClearSelection}
-            style={{
-              background: "transparent",
-              border: "none",
-              color: "#666",
-              cursor: "pointer",
-              fontSize: 16,
-              lineHeight: 1,
-              padding: "0 4px",
-            }}
-          >
-            {"\u00d7"}
-          </button>
-        </div>
-
-        {/* Selected elements list */}
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 4,
-            maxHeight: 200,
-            overflow: "auto",
-          }}
-        >
-          {selectedElements.map((el, i) => (
-            <div
-              key={el.selector + i}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "4px 8px",
-                background: "#111128",
-                borderRadius: 6,
-                fontSize: 11,
-                fontFamily: "monospace",
-              }}
-            >
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    color: "#10b981",
-                    fontWeight: 600,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {el.elementName}
-                </div>
-                {el.sourceLocation && (
-                  <div
-                    style={{
-                      color: "#666",
-                      fontSize: 10,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {el.sourceLocation}
-                  </div>
-                )}
-              </div>
+        {/* Component name header(s) with chevron CSS dropdown */}
+        {displayItems.map((item, i) => {
+          const isExpanded = expandedCSS.has(i);
+          const styleEntries = Object.entries(item.styles);
+          return (
+            <div key={item.key}>
               <button
                 type="button"
-                onClick={() => onRemoveElement(i)}
+                onClick={() => toggleCSS(i)}
                 style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  width: "100%",
+                  padding: "4px 0",
                   background: "transparent",
                   border: "none",
-                  color: "#555",
                   cursor: "pointer",
-                  fontSize: 14,
-                  lineHeight: 1,
-                  padding: "0 2px",
-                  flexShrink: 0,
+                  fontSize: 12,
+                  fontWeight: 500,
+                  color: "#333",
+                  fontFamily: FONT_STACK,
+                  textAlign: "left",
                 }}
               >
-                {"\u00d7"}
+                <span
+                  style={{
+                    display: "inline-flex",
+                    fontSize: 8,
+                    color: "#999",
+                    transition: "transform 0.15s ease",
+                    transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                    flexShrink: 0,
+                  }}
+                >
+                  {"\u25B6"}
+                </span>
+                {item.name}
               </button>
-            </div>
-          ))}
 
-          {/* Text selection indicator */}
-          {textSelection && (
-            <div
-              style={{
-                padding: "4px 8px",
-                background: "#111128",
-                borderRadius: 6,
-                fontSize: 11,
-              }}
-            >
+              {/* CSS properties dropdown */}
               <div
                 style={{
-                  color: "#7c3aed",
-                  fontWeight: 600,
-                  fontFamily: "monospace",
+                  maxHeight: isExpanded ? 200 : 0,
+                  overflow: isExpanded ? "auto" : "hidden",
+                  transition: "max-height 0.2s ease",
                 }}
               >
-                Text selection
-              </div>
-              <div
-                style={{
-                  color: "#999",
-                  fontSize: 10,
-                  fontStyle: "italic",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                "{textSelection.text.slice(0, 60)}{textSelection.text.length > 60 ? "..." : ""}"
+                <div
+                  style={{
+                    padding: "6px 8px",
+                    marginLeft: 14,
+                    background: "#f5f5f5",
+                    borderRadius: 4,
+                    fontSize: 10,
+                    fontFamily: "monospace",
+                    color: "#666",
+                    lineHeight: 1.7,
+                  }}
+                >
+                  {styleEntries.map(([prop, val]) => (
+                    <div key={prop}>
+                      <span style={{ color: "#999" }}>{prop}:</span> {val}
+                    </div>
+                  ))}
+                  {styleEntries.length === 0 && (
+                    <div style={{ color: "#999", fontStyle: "italic" }}>
+                      No computed styles
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-          )}
-        </div>
-
-        {/* Intent & severity chips */}
-        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-          {(["fix", "change", "question", "approve"] as const).map((i) => (
-            <button
-              key={i}
-              type="button"
-              onClick={() => setIntent(i)}
-              style={{
-                padding: "2px 8px",
-                fontSize: 11,
-                borderRadius: 10,
-                border: intent === i ? "1px solid #2563eb" : "1px solid #2a2a4a",
-                background: intent === i ? "#2563eb22" : "transparent",
-                color: intent === i ? "#5b9bff" : "#777",
-                cursor: "pointer",
-              }}
-            >
-              {i}
-            </button>
-          ))}
-          <span style={{ width: 1, background: "#2a2a4a", margin: "0 2px" }} />
-          {(["suggestion", "important", "blocking"] as const).map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setSeverity(s)}
-              style={{
-                padding: "2px 8px",
-                fontSize: 11,
-                borderRadius: 10,
-                border: severity === s ? "1px solid #f59e0b" : "1px solid #2a2a4a",
-                background: severity === s ? "#f59e0b22" : "transparent",
-                color: severity === s ? "#f59e0b" : "#777",
-                cursor: "pointer",
-              }}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
+          );
+        })}
 
         {/* Comment */}
         <textarea
@@ -276,24 +208,26 @@ export function SelectionPanel({
           rows={3}
           style={{
             width: "100%",
-            background: "#0a0a1a",
-            border: "1px solid #2a2a4a",
+            background: "#fff",
+            border: "1px solid #e0e0e0",
             borderRadius: 6,
-            color: "#fafafa",
+            color: "#333",
             padding: 8,
             fontSize: 13,
-            fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            fontFamily: FONT_STACK,
             resize: "vertical",
             outline: "none",
+            boxSizing: "border-box",
           }}
         />
 
-        {/* Actions */}
+        {/* Actions — right-aligned, 8px padding */}
         <div
           style={{
             display: "flex",
             gap: 8,
             justifyContent: "flex-end",
+            padding: 8,
           }}
         >
           <button
@@ -302,35 +236,33 @@ export function SelectionPanel({
             style={{
               padding: "6px 14px",
               background: "transparent",
-              border: "1px solid #2a2a4a",
+              border: "1px solid #e0e0e0",
               borderRadius: 6,
               color: "#888",
               cursor: "pointer",
               fontSize: 12,
+              fontFamily: FONT_STACK,
             }}
           >
-            Cancel
+            Discard
           </button>
           <button
             type="submit"
             disabled={!comment.trim()}
             style={{
               padding: "6px 14px",
-              background: comment.trim() ? "#10b981" : "#1a2a1a",
-              border: "1px solid #10b981",
+              background: comment.trim() ? "#333" : "#f0f0f0",
+              border: "1px solid " + (comment.trim() ? "#333" : "#e0e0e0"),
               borderRadius: 6,
-              color: comment.trim() ? "#fff" : "#555",
+              color: comment.trim() ? "#fff" : "#999",
               cursor: comment.trim() ? "pointer" : "default",
               fontSize: 12,
               fontWeight: 600,
+              fontFamily: FONT_STACK,
             }}
           >
-            Add to batch
+            Add
           </button>
-        </div>
-
-        <div style={{ fontSize: 10, color: "#555" }}>
-          Cmd+Enter to add · Esc to cancel · Ctrl+Click to multi-select
         </div>
       </form>
     </div>
