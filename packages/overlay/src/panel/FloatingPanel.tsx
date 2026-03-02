@@ -130,6 +130,7 @@ export function FloatingPanel({
   );
   const totalPending = batchCount + moveCount;
   const isLeftSide = corner === "top-left" || corner === "bottom-left";
+  const isTopSide = corner === "top-left" || corner === "top-right";
 
   // Clear local fork loading state once real iterations appear
   useEffect(() => {
@@ -242,7 +243,7 @@ export function FloatingPanel({
           borderRadius: 12,
           boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
           display: "flex",
-          flexDirection: "column",
+          flexDirection: isTopSide ? "column-reverse" : "column",
           gap: 0,
           cursor: isDragging ? "grabbing" : "grab",
           userSelect: "none",
@@ -356,8 +357,8 @@ export function FloatingPanel({
             flexDirection: isLeftSide ? "row-reverse" : "row",
             alignItems: "center",
             background: "#fff",
-            borderRadius: "12px 12px 0 0",
-            boxShadow: "0 -3px 8px rgba(0,0,0,0.06)",
+            borderRadius: isTopSide ? "0 0 12px 12px" : "12px 12px 0 0",
+            boxShadow: isTopSide ? "0 3px 8px rgba(0,0,0,0.06)" : "0 -3px 8px rgba(0,0,0,0.06)",
             padding: 4,
           }}
         >
