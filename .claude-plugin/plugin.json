@@ -1,0 +1,12 @@
+{
+  "name": "iterate",
+  "version": "0.1.0",
+  "description": "Visual feedback loop for AI-assisted UI development. Select elements, annotate, and iterate with Claude.",
+  "author": {
+    "name": "iterate"
+  },
+  "repository": "https://github.com/connorwhite-online/iterate",
+  "license": "MIT",
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json"
+}
