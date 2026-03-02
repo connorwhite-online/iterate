@@ -4,6 +4,7 @@ import type { IterationInfo, IterationStatus } from "@iterate/core";
 import {
   CursorIcon,
   MoveIcon,
+  MarkerIcon,
   SendIcon,
   CloseIcon,
   LogoIcon,
@@ -369,6 +370,12 @@ export function FloatingPanel({
               label="Select"
               active={mode === "select"}
               onClick={() => onModeChange(mode === "select" ? "browse" : "select")}
+            />
+            <IconButton
+              icon={<MarkerIcon size={ICON_SIZE} />}
+              label="Draw"
+              active={mode === "draw"}
+              onClick={() => onModeChange(mode === "draw" ? "browse" : "draw")}
             />
             <IconButton
               icon={<MoveIcon size={ICON_SIZE} />}

@@ -5,6 +5,7 @@ import type {
   AnnotationSeverity,
   SelectedElement,
   TextSelection,
+  DrawingData,
   Rect,
   DomChange,
 } from "@iterate/core";
@@ -12,11 +13,12 @@ import { formatBatchPrompt } from "@iterate/core";
 import { ElementPicker, type PickedElement } from "./inspector/ElementPicker.js";
 import { MarqueeSelect } from "./inspector/MarqueeSelect.js";
 import { TextSelect } from "./inspector/TextSelect.js";
+import { MarkerDraw } from "./inspector/MarkerDraw.js";
 import { SelectionPanel } from "./annotate/SelectionPanel.js";
 import { DragHandler, type PendingMove } from "./manipulate/DragHandler.js";
 import { DaemonConnection } from "./transport/connection.js";
 
-export type ToolMode = "select" | "move" | "browse";
+export type ToolMode = "select" | "move" | "draw" | "browse";
 
 export interface IterateOverlayProps {
   /** Which tool mode is active */
@@ -42,6 +44,7 @@ interface PendingAnnotation {
   iteration: string;
   elements: SelectedElement[];
   textSelection?: TextSelection;
+  drawing?: DrawingData;
   comment: string;
   intent?: AnnotationIntent;
   severity?: AnnotationSeverity;
@@ -66,6 +69,7 @@ export function IterateOverlay({
   // Selection state
   const [selectedElements, setSelectedElements] = useState<PickedElement[]>([]);
   const [textSelection, setTextSelection] = useState<TextSelection | null>(null);
+  const [activeDrawing, setActiveDrawing] = useState<DrawingData | null>(null);
 
   // Pending batch (accumulated annotations not yet submitted)
   const [pendingBatch, setPendingBatch] = useState<PendingAnnotation[]>([]);
@@ -119,6 +123,15 @@ export function IterateOverlay({
     []
   );
 
+  // Handle marker drawing completion
+  const handleDrawComplete = useCallback(
+    (elements: PickedElement[], drawing: DrawingData) => {
+      setSelectedElements(elements);
+      setActiveDrawing(drawing);
+    },
+    []
+  );
+
   // Remove a single element from the selection
   const handleRemoveElement = useCallback(
     (index: number) => {
@@ -134,7 +147,7 @@ export function IterateOverlay({
   // Add current selection as an annotation to the pending batch
   const handleAddToBatch = useCallback(
     (comment: string, intent?: AnnotationIntent, severity?: AnnotationSeverity) => {
-      if (selectedElements.length === 0 && !textSelection) return;
+      if (selectedElements.length === 0 && !textSelection && !activeDrawing) return;
 
       const annotation: PendingAnnotation = {
         iteration,
@@ -149,6 +162,7 @@ export function IterateOverlay({
           sourceLocation: el.sourceLocation,
         })),
         textSelection: textSelection ?? undefined,
+        drawing: activeDrawing ?? undefined,
         comment,
         intent,
         severity,
@@ -159,14 +173,16 @@ export function IterateOverlay({
       // Clear selection after adding to batch
       setSelectedElements([]);
       setTextSelection(null);
+      setActiveDrawing(null);
     },
-    [selectedElements, textSelection, iteration]
+    [selectedElements, textSelection, activeDrawing, iteration]
   );
 
   // Clear selection
   const handleClearSelection = useCallback(() => {
     setSelectedElements([]);
     setTextSelection(null);
+    setActiveDrawing(null);
   }, []);
 
   // Handle drag move — add to pending moves list with current iteration
@@ -179,23 +195,27 @@ export function IterateOverlay({
 
   // Convert pending moves to DomChange format for the wire protocol
   const pendingMovesToDomChanges = useCallback((): DomChange[] => {
-    return pendingMoves.map((move, idx) => ({
-      id: `pending-move-${idx}-${Date.now()}`,
-      iteration: move.iteration ?? iteration,
-      selector: move.selector,
-      type: "move" as const,
-      componentName: move.componentName,
-      sourceLocation: move.sourceLocation,
-      before: {
-        rect: move.from,
-        computedStyles: move.computedStyles,
-      },
-      after: {
-        rect: move.to,
-        computedStyles: move.computedStyles,
-      },
-      timestamp: Date.now(),
-    }));
+    return pendingMoves.map((move, idx) => {
+      const isReorder = move.reorderIndex !== undefined;
+      return {
+        id: `pending-move-${idx}-${Date.now()}`,
+        iteration: move.iteration ?? iteration,
+        selector: move.selector,
+        type: isReorder ? ("reorder" as const) : ("move" as const),
+        componentName: move.componentName,
+        sourceLocation: move.sourceLocation,
+        before: {
+          rect: move.from,
+          computedStyles: move.computedStyles,
+        },
+        after: {
+          rect: move.to,
+          computedStyles: move.computedStyles,
+          siblingIndex: move.reorderIndex,
+        },
+        timestamp: Date.now(),
+      };
+    });
   }, [pendingMoves, iteration]);
 
   // Expose batch submission to parent (called by Submit button in toolbar)
@@ -211,6 +231,7 @@ export function IterateOverlay({
             iteration: a.iteration,
             elements: a.elements,
             textSelection: a.textSelection,
+            drawing: a.drawing,
             comment: a.comment,
             intent: a.intent,
             severity: a.severity,
@@ -234,6 +255,7 @@ export function IterateOverlay({
       setPendingMoves([]);
       setSelectedElements([]);
       setTextSelection(null);
+      setActiveDrawing(null);
     };
     window.addEventListener("iterate:clear-batch", handler);
     return () => window.removeEventListener("iterate:clear-batch", handler);
@@ -257,7 +279,7 @@ export function IterateOverlay({
       if (pendingBatch.length === 0 && pendingMoves.length === 0) return;
 
       const domChanges = pendingMoves.map((m) => ({
-        type: "move" as const,
+        type: (m.reorderIndex !== undefined ? "reorder" : "move") as string,
         selector: m.selector,
         componentName: m.componentName,
         sourceLocation: m.sourceLocation,
@@ -303,6 +325,13 @@ export function IterateOverlay({
         onTextSelect={handleTextSelect}
       />
 
+      {/* Marker draw tool (disabled while annotating) */}
+      <MarkerDraw
+        active={mode === "draw" && !isAnnotating}
+        iframeRef={iframeRef}
+        onDrawComplete={handleDrawComplete}
+      />
+
       {/* Drag handler for move mode with live preview */}
       <DragHandler
         active={mode === "move"}
@@ -322,32 +351,82 @@ export function IterateOverlay({
       />
 
       {/* Pending batch indicator markers on elements */}
-      {pendingBatch.map((annotation, batchIdx) =>
-        annotation.elements.map((el, elIdx) => (
-          <div
-            key={`batch-${batchIdx}-${elIdx}`}
-            style={{
-              position: "absolute",
-              left: el.rect.x + el.rect.width / 2 - 9,
-              top: el.rect.y + el.rect.height / 2 - 9,
-              width: 18,
-              height: 18,
-              borderRadius: "50%",
-              background: "#f59e0b",
-              color: "#000",
-              fontSize: 10,
-              fontWeight: 700,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              pointerEvents: "none",
-              fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-            }}
-          >
-            {batchIdx + 1}
-          </div>
-        ))
-      )}
+      {pendingBatch.map((annotation, batchIdx) => (
+        <React.Fragment key={`batch-${batchIdx}`}>
+          {/* Drawing strokes for marker annotations */}
+          {annotation.drawing && (
+            <svg
+              style={{
+                position: "absolute",
+                inset: 0,
+                width: "100%",
+                height: "100%",
+                pointerEvents: "none",
+                overflow: "visible",
+              }}
+            >
+              <path
+                d={annotation.drawing.path}
+                fill="none"
+                stroke={annotation.drawing.strokeColor}
+                strokeWidth={annotation.drawing.strokeWidth}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                opacity={0.5}
+              />
+            </svg>
+          )}
+          {/* Element markers */}
+          {annotation.elements.map((el, elIdx) => (
+            <div
+              key={`batch-${batchIdx}-${elIdx}`}
+              style={{
+                position: "absolute",
+                left: el.rect.x + el.rect.width / 2 - 9,
+                top: el.rect.y + el.rect.height / 2 - 9,
+                width: 18,
+                height: 18,
+                borderRadius: "50%",
+                background: annotation.drawing ? "#ef4444" : "#f59e0b",
+                color: "#fff",
+                fontSize: 10,
+                fontWeight: 700,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                pointerEvents: "none",
+                fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+              }}
+            >
+              {batchIdx + 1}
+            </div>
+          ))}
+          {/* Drawing badge when no elements were found */}
+          {annotation.drawing && annotation.elements.length === 0 && (
+            <div
+              style={{
+                position: "absolute",
+                left: annotation.drawing.bounds.x + annotation.drawing.bounds.width / 2 - 9,
+                top: annotation.drawing.bounds.y + annotation.drawing.bounds.height / 2 - 9,
+                width: 18,
+                height: 18,
+                borderRadius: "50%",
+                background: "#ef4444",
+                color: "#fff",
+                fontSize: 10,
+                fontWeight: 700,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                pointerEvents: "none",
+                fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+              }}
+            >
+              {batchIdx + 1}
+            </div>
+          )}
+        </React.Fragment>
+      ))}
     </div>
   );
 }

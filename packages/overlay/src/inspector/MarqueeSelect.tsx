@@ -135,7 +135,8 @@ export function MarqueeSelect({
 }
 
 /**
- * Find all "interesting" elements whose bounding rects intersect with the given rectangle.
+ * Find all "interesting" elements fully enclosed within the given rectangle.
+ * Only selects elements whose entire bounding box fits inside the marquee.
  * Filters out html/body/large wrapper elements to get meaningful selections.
  */
 function findElementsInRect(
@@ -145,7 +146,7 @@ function findElementsInRect(
   const results: PickedElement[] = [];
   const seen = new Set<Element>();
 
-  // Walk all elements and check intersection
+  // Walk all elements and check full enclosure
   const allElements = doc.querySelectorAll("*");
 
   for (const el of allElements) {
@@ -163,12 +164,12 @@ function findElementsInRect(
     // Skip elements larger than the marquee (containers wrapping everything)
     if (elRect.width > rect.width * 2 && elRect.height > rect.height * 2) continue;
 
-    // Check intersection
+    // Check full enclosure — element must be entirely within the marquee box
     if (
-      elRect.left < rect.x + rect.width &&
-      elRect.right > rect.x &&
-      elRect.top < rect.y + rect.height &&
-      elRect.bottom > rect.y
+      elRect.left >= rect.x &&
+      elRect.right <= rect.x + rect.width &&
+      elRect.top >= rect.y &&
+      elRect.bottom <= rect.y + rect.height
     ) {
       // Skip if a parent is already selected (prefer leaf elements)
       let parentAlreadySelected = false;
@@ -183,10 +184,8 @@ function findElementsInRect(
 
       if (!parentAlreadySelected) {
         // Remove any children that were previously added
-        const childSelectors = new Set<string>();
         for (let i = results.length - 1; i >= 0; i--) {
           if (el.contains(results[i]!.domElement)) {
-            childSelectors.add(results[i]!.selector);
             results.splice(i, 1);
           }
         }

@@ -1,4 +1,4 @@
-import type { SelectedElement, TextSelection, AnnotationIntent, AnnotationSeverity, Rect } from "./types/annotations.js";
+import type { SelectedElement, TextSelection, DrawingData, AnnotationIntent, AnnotationSeverity, Rect } from "./types/annotations.js";
 
 /**
  * A single annotation item to format (works for both pending and persisted annotations).
@@ -7,6 +7,7 @@ export interface FormatAnnotation {
   comment: string;
   elements: SelectedElement[];
   textSelection?: TextSelection;
+  drawing?: DrawingData;
   intent?: AnnotationIntent;
   severity?: AnnotationSeverity;
   iteration?: string;
@@ -89,6 +90,11 @@ export function formatBatchPrompt(
         ? `<${container.componentName}>`
         : container.elementName || container.selector;
       text += `  In: ${containerName} (\`${container.selector}\`)\n`;
+    }
+
+    if (a.drawing) {
+      text += `- **Drawing annotation** (marker tool)\n`;
+      text += `  Region: ${a.drawing.bounds.width.toFixed(0)}×${a.drawing.bounds.height.toFixed(0)} at (${a.drawing.bounds.x.toFixed(0)}, ${a.drawing.bounds.y.toFixed(0)})\n`;
     }
 
     text += `\n`;

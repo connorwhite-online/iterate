@@ -11,13 +11,10 @@ export interface PendingMove {
   computedStyles: Record<string, string>;
   componentName: string | null;
   sourceLocation: string | null;
-}
-
-/** Internal tracking for rollback */
-interface AppliedMove {
-  element: Element;
-  originalTransform: string;
-  move: PendingMove;
+  /** For flex/grid reordering: the target sibling index */
+  reorderIndex?: number;
+  /** The parent selector for reorder context */
+  parentSelector?: string;
 }
 
 interface DragHandlerProps {
@@ -32,14 +29,18 @@ interface DragHandlerProps {
 }
 
 /**
- * Handles drag-to-move with live DOM preview.
+ * Drag-to-move handler with two behaviors:
  *
- * When an element is dragged:
- * 1. A ghost follows the cursor during the drag
- * 2. On drop, a CSS transform is applied to the actual element (live preview)
- * 3. The original position is shown as a dashed marker
- * 4. All transforms can be toggled on/off via previewMode
- * 5. Transforms are rolled back when moves are cleared
+ * 1. Flex/grid children: Detects drop position among siblings for DOM reordering
+ *    (like dragging frames in Figma auto-layout). Shows a drop indicator line
+ *    between siblings during the drag.
+ *
+ * 2. All other elements: Records a positional move intent. Element stays in place,
+ *    a dotted border shows current position, and an arrow points to where it was
+ *    dragged.
+ *
+ * In both cases the element itself is never visually moved — only annotation
+ * overlays are rendered to communicate the intent.
  */
 export function DragHandler({
   active,
@@ -51,11 +52,10 @@ export function DragHandler({
   const [dragging, setDragging] = useState(false);
   const [dragElement, setDragElement] = useState<Element | null>(null);
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
-  const [currentOffset, setCurrentOffset] = useState({ x: 0, y: 0 });
+  const [currentMouse, setCurrentMouse] = useState<{ x: number; y: number } | null>(null);
   const [originalRect, setOriginalRect] = useState<Rect | null>(null);
-
-  // Track all applied transforms for rollback
-  const appliedMovesRef = useRef<AppliedMove[]>([]);
+  const [dropIndicator, setDropIndicator] = useState<{ x: number; y: number; width: number; height: number; isVertical: boolean } | null>(null);
+  const [isReorderDrag, setIsReorderDrag] = useState(false);
 
   const getTargetDocument = useCallback(() => {
     try {
@@ -65,72 +65,100 @@ export function DragHandler({
     }
   }, [iframeRef]);
 
-  // Apply or revert transforms based on previewMode
-  useEffect(() => {
-    for (const applied of appliedMovesRef.current) {
-      if (previewMode) {
-        const dx = applied.move.to.x - applied.move.from.x;
-        const dy = applied.move.to.y - applied.move.from.y;
-        applied.element.setAttribute(
-          "style",
-          `${applied.originalTransform ? '' : ''}transform: translate(${dx}px, ${dy}px) !important; transition: transform 0.2s ease !important;`
-        );
+  /**
+   * For flex/grid containers, determine the drop index based on cursor position
+   * among the container's children. Returns the sibling index and a visual
+   * indicator rect for the drop line.
+   */
+  const getDropPosition = useCallback((
+    parent: Element,
+    draggedEl: Element,
+    mouseX: number,
+    mouseY: number,
+  ): { index: number; indicator: { x: number; y: number; width: number; height: number; isVertical: boolean } } | null => {
+    const parentStyle = window.getComputedStyle(parent);
+    const display = parentStyle.display;
+    if (!display.includes("flex") && !display.includes("grid")) return null;
+
+    const isRow = display.includes("grid") ||
+      parentStyle.flexDirection === "row" ||
+      parentStyle.flexDirection === "row-reverse" ||
+      parentStyle.flexDirection === "";
+
+    const children = Array.from(parent.children).filter(
+      (c) => c !== draggedEl && c.getBoundingClientRect().width > 0 && c.getBoundingClientRect().height > 0
+    );
+
+    if (children.length === 0) return { index: 0, indicator: { x: 0, y: 0, width: 0, height: 0, isVertical: isRow } };
+
+    // Find which gap the cursor is closest to
+    for (let i = 0; i <= children.length; i++) {
+      const prevRect = i > 0 ? children[i - 1]!.getBoundingClientRect() : null;
+      const nextRect = i < children.length ? children[i]!.getBoundingClientRect() : null;
+
+      if (isRow) {
+        const gapX = prevRect
+          ? nextRect
+            ? (prevRect.right + nextRect.left) / 2
+            : prevRect.right + 4
+          : nextRect
+            ? nextRect.left - 4
+            : 0;
+
+        if (
+          (i === 0 && mouseX < (nextRect ? nextRect.left + nextRect.width / 2 : Infinity)) ||
+          (i === children.length && mouseX >= (prevRect ? prevRect.left + prevRect.width / 2 : 0)) ||
+          (prevRect && nextRect && mouseX >= prevRect.left + prevRect.width / 2 && mouseX < nextRect.left + nextRect.width / 2)
+        ) {
+          const parentRect = parent.getBoundingClientRect();
+          return {
+            index: i,
+            indicator: {
+              x: gapX,
+              y: parentRect.top + 4,
+              width: 2,
+              height: parentRect.height - 8,
+              isVertical: true,
+            },
+          };
+        }
       } else {
-        // Revert to original
-        if (applied.originalTransform) {
-          (applied.element as HTMLElement).style.transform = applied.originalTransform;
-        } else {
-          (applied.element as HTMLElement).style.removeProperty("transform");
+        const gapY = prevRect
+          ? nextRect
+            ? (prevRect.bottom + nextRect.top) / 2
+            : prevRect.bottom + 4
+          : nextRect
+            ? nextRect.top - 4
+            : 0;
+
+        if (
+          (i === 0 && mouseY < (nextRect ? nextRect.top + nextRect.height / 2 : Infinity)) ||
+          (i === children.length && mouseY >= (prevRect ? prevRect.top + prevRect.height / 2 : 0)) ||
+          (prevRect && nextRect && mouseY >= prevRect.top + prevRect.height / 2 && mouseY < nextRect.top + nextRect.height / 2)
+        ) {
+          const parentRect = parent.getBoundingClientRect();
+          return {
+            index: i,
+            indicator: {
+              x: parentRect.left + 4,
+              y: gapY,
+              width: parentRect.width - 8,
+              height: 2,
+              isVertical: false,
+            },
+          };
         }
-        (applied.element as HTMLElement).style.removeProperty("transition");
       }
     }
-  }, [previewMode]);
 
-  // Sync applied moves with pendingMoves (handle clears/undos)
-  useEffect(() => {
-    const pendingSelectors = new Set(pendingMoves.map((m) => m.selector));
-    const toRemove: AppliedMove[] = [];
-
-    for (const applied of appliedMovesRef.current) {
-      if (!pendingSelectors.has(applied.move.selector)) {
-        // This move was cleared — revert its transform
-        if (applied.originalTransform) {
-          (applied.element as HTMLElement).style.transform = applied.originalTransform;
-        } else {
-          (applied.element as HTMLElement).style.removeProperty("transform");
-        }
-        (applied.element as HTMLElement).style.removeProperty("transition");
-        toRemove.push(applied);
-      }
-    }
-
-    if (toRemove.length > 0) {
-      appliedMovesRef.current = appliedMovesRef.current.filter(
-        (a) => !toRemove.includes(a)
-      );
-    }
-  }, [pendingMoves]);
-
-  // Clean up all transforms on unmount
-  useEffect(() => {
-    return () => {
-      for (const applied of appliedMovesRef.current) {
-        if (applied.originalTransform) {
-          (applied.element as HTMLElement).style.transform = applied.originalTransform;
-        } else {
-          (applied.element as HTMLElement).style.removeProperty("transform");
-        }
-        (applied.element as HTMLElement).style.removeProperty("transition");
-      }
-      appliedMovesRef.current = [];
-    };
+    return null;
   }, []);
 
   useEffect(() => {
     if (!active) {
       setDragging(false);
       setDragElement(null);
+      setDropIndicator(null);
       return;
     }
 
@@ -140,42 +168,46 @@ export function DragHandler({
       const target = e.target as Element;
       if (!target) return;
 
-      const computed = window.getComputedStyle(target);
-      const position = computed.position;
-      const parentDisplay = target.parentElement
-        ? window.getComputedStyle(target.parentElement).display
-        : "";
-
-      // Allow dragging for absolute/fixed elements or flex/grid children
-      const isDraggable =
-        position === "absolute" ||
-        position === "fixed" ||
-        parentDisplay.includes("flex") ||
-        parentDisplay.includes("grid");
-
-      if (!isDraggable) return;
+      // Skip non-visual/structural elements
+      const tag = target.tagName.toLowerCase();
+      if (["html", "body", "head", "script", "style"].includes(tag)) return;
 
       e.preventDefault();
       e.stopPropagation();
 
       const rect = target.getBoundingClientRect();
+
+      // Check if the element is a flex/grid child for reorder mode
+      const parentEl = target.parentElement;
+      const parentDisplay = parentEl ? window.getComputedStyle(parentEl).display : "";
+      const canReorder = parentDisplay.includes("flex") || parentDisplay.includes("grid");
+
       setDragElement(target);
       setDragStart({ x: e.clientX, y: e.clientY });
+      setCurrentMouse({ x: e.clientX, y: e.clientY });
       setOriginalRect({
         x: rect.x,
         y: rect.y,
         width: rect.width,
         height: rect.height,
       });
+      setIsReorderDrag(canReorder);
       setDragging(true);
     };
 
     const handleMouseMove = (e: MouseEvent) => {
-      if (!dragging || !dragStart) return;
-      setCurrentOffset({
-        x: e.clientX - dragStart.x,
-        y: e.clientY - dragStart.y,
-      });
+      if (!dragging || !dragStart || !dragElement) return;
+      setCurrentMouse({ x: e.clientX, y: e.clientY });
+
+      // Update drop indicator for flex/grid reordering
+      if (isReorderDrag && dragElement.parentElement) {
+        const drop = getDropPosition(dragElement.parentElement, dragElement, e.clientX, e.clientY);
+        if (drop) {
+          setDropIndicator(drop.indicator);
+        } else {
+          setDropIndicator(null);
+        }
+      }
     };
 
     const handleMouseUp = (e: MouseEvent) => {
@@ -192,8 +224,9 @@ export function DragHandler({
         setDragging(false);
         setDragElement(null);
         setDragStart(null);
+        setCurrentMouse(null);
         setOriginalRect(null);
-        setCurrentOffset({ x: 0, y: 0 });
+        setDropIndicator(null);
         return;
       }
 
@@ -206,15 +239,6 @@ export function DragHandler({
 
       const { component, source } = getComponentInfo(dragElement);
 
-      // Apply live transform to the actual element
-      const htmlElement = dragElement as HTMLElement;
-      const originalTransform = htmlElement.style.transform || "";
-
-      if (previewMode) {
-        htmlElement.style.setProperty("transform", `translate(${dx}px, ${dy}px)`, "important");
-        htmlElement.style.setProperty("transition", "transform 0.2s ease", "important");
-      }
-
       const pendingMove: PendingMove = {
         selector: generateSelector(dragElement),
         from: originalRect,
@@ -224,20 +248,23 @@ export function DragHandler({
         sourceLocation: source,
       };
 
-      // Track for rollback
-      appliedMovesRef.current.push({
-        element: dragElement,
-        originalTransform,
-        move: pendingMove,
-      });
+      // For flex/grid children, determine reorder index
+      if (isReorderDrag && dragElement.parentElement) {
+        const drop = getDropPosition(dragElement.parentElement, dragElement, e.clientX, e.clientY);
+        if (drop) {
+          pendingMove.reorderIndex = drop.index;
+          pendingMove.parentSelector = generateSelector(dragElement.parentElement);
+        }
+      }
 
       onMove(pendingMove);
 
       setDragging(false);
       setDragElement(null);
       setDragStart(null);
+      setCurrentMouse(null);
       setOriginalRect(null);
-      setCurrentOffset({ x: 0, y: 0 });
+      setDropIndicator(null);
     };
 
     targetDoc.addEventListener("mousedown", handleMouseDown, { capture: true });
@@ -249,28 +276,14 @@ export function DragHandler({
       targetDoc.removeEventListener("mousemove", handleMouseMove);
       targetDoc.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [active, dragging, dragStart, dragElement, originalRect, getTargetDocument, onMove, previewMode]);
+  }, [active, dragging, dragStart, dragElement, originalRect, isReorderDrag, getTargetDocument, onMove, getDropPosition]);
 
   return (
     <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-      {/* Active drag ghost */}
-      {dragging && originalRect && (
+      {/* Active drag — dotted border around element + arrow to cursor */}
+      {dragging && originalRect && currentMouse && dragStart && (
         <>
-          {/* Ghost following cursor */}
-          <div
-            style={{
-              position: "absolute",
-              left: originalRect.x + currentOffset.x,
-              top: originalRect.y + currentOffset.y,
-              width: originalRect.width,
-              height: originalRect.height,
-              border: "2px dashed #2563eb",
-              backgroundColor: "rgba(37, 99, 235, 0.15)",
-              borderRadius: 4,
-              pointerEvents: "none",
-            }}
-          />
-          {/* Original position */}
+          {/* Dotted border around element's current position */}
           <div
             style={{
               position: "absolute",
@@ -278,32 +291,14 @@ export function DragHandler({
               top: originalRect.y,
               width: originalRect.width,
               height: originalRect.height,
-              border: "1px dashed #555",
+              border: "2px dashed #2563eb",
+              borderRadius: 4,
               pointerEvents: "none",
             }}
           />
-        </>
-      )}
 
-      {/* Origin markers for all pending moves (show where things were) */}
-      {previewMode &&
-        pendingMoves.map((move, idx) => (
-          <div key={`origin-${idx}`}>
-            {/* Original position marker */}
-            <div
-              style={{
-                position: "absolute",
-                left: move.from.x,
-                top: move.from.y,
-                width: move.from.width,
-                height: move.from.height,
-                border: "1px dashed rgba(245, 158, 11, 0.5)",
-                backgroundColor: "rgba(245, 158, 11, 0.05)",
-                borderRadius: 4,
-                pointerEvents: "none",
-              }}
-            />
-            {/* Arrow from original to new position */}
+          {/* Arrow from element center to current cursor */}
+          {(Math.abs(currentMouse.x - dragStart.x) > 10 || Math.abs(currentMouse.y - dragStart.y) > 10) && (
             <svg
               style={{
                 position: "absolute",
@@ -317,7 +312,7 @@ export function DragHandler({
             >
               <defs>
                 <marker
-                  id={`arrowhead-${idx}`}
+                  id="drag-arrowhead"
                   markerWidth="8"
                   markerHeight="6"
                   refX="8"
@@ -326,45 +321,137 @@ export function DragHandler({
                 >
                   <polygon
                     points="0 0, 8 3, 0 6"
-                    fill="rgba(245, 158, 11, 0.6)"
+                    fill="rgba(37, 99, 235, 0.7)"
                   />
                 </marker>
               </defs>
               <line
-                x1={move.from.x + move.from.width / 2}
-                y1={move.from.y + move.from.height / 2}
-                x2={move.to.x + move.to.width / 2}
-                y2={move.to.y + move.to.height / 2}
-                stroke="rgba(245, 158, 11, 0.4)"
-                strokeWidth="1.5"
-                strokeDasharray="4 3"
-                markerEnd={`url(#arrowhead-${idx})`}
+                x1={originalRect.x + originalRect.width / 2}
+                y1={originalRect.y + originalRect.height / 2}
+                x2={currentMouse.x}
+                y2={currentMouse.y}
+                stroke="rgba(37, 99, 235, 0.5)"
+                strokeWidth="2"
+                strokeDasharray="6 4"
+                markerEnd="url(#drag-arrowhead)"
               />
             </svg>
-            {/* Move badge */}
+          )}
+
+          {/* Ghost outline at cursor position */}
+          <div
+            style={{
+              position: "absolute",
+              left: originalRect.x + (currentMouse.x - dragStart.x),
+              top: originalRect.y + (currentMouse.y - dragStart.y),
+              width: originalRect.width,
+              height: originalRect.height,
+              border: "2px dashed rgba(37, 99, 235, 0.4)",
+              backgroundColor: "rgba(37, 99, 235, 0.06)",
+              borderRadius: 4,
+              pointerEvents: "none",
+            }}
+          />
+
+          {/* Drop indicator line for flex/grid reordering */}
+          {dropIndicator && (
             <div
               style={{
                 position: "absolute",
-                left: move.from.x + move.from.width - 8,
-                top: move.from.y - 8,
-                width: 18,
-                height: 18,
-                borderRadius: "50%",
-                background: "#7c3aed",
-                color: "#fff",
-                fontSize: 10,
-                fontWeight: 700,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
+                left: dropIndicator.x - (dropIndicator.isVertical ? 1 : 0),
+                top: dropIndicator.y - (dropIndicator.isVertical ? 0 : 1),
+                width: dropIndicator.width,
+                height: dropIndicator.height,
+                background: "#2563eb",
+                borderRadius: 1,
                 pointerEvents: "none",
-                fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                boxShadow: "0 0 4px rgba(37, 99, 235, 0.5)",
               }}
-            >
-              {idx + 1}
-            </div>
+            />
+          )}
+        </>
+      )}
+
+      {/* Persistent markers for all pending moves */}
+      {pendingMoves.map((move, idx) => (
+        <div key={`move-${idx}`}>
+          {/* Dotted border at element's current position */}
+          <div
+            style={{
+              position: "absolute",
+              left: move.from.x,
+              top: move.from.y,
+              width: move.from.width,
+              height: move.from.height,
+              border: "2px dashed rgba(124, 58, 237, 0.5)",
+              borderRadius: 4,
+              pointerEvents: "none",
+            }}
+          />
+
+          {/* Arrow from original to target position */}
+          <svg
+            style={{
+              position: "absolute",
+              left: 0,
+              top: 0,
+              width: "100%",
+              height: "100%",
+              pointerEvents: "none",
+              overflow: "visible",
+            }}
+          >
+            <defs>
+              <marker
+                id={`arrowhead-${idx}`}
+                markerWidth="8"
+                markerHeight="6"
+                refX="8"
+                refY="3"
+                orient="auto"
+              >
+                <polygon
+                  points="0 0, 8 3, 0 6"
+                  fill="rgba(124, 58, 237, 0.6)"
+                />
+              </marker>
+            </defs>
+            <line
+              x1={move.from.x + move.from.width / 2}
+              y1={move.from.y + move.from.height / 2}
+              x2={move.to.x + move.to.width / 2}
+              y2={move.to.y + move.to.height / 2}
+              stroke="rgba(124, 58, 237, 0.4)"
+              strokeWidth="1.5"
+              strokeDasharray="4 3"
+              markerEnd={`url(#arrowhead-${idx})`}
+            />
+          </svg>
+
+          {/* Reorder badge or move badge */}
+          <div
+            style={{
+              position: "absolute",
+              left: move.from.x + move.from.width - 8,
+              top: move.from.y - 8,
+              width: 18,
+              height: 18,
+              borderRadius: "50%",
+              background: move.reorderIndex !== undefined ? "#2563eb" : "#7c3aed",
+              color: "#fff",
+              fontSize: 10,
+              fontWeight: 700,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              pointerEvents: "none",
+              fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            }}
+          >
+            {idx + 1}
           </div>
-        ))}
+        </div>
+      ))}
     </div>
   );
 }
