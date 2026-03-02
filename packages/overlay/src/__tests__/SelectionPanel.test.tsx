@@ -42,43 +42,41 @@ describe("SelectionPanel", () => {
     expect(container.innerHTML).not.toBe("");
   });
 
-  it("shows element names for selected elements", () => {
-    // SelectionPanel displays elementName, not componentName
+  it("shows component name as header", () => {
     const { container } = render(
       <SelectionPanel
         {...defaultProps}
-        selectedElements={[mockPickedElement({ elementName: "HeroSection" })]}
+        selectedElements={[mockPickedElement({ componentName: "HeroSection" })]}
       />
     );
     expect(container.textContent).toContain("HeroSection");
   });
 
-  it("shows source locations for selected elements", () => {
+  it("falls back to elementName when componentName is null", () => {
     const { container } = render(
       <SelectionPanel
         {...defaultProps}
-        selectedElements={[mockPickedElement({ sourceLocation: "src/Hero.tsx:42" })]}
+        selectedElements={[mockPickedElement({ componentName: null, elementName: "div.hero" })]}
       />
     );
-    expect(container.textContent).toContain("src/Hero.tsx:42");
+    expect(container.textContent).toContain("div.hero");
   });
 
-  it("calls onRemoveElement when remove button clicked", () => {
-    const onRemoveElement = vi.fn();
+  it("shows CSS properties when chevron is clicked", () => {
     const { container } = render(
       <SelectionPanel
         {...defaultProps}
-        selectedElements={[mockPickedElement(), mockPickedElement({ selector: "div.other" })]}
-        onRemoveElement={onRemoveElement}
+        selectedElements={[mockPickedElement({ computedStyles: { "font-size": "16px", color: "red" } })]}
       />
     );
-    // Find element remove buttons (×) — skip the first × which is the header close button
-    const allButtons = container.querySelectorAll("button");
-    const xButtons = Array.from(allButtons).filter((b) => b.textContent === "×");
-    // xButtons[0] is the header close button, xButtons[1+] are element remove buttons
-    expect(xButtons.length).toBeGreaterThanOrEqual(2);
-    fireEvent.click(xButtons[1]!);
-    expect(onRemoveElement).toHaveBeenCalled();
+    // Click the chevron button to expand CSS
+    const chevronButton = container.querySelector("button");
+    expect(chevronButton).not.toBeNull();
+    fireEvent.click(chevronButton!);
+    expect(container.textContent).toContain("font-size:");
+    expect(container.textContent).toContain("16px");
+    expect(container.textContent).toContain("color:");
+    expect(container.textContent).toContain("red");
   });
 
   it("does not submit with empty comment", () => {
@@ -97,7 +95,7 @@ describe("SelectionPanel", () => {
     }
   });
 
-  it("submits annotation with comment", () => {
+  it("submits annotation with comment only (no intent/severity)", () => {
     const onAddToBatch = vi.fn();
     const { container } = render(
       <SelectionPanel
@@ -112,18 +110,40 @@ describe("SelectionPanel", () => {
       const form = container.querySelector("form");
       if (form) {
         fireEvent.submit(form);
-        expect(onAddToBatch).toHaveBeenCalledWith("Fix this layout", expect.any(String), expect.any(String));
+        expect(onAddToBatch).toHaveBeenCalledWith("Fix this layout");
       }
     }
   });
 
-  it("shows element count", () => {
+  it("calls onClearSelection when Discard button clicked", () => {
+    const onClearSelection = vi.fn();
     const { container } = render(
       <SelectionPanel
         {...defaultProps}
-        selectedElements={[mockPickedElement(), mockPickedElement({ selector: "div.other" })]}
+        selectedElements={[mockPickedElement()]}
+        onClearSelection={onClearSelection}
       />
     );
-    expect(container.textContent).toContain("2");
+    const allButtons = container.querySelectorAll("button");
+    const discardButton = Array.from(allButtons).find(
+      (b) => b.textContent === "Discard"
+    );
+    expect(discardButton).toBeDefined();
+    fireEvent.click(discardButton!);
+    expect(onClearSelection).toHaveBeenCalled();
+  });
+
+  it("shows multiple component names for multi-select", () => {
+    const { container } = render(
+      <SelectionPanel
+        {...defaultProps}
+        selectedElements={[
+          mockPickedElement({ componentName: "Header" }),
+          mockPickedElement({ componentName: "Footer", selector: "div.footer" }),
+        ]}
+      />
+    );
+    expect(container.textContent).toContain("Header");
+    expect(container.textContent).toContain("Footer");
   });
 });
