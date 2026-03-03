@@ -4,46 +4,31 @@ A visual feedback tool for AI-assisted development. Select elements, annotate in
 
 ## Quick Start
 
-### Install
+### 1. Install skills
 
 ```bash
-npm install -D iterate
+npx skills add connorwhite-online/iterate
 ```
 
-### Setup
+This installs the iterate slash commands into your Claude Code session.
 
-```bash
-npx iterate init
+### 2. Set up your project
+
+In Claude Code, run:
+
+```
+/iterate
 ```
 
-This creates:
-- `.iterate/config.json` — auto-detects your package manager and dev command
-- `.mcp.json` — registers the iterate MCP server for Claude Code
+Claude will automatically:
+- Detect your framework (Next.js or Vite)
+- Install the adapter package (`iterate-ui-next` or `iterate-ui-vite`)
+- Wrap your framework config with the iterate plugin
+- Create `.iterate/config.json`, `.mcp.json`, and register the Claude Code plugin
 
-### Framework Config
+Restart Claude Code to activate the MCP server and slash commands.
 
-**Next.js:**
-```js
-// next.config.mjs
-import { withIterate } from 'iterate-ui-next'
-
-const nextConfig = {}
-export default withIterate(nextConfig)
-```
-
-**Vite:**
-```ts
-// vite.config.ts
-import { iterate } from 'iterate-ui-vite'
-
-export default defineConfig({
-  plugins: [react(), iterate()]
-})
-```
-
-Both plugins auto-inject the overlay and start the daemon in development mode only. No production impact.
-
-### Run
+### 3. Run
 
 ```bash
 npm run dev
@@ -51,14 +36,39 @@ npm run dev
 
 Open your app in the browser — you'll see the iterate overlay (toggle with **Alt+Shift+I**).
 
+### Manual Setup
+
+If you prefer to set up without the slash command:
+
+```bash
+npx iterate init
+```
+
+Then wrap your framework config:
+
+**Next.js** (`next.config.mjs`):
+```js
+import { withIterate } from 'iterate-ui-next'
+export default withIterate(nextConfig)
+```
+
+**Vite** (`vite.config.ts`):
+```ts
+import { iterate } from 'iterate-ui-vite'
+export default defineConfig({ plugins: [react(), iterate()] })
+```
+
+Both plugins auto-inject the overlay and start the daemon in development mode only. No production impact.
+
 ## Claude Code Slash Commands
 
-After setup, three slash commands are available in your Claude Code session:
+After setup, four slash commands are available in your Claude Code session:
 
 | Command | What it does |
 |---------|-------------|
-| `/iterate:go` | Fetch all pending UI annotations and implement them |
+| `/iterate` | Set up iterate in your project (run once) |
 | `/iterate:prompt <text>` | Create multiple variations from a design prompt |
+| `/iterate:go` | Fetch all pending UI annotations and implement them |
 | `/iterate:keep <name>` | Pick a winning iteration and merge it to your base branch |
 
 ### Typical flow
