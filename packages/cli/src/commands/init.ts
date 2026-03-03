@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_CONFIG, type IterateConfig } from "iterate-ui-core";
@@ -10,8 +11,10 @@ export const initCommand = new Command("init")
   .action(async (opts) => {
     const cwd = process.cwd();
 
-    // Check we're in a git repo
-    if (!existsSync(join(cwd, ".git"))) {
+    // Check we're in a git repo (supports monorepos where .git is in a parent)
+    try {
+      execSync("git rev-parse --is-inside-work-tree", { cwd, stdio: "ignore" });
+    } catch {
       console.error("Error: not a git repository. Run `git init` first.");
       process.exit(1);
     }
@@ -63,13 +66,58 @@ export const initCommand = new Command("init")
       console.log("Note: .mcp.json already exists — add the iterate MCP server manually if needed.");
     }
 
+    // Register Claude Code plugin via .claude/settings.json
+    const claudeDir = join(cwd, ".claude");
+    const claudeSettingsPath = join(claudeDir, "settings.json");
+    mkdirSync(claudeDir, { recursive: true });
+
+    let claudeSettings: Record<string, unknown> = {};
+    if (existsSync(claudeSettingsPath)) {
+      try {
+        claudeSettings = JSON.parse(readFileSync(claudeSettingsPath, "utf-8"));
+      } catch {
+        // Start fresh on parse error
+      }
+    }
+
+    let settingsModified = false;
+
+    if (!claudeSettings.extraKnownMarketplaces || typeof claudeSettings.extraKnownMarketplaces !== "object") {
+      claudeSettings.extraKnownMarketplaces = {};
+    }
+    const marketplaces = claudeSettings.extraKnownMarketplaces as Record<string, unknown>;
+    if (!marketplaces["iterate-plugins"]) {
+      marketplaces["iterate-plugins"] = {
+        source: {
+          source: "github",
+          repo: "connorwhite-online/iterate",
+        },
+      };
+      settingsModified = true;
+    }
+
+    if (!claudeSettings.enabledPlugins || typeof claudeSettings.enabledPlugins !== "object") {
+      claudeSettings.enabledPlugins = {};
+    }
+    const plugins = claudeSettings.enabledPlugins as Record<string, unknown>;
+    if (!("iterate@iterate-plugins" in plugins)) {
+      plugins["iterate@iterate-plugins"] = true;
+      settingsModified = true;
+    }
+
+    if (settingsModified) {
+      writeFileSync(claudeSettingsPath, JSON.stringify(claudeSettings, null, 2) + "\n");
+      console.log("Registered iterate plugin in .claude/settings.json.");
+    }
+
     console.log("\nInitialized iterate:");
     console.log(`  Package manager: ${config.packageManager}`);
     console.log(`  Dev command: ${config.devCommand}`);
     console.log(`  Daemon port: ${config.daemonPort}`);
     console.log(`  Max iterations: ${config.maxIterations}`);
     console.log(`\nRun \`iterate serve\` to start the control server.`);
-    console.log(`Claude Code slash commands: /iterate:go, /iterate:prompt, /iterate:keep`);
+    console.log(`Slash commands: /iterate:go, /iterate:prompt, /iterate:keep`);
+    console.log(`Restart Claude Code to activate slash commands.`);
   });
 
 function detectPackageManager(cwd: string): IterateConfig["packageManager"] {

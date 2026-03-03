@@ -1,6 +1,14 @@
 import { simpleGit, type SimpleGit } from "simple-git";
 import { join } from "node:path";
 
+export interface DiscoveredWorktree {
+  path: string;
+  branch: string;
+  head: string;
+  /** Whether this is a bare/detached worktree (no branch) */
+  detached: boolean;
+}
+
 export class WorktreeManager {
   private git: SimpleGit;
   private cwd: string;
@@ -8,6 +16,11 @@ export class WorktreeManager {
   constructor(cwd: string) {
     this.cwd = cwd;
     this.git = simpleGit(cwd);
+  }
+
+  /** Get the git repository root (the main worktree path) */
+  async getRepoRoot(): Promise<string> {
+    return (await this.git.raw(["rev-parse", "--show-toplevel"])).trim();
   }
 
   /** Get the current branch name */
@@ -73,7 +86,20 @@ export class WorktreeManager {
     }
   }
 
-  /** List all iterate worktrees */
+  /** Remove a worktree by its full path (for external worktrees) */
+  async removeByPath(worktreePath: string, branch?: string, deleteBranch = false): Promise<void> {
+    await this.git.raw(["worktree", "remove", "--force", worktreePath]);
+
+    if (deleteBranch && branch) {
+      try {
+        await this.git.raw(["branch", "-D", branch]);
+      } catch {
+        // Branch may already be deleted
+      }
+    }
+  }
+
+  /** List all iterate worktrees (filtered to iterate/ branches only) */
   async list(): Promise<
     Array<{ path: string; branch: string; head: string }>
   > {
@@ -103,20 +129,51 @@ export class WorktreeManager {
     return worktrees;
   }
 
+  /** Discover ALL git worktrees (not just iterate/ branches) */
+  async discoverAll(): Promise<DiscoveredWorktree[]> {
+    const raw = await this.git.raw(["worktree", "list", "--porcelain"]);
+    const worktrees: DiscoveredWorktree[] = [];
+    let current: Partial<DiscoveredWorktree> = {};
+
+    for (const line of raw.split("\n")) {
+      if (line.startsWith("worktree ")) {
+        current.path = line.slice("worktree ".length);
+      } else if (line.startsWith("HEAD ")) {
+        current.head = line.slice("HEAD ".length);
+      } else if (line.startsWith("branch ")) {
+        const ref = line.slice("branch ".length);
+        current.branch = ref.replace("refs/heads/", "");
+        current.detached = false;
+      } else if (line === "detached") {
+        current.detached = true;
+      } else if (line === "") {
+        if (current.path && current.head) {
+          worktrees.push({
+            path: current.path,
+            branch: current.branch ?? current.head.slice(0, 8),
+            head: current.head,
+            detached: current.detached ?? false,
+          });
+        }
+        current = {};
+      }
+    }
+
+    return worktrees;
+  }
+
   /**
    * Pick a winner: merge the chosen iteration's branch into base,
-   * then remove all other iteration worktrees.
+   * then remove all iteration worktrees.
    */
   async pick(
-    winnerName: string,
-    allIterationNames: string[],
+    winnerBranch: string,
+    winnerWorktreePath: string,
+    allIterations: Array<{ name: string; worktreePath: string; branch: string; source?: string }>,
     strategy: "merge" | "squash" | "rebase" = "merge"
   ): Promise<void> {
-    const winnerBranch = `iterate/${winnerName}`;
-
     // Auto-commit any uncommitted changes in the winner's worktree
-    const winnerPath = join(this.cwd, ".iterate", "worktrees", winnerName);
-    const winnerGit = simpleGit(winnerPath);
+    const winnerGit = simpleGit(winnerWorktreePath);
     const winnerStatus = await winnerGit.status();
     if (
       winnerStatus.modified.length > 0 ||
@@ -125,8 +182,10 @@ export class WorktreeManager {
       winnerStatus.deleted.length > 0
     ) {
       await winnerGit.add(".");
-      await winnerGit.commit(`iterate: ${winnerName} changes`);
+      await winnerGit.commit(`iterate: changes from ${winnerBranch}`);
     }
+
+    const winnerDisplayName = winnerBranch.replace("iterate/", "");
 
     try {
       if (strategy === "squash") {
@@ -134,7 +193,7 @@ export class WorktreeManager {
         // Check if there are staged changes to commit
         const status = await this.git.status();
         if (status.staged.length > 0) {
-          await this.git.raw(["commit", "-m", `iterate: pick ${winnerName}`]);
+          await this.git.raw(["commit", "-m", `iterate: pick ${winnerDisplayName}`]);
         }
       } else if (strategy === "rebase") {
         await this.git.raw(["rebase", winnerBranch]);
@@ -143,7 +202,7 @@ export class WorktreeManager {
           "merge",
           winnerBranch,
           "-m",
-          `iterate: pick ${winnerName}`,
+          `iterate: pick ${winnerDisplayName}`,
         ]);
       }
     } catch (err) {
@@ -165,9 +224,15 @@ export class WorktreeManager {
     }
 
     // Remove all iteration worktrees (including the winner)
-    for (const name of allIterationNames) {
+    for (const iter of allIterations) {
       try {
-        await this.remove(name, true);
+        if (iter.source === "external") {
+          // External worktrees: remove worktree but leave the branch
+          await this.removeByPath(iter.worktreePath);
+        } else {
+          // Iterate-created: remove worktree and branch
+          await this.remove(iter.name, true);
+        }
       } catch {
         // Best effort cleanup
       }

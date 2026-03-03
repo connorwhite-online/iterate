@@ -10,7 +10,7 @@ interface MarkerDrawProps {
 }
 
 /** Stroke settings */
-const STROKE_COLOR = "#ef4444";
+const STROKE_COLOR = "#2563eb";
 const STROKE_WIDTH = 3;
 
 /**
@@ -246,6 +246,9 @@ function findElementsUnderDrawing(
     if (["html", "body", "head", "script", "style", "meta", "link", "noscript"].includes(tag)) {
       continue;
     }
+
+    // Skip iterate overlay elements (badges, SVGs, panels, etc.)
+    if (el.closest("#__iterate-overlay-root__")) continue;
 
     const elRect = el.getBoundingClientRect();
     if (elRect.width === 0 || elRect.height === 0) continue;

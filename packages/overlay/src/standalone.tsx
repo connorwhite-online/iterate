@@ -15,15 +15,18 @@ interface IterateMessage {
     | "submit-batch"
     | "clear-batch"
     | "copy-batch"
-    | "undo-move"
+    | "undo"
     | "set-preview"
     | "batch-counts"
-    | "ready";
+    | "ready"
+    | "request-batch-text"
+    | "batch-text";
   mode?: ToolMode;
   iteration?: string;
   previewMode?: boolean;
   batchCount?: number;
   moveCount?: number;
+  text?: string;
 }
 
 function isIterateMessage(data: unknown): data is IterateMessage {
@@ -42,7 +45,7 @@ function isIterateMessage(data: unknown): data is IterateMessage {
  */
 function StandaloneOverlay() {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
-  const iterationIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const iterationIframeRefs = useRef<Record<string, HTMLIFrameElement | null>>({});
   const connectionRef = useRef<DaemonConnection | null>(null);
   const previousModeRef = useRef<ToolMode>("browse");
   const modeRef = useRef<ToolMode>("browse");
@@ -56,8 +59,7 @@ function StandaloneOverlay() {
       : ORIGINAL_TAB;
   });
   const [visible, setVisible] = useState(true);
-  const [batchCount, setBatchCount] = useState(0);
-  const [moveCount, setMoveCount] = useState(0);
+  const [tabCounts, setTabCounts] = useState<Record<string, { batch: number; move: number }>>({});
   const [previewMode, setPreviewMode] = useState(true);
   const [iterations, setIterations] = useState<Record<string, IterationInfo>>({});
 
@@ -79,6 +81,24 @@ function StandaloneOverlay() {
 
   // Derived state
   const isViewingIteration = iteration !== ORIGINAL_TAB;
+
+  // Derive per-tab and total counts from tabCounts
+  const activeCounts = tabCounts[iteration] ?? { batch: 0, move: 0 };
+  const batchCount = activeCounts.batch;
+  const moveCount = activeCounts.move;
+  const totalBatchCount = Object.values(tabCounts).reduce((sum, c) => sum + c.batch, 0);
+  const totalMoveCount = Object.values(tabCounts).reduce((sum, c) => sum + c.move, 0);
+  const tabBadgeCounts: Record<string, number> = {};
+  for (const [tab, counts] of Object.entries(tabCounts)) {
+    const total = counts.batch + counts.move;
+    if (total > 0) tabBadgeCounts[tab] = total;
+  }
+
+  // All ready iteration iframes (for multi-iframe rendering)
+  const readyIterations = !isDaemonShell && !isEmbedded
+    ? Object.entries(iterations).filter(([, info]) => info.status === "ready" && info.port)
+    : [];
+  const hasReadyIterations = readyIterations.length > 0;
 
   // --- Embedded mode: WebSocket relay for tool mode + postMessage fallback ---
   useEffect(() => {
@@ -132,17 +152,31 @@ function StandaloneOverlay() {
         case "copy-batch":
           window.dispatchEvent(new CustomEvent("iterate:copy-batch"));
           break;
-        case "undo-move":
-          window.dispatchEvent(new CustomEvent("iterate:undo-move"));
+        case "undo":
+          window.dispatchEvent(new CustomEvent("iterate:undo"));
           break;
         case "set-preview":
           if (msg.previewMode !== undefined) setPreviewMode(msg.previewMode);
+          break;
+        case "request-batch-text":
+          window.dispatchEvent(new CustomEvent("iterate:request-batch-text"));
           break;
       }
     };
 
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
+  }, [isEmbedded]);
+
+  // --- Embedded mode: forward batch text response to parent ---
+  useEffect(() => {
+    if (!isEmbedded) return;
+    const handler = (e: Event) => {
+      const text = (e as CustomEvent).detail.text;
+      window.parent.postMessage({ __iterate: true, type: "batch-text", text } as IterateMessage, "*");
+    };
+    window.addEventListener("iterate:batch-text-response", handler);
+    return () => window.removeEventListener("iterate:batch-text-response", handler);
   }, [isEmbedded]);
 
   // --- Embedded mode: send batch/move counts back to parent ---
@@ -159,49 +193,72 @@ function StandaloneOverlay() {
 
   // --- Parent mode: forward tool/action commands to iteration iframe ---
   const postToIframe = useCallback(
-    (msg: IterateMessage) => {
-      iterationIframeRef.current?.contentWindow?.postMessage(msg, "*");
+    (msg: IterateMessage, targetName?: string) => {
+      const name = targetName ?? iterationRef.current;
+      iterationIframeRefs.current[name]?.contentWindow?.postMessage(msg, "*");
     },
     []
   );
 
-  // Forward mode changes to iteration iframe
+  const postToAllIframes = useCallback(
+    (msg: IterateMessage) => {
+      for (const iframe of Object.values(iterationIframeRefs.current)) {
+        iframe?.contentWindow?.postMessage(msg, "*");
+      }
+    },
+    []
+  );
+
+  // Forward mode changes to the active iteration iframe (re-runs on tab switch too)
   useEffect(() => {
     if (!isViewingIteration || isEmbedded) return;
     postToIframe({ __iterate: true, type: "set-mode", mode });
-  }, [mode, isViewingIteration, isEmbedded, postToIframe]);
+  }, [mode, iteration, isViewingIteration, isEmbedded, postToIframe]);
 
-  // Forward preview mode changes to iteration iframe
+  // Forward preview mode changes to all iteration iframes
   useEffect(() => {
-    if (!isViewingIteration || isEmbedded) return;
-    postToIframe({ __iterate: true, type: "set-preview", previewMode });
-  }, [previewMode, isViewingIteration, isEmbedded, postToIframe]);
+    if (isEmbedded) return;
+    postToAllIframes({ __iterate: true, type: "set-preview", previewMode });
+  }, [previewMode, isEmbedded, postToAllIframes]);
 
-  // Listen for messages from iteration iframe (batch counts + ready handshake)
+  // Listen for messages from iteration iframes (batch counts + ready handshake)
   useEffect(() => {
     if (isEmbedded) return;
 
     const handler = (e: MessageEvent) => {
       if (!isIterateMessage(e.data)) return;
+
       if (e.data.type === "batch-counts") {
-        if (e.data.batchCount !== undefined) setBatchCount(e.data.batchCount);
-        if (e.data.moveCount !== undefined) setMoveCount(e.data.moveCount);
+        // Match e.source to a specific iteration iframe
+        for (const [name, iframe] of Object.entries(iterationIframeRefs.current)) {
+          if (iframe?.contentWindow === e.source) {
+            setTabCounts((prev) => ({
+              ...prev,
+              [name]: { batch: e.data.batchCount ?? 0, move: e.data.moveCount ?? 0 },
+            }));
+            break;
+          }
+        }
       } else if (e.data.type === "ready") {
-        // Iframe overlay just mounted — sync current state including iteration name
-        const iframe = iterationIframeRef.current;
-        if (iframe?.contentWindow) {
-          iframe.contentWindow.postMessage(
-            { __iterate: true, type: "set-iteration", iteration: iterationRef.current } as IterateMessage,
-            "*"
-          );
-          iframe.contentWindow.postMessage(
-            { __iterate: true, type: "set-mode", mode: modeRef.current } as IterateMessage,
-            "*"
-          );
-          iframe.contentWindow.postMessage(
-            { __iterate: true, type: "set-preview", previewMode: previewModeRef.current } as IterateMessage,
-            "*"
-          );
+        // Find which iframe sent this ready message and sync state to it
+        for (const [name, iframe] of Object.entries(iterationIframeRefs.current)) {
+          if (iframe?.contentWindow === e.source) {
+            const win = e.source as Window;
+            win.postMessage(
+              { __iterate: true, type: "set-iteration", iteration: name } as IterateMessage,
+              "*"
+            );
+            // Send current mode only to the active iframe; browse to others
+            win.postMessage(
+              { __iterate: true, type: "set-mode", mode: name === iterationRef.current ? modeRef.current : "browse" } as IterateMessage,
+              "*"
+            );
+            win.postMessage(
+              { __iterate: true, type: "set-preview", previewMode: previewModeRef.current } as IterateMessage,
+              "*"
+            );
+            break;
+          }
         }
       }
     };
@@ -349,39 +406,90 @@ function StandaloneOverlay() {
     }
   }, [iterations, iteration, isEmbedded, handleIterationChange]);
 
-  // Handle batch submission — forward to iframe if viewing iteration
+  // Handle batch submission — submit from ALL tabs that have changes
   const handleSubmitBatch = useCallback(() => {
-    if (isViewingIteration) {
-      postToIframe({ __iterate: true, type: "submit-batch" });
-    } else {
+    const origCounts = tabCounts[ORIGINAL_TAB];
+    if (origCounts && (origCounts.batch > 0 || origCounts.move > 0)) {
       window.dispatchEvent(new CustomEvent("iterate:submit-batch"));
     }
-  }, [isViewingIteration, postToIframe]);
+    for (const [name, counts] of Object.entries(tabCounts)) {
+      if (name === ORIGINAL_TAB) continue;
+      if (counts.batch > 0 || counts.move > 0) {
+        postToIframe({ __iterate: true, type: "submit-batch" }, name);
+      }
+    }
+  }, [tabCounts, postToIframe]);
 
-  // Handle clearing all annotations and moves
+  // Handle clearing all annotations and moves — clear ALL tabs
   const handleClearBatch = useCallback(() => {
-    if (isViewingIteration) {
-      postToIframe({ __iterate: true, type: "clear-batch" });
-    } else {
-      window.dispatchEvent(new CustomEvent("iterate:clear-batch"));
-    }
-  }, [isViewingIteration, postToIframe]);
+    window.dispatchEvent(new CustomEvent("iterate:clear-batch"));
+    postToAllIframes({ __iterate: true, type: "clear-batch" });
+  }, [postToAllIframes]);
 
-  // Handle copying annotations to clipboard
+  // Handle copying annotations to clipboard — collect text from ALL tabs
   const handleCopyBatch = useCallback(() => {
-    if (isViewingIteration) {
-      postToIframe({ __iterate: true, type: "copy-batch" });
-    } else {
-      window.dispatchEvent(new CustomEvent("iterate:copy-batch"));
-    }
-  }, [isViewingIteration, postToIframe]);
+    const promises: Promise<string>[] = [];
 
-  // Handle undo last move
+    // Collect from Original tab
+    const origCounts = tabCounts[ORIGINAL_TAB];
+    if (origCounts && (origCounts.batch > 0 || origCounts.move > 0)) {
+      promises.push(
+        new Promise<string>((resolve) => {
+          const handler = (e: Event) => {
+            resolve((e as CustomEvent).detail.text ?? "");
+            window.removeEventListener("iterate:batch-text-response", handler);
+          };
+          window.addEventListener("iterate:batch-text-response", handler);
+          window.dispatchEvent(new CustomEvent("iterate:request-batch-text"));
+          setTimeout(() => {
+            window.removeEventListener("iterate:batch-text-response", handler);
+            resolve("");
+          }, 2000);
+        })
+      );
+    }
+
+    // Collect from each iteration iframe
+    for (const [name, counts] of Object.entries(tabCounts)) {
+      if (name === ORIGINAL_TAB) continue;
+      if (counts.batch > 0 || counts.move > 0) {
+        promises.push(
+          new Promise<string>((resolve) => {
+            const handler = (e: MessageEvent) => {
+              if (!isIterateMessage(e.data)) return;
+              if (e.data.type === "batch-text") {
+                const iframe = iterationIframeRefs.current[name];
+                if (iframe?.contentWindow === e.source) {
+                  resolve(e.data.text ?? "");
+                  window.removeEventListener("message", handler);
+                }
+              }
+            };
+            window.addEventListener("message", handler);
+            postToIframe({ __iterate: true, type: "request-batch-text" }, name);
+            setTimeout(() => {
+              window.removeEventListener("message", handler);
+              resolve("");
+            }, 2000);
+          })
+        );
+      }
+    }
+
+    if (promises.length === 0) return;
+
+    Promise.all(promises).then((texts) => {
+      const combined = texts.filter(Boolean).join("\n\n---\n\n");
+      if (combined) navigator.clipboard.writeText(combined);
+    });
+  }, [tabCounts, postToIframe]);
+
+  // Handle undo last change — only operates on the active tab
   const handleUndoMove = useCallback(() => {
     if (isViewingIteration) {
-      postToIframe({ __iterate: true, type: "undo-move" });
+      postToIframe({ __iterate: true, type: "undo" });
     } else {
-      window.dispatchEvent(new CustomEvent("iterate:undo-move"));
+      window.dispatchEvent(new CustomEvent("iterate:undo"));
     }
   }, [isViewingIteration, postToIframe]);
 
@@ -448,14 +556,25 @@ function StandaloneOverlay() {
     [iterations]
   );
 
-  // Build the iteration iframe URL (framework plugin mode, parent only).
-  // Load directly from the iteration's dev server port — avoids path-prefix
-  // issues where absolute asset paths (/_next/...) would 404 through the proxy.
-  const iterationPort = iterations[iteration]?.port;
-  const iterationUrl =
-    !isDaemonShell && !isEmbedded && isViewingIteration && iterationPort
-      ? `http://${window.location.hostname}:${iterationPort}/`
-      : null;
+  // Clean up stale iframe refs when iterations are removed
+  useEffect(() => {
+    const currentNames = new Set(Object.keys(iterations));
+    for (const name of Object.keys(iterationIframeRefs.current)) {
+      if (!currentNames.has(name)) {
+        delete iterationIframeRefs.current[name];
+      }
+    }
+    // Also clean up stale tabCounts for removed iterations
+    setTabCounts((prev) => {
+      const cleaned: Record<string, { batch: number; move: number }> = {};
+      for (const [key, val] of Object.entries(prev)) {
+        if (key === ORIGINAL_TAB || currentNames.has(key)) {
+          cleaned[key] = val;
+        }
+      }
+      return cleaned;
+    });
+  }, [iterations]);
 
   // Lazily create a portal target for the iteration iframe (sibling of overlay root,
   // NOT inside it — avoids pointer-events:none inheritance blocking iframe clicks)
@@ -471,28 +590,23 @@ function StandaloneOverlay() {
     iframePortalRef.current = el;
   }
 
-  // Show/hide the portal container based on whether we need the iframe
+  // Show/hide the portal container based on whether we're viewing an iteration
   useEffect(() => {
     const portal = iframePortalRef.current;
     if (!portal) return;
-    if (iterationUrl) {
+    if (isViewingIteration && hasReadyIterations) {
       portal.style.display = "block";
       portal.style.pointerEvents = "auto";
     } else {
       portal.style.display = "none";
       portal.style.pointerEvents = "none";
     }
-  }, [iterationUrl]);
+  }, [isViewingIteration, hasReadyIterations]);
 
-  // Determine which iframe ref to pass to IterateOverlay:
-  // - Daemon shell: use iframeRef (set by viewport observer)
-  // - Framework plugin viewing iteration: use iterationIframeRef (cross-origin, tools are no-op)
-  // - Framework plugin viewing original: use iframeRef (null, targets parent document)
-  const activeIframeRef = isDaemonShell
-    ? iframeRef
-    : isViewingIteration
-      ? iterationIframeRef
-      : iframeRef;
+  // The parent IterateOverlay always uses iframeRef.
+  // When viewing iterations, parent overlay is forced to browse mode — the
+  // actual tools are handled by the embedded overlay inside each iteration iframe.
+  const activeIframeRef = iframeRef;
 
   // If embedded in an iframe, only render the IterateOverlay (no FloatingPanel)
   if (isEmbedded) {
@@ -502,8 +616,18 @@ function StandaloneOverlay() {
         iteration={iteration}
         wsUrl={wsUrl}
         iframeRef={iframeRef}
-        onBatchCountChange={setBatchCount}
-        onMoveCountChange={setMoveCount}
+        onBatchCountChange={(count) => {
+          setTabCounts((prev) => ({
+            ...prev,
+            [iteration]: { batch: count, move: prev[iteration]?.move ?? 0 },
+          }));
+        }}
+        onMoveCountChange={(count) => {
+          setTabCounts((prev) => ({
+            ...prev,
+            [iteration]: { batch: prev[iteration]?.batch ?? 0, move: count },
+          }));
+        }}
         previewMode={previewMode}
       />
     );
@@ -511,20 +635,28 @@ function StandaloneOverlay() {
 
   return (
     <>
-      {/* Iteration preview iframe — rendered via portal OUTSIDE overlay root
-          to avoid pointer-events:none inheritance blocking iframe interactions */}
-      {iterationUrl && iframePortalRef.current && createPortal(
-        <iframe
-          ref={iterationIframeRef}
-          src={iterationUrl}
-          style={{
-            width: "100%",
-            height: "100%",
-            border: "none",
-            display: "block",
-          }}
-          title={`Iteration: ${iteration}`}
-        />,
+      {/* Iteration preview iframes — ALL ready iterations are rendered simultaneously
+          via portal OUTSIDE overlay root to avoid pointer-events:none inheritance.
+          Only the active iteration is visible; others stay hidden to preserve state. */}
+      {iframePortalRef.current && readyIterations.length > 0 && createPortal(
+        <>
+          {readyIterations.map(([name, info]) => (
+            <iframe
+              key={name}
+              ref={(el) => { iterationIframeRefs.current[name] = el; }}
+              src={`http://${window.location.hostname}:${info.port}/`}
+              style={{
+                width: "100%",
+                height: "100%",
+                border: "none",
+                display: name === iteration ? "block" : "none",
+                position: "absolute",
+                inset: 0,
+              }}
+              title={`Iteration: ${name}`}
+            />
+          ))}
+        </>,
         iframePortalRef.current
       )}
 
@@ -537,8 +669,18 @@ function StandaloneOverlay() {
         iteration={iteration}
         wsUrl={wsUrl}
         iframeRef={activeIframeRef}
-        onBatchCountChange={isViewingIteration ? undefined : setBatchCount}
-        onMoveCountChange={isViewingIteration ? undefined : setMoveCount}
+        onBatchCountChange={(count) => {
+          setTabCounts((prev) => ({
+            ...prev,
+            [ORIGINAL_TAB]: { batch: count, move: prev[ORIGINAL_TAB]?.move ?? 0 },
+          }));
+        }}
+        onMoveCountChange={(count) => {
+          setTabCounts((prev) => ({
+            ...prev,
+            [ORIGINAL_TAB]: { batch: prev[ORIGINAL_TAB]?.batch ?? 0, move: count },
+          }));
+        }}
         previewMode={previewMode}
       />
 
@@ -548,14 +690,12 @@ function StandaloneOverlay() {
         onModeChange={handleModeChange}
         visible={visible}
         onVisibilityChange={setVisible}
-        batchCount={batchCount}
-        moveCount={moveCount}
+        batchCount={totalBatchCount}
+        moveCount={totalMoveCount}
         onSubmitBatch={handleSubmitBatch}
         onClearBatch={handleClearBatch}
         onCopyBatch={handleCopyBatch}
         onUndoMove={handleUndoMove}
-        previewMode={previewMode}
-        onPreviewModeChange={setPreviewMode}
         iterations={iterations}
         activeIteration={iteration}
         onIterationChange={handleIterationChange}
@@ -563,6 +703,7 @@ function StandaloneOverlay() {
         onPick={handlePick}
         onDiscard={handleDiscard}
         isViewingIteration={isViewingIteration}
+        tabBadgeCounts={tabBadgeCounts}
       />
     </>
   );

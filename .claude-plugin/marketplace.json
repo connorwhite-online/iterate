@@ -1,0 +1,13 @@
+{
+  "name": "iterate-plugins",
+  "owner": {
+    "name": "iterate"
+  },
+  "plugins": [
+    {
+      "name": "iterate",
+      "source": "./packages/cli",
+      "description": "Visual feedback loop for AI-assisted UI development."
+    }
+  ]
+}

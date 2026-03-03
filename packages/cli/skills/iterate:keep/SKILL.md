@@ -1,5 +1,5 @@
 ---
-name: keep
+name: "iterate:keep"
 description: Pick a winning iteration to merge back to the base branch and clean up the rest.
 argument-hint: <iteration name or description>
 ---

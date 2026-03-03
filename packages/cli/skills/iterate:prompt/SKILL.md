@@ -1,5 +1,5 @@
 ---
-name: prompt
+name: "iterate:prompt"
 description: Create multiple iterate variations from a design prompt and implement each one differently.
 argument-hint: <design prompt>
 ---
@@ -20,6 +20,7 @@ The user wants to create multiple UI variations from a prompt. Their prompt is:
 3. **Wait for iterations.** After creating all iterations, call `iterate_list_iterations` to confirm they're all in `ready` status. If any are still starting up, wait briefly and check again.
 
 4. **Implement variations.** For each iteration, make meaningfully different code changes that address the prompt. The iteration's `worktreePath` tells you where its code lives — all file edits for that variation must happen inside that worktree path.
+   - **IMPORTANT: Worktrees are full repository checkouts.** The `worktreePath` points to the repo root, NOT the app subdirectory. If the app lives at `examples/next-app/` in the repo, you must edit files at `{worktreePath}/examples/next-app/src/...`, not `{worktreePath}/src/...`. Always check the repo structure to find the correct path relative to the worktree root.
    - Each variation should take a distinct creative direction
    - Changes should be substantial enough that the user can see real differences
    - Focus on the visual/functional differences implied by the prompt

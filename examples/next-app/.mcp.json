@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "iterate": {
+      "command": "npx",
+      "args": [
+        "iterate-mcp"
+      ],
+      "env": {
+        "ITERATE_DAEMON_PORT": "4000"
+      }
+    }
+  }
+}

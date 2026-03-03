@@ -7,6 +7,9 @@ export type IterationStatus =
   | "error"
   | "stopped";
 
+/** How this iteration was created */
+export type IterationSource = "iterate" | "external";
+
 /** Information about a single iteration (worktree + dev server) */
 export interface IterationInfo {
   name: string;
@@ -20,4 +23,6 @@ export interface IterationInfo {
   commandPrompt?: string;
   /** Groups iterations from the same /iterate command */
   commandId?: string;
+  /** How this iteration was created: "iterate" (via API) or "external" (discovered worktree) */
+  source?: IterationSource;
 }

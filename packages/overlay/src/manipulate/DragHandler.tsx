@@ -383,7 +383,7 @@ export function DragHandler({
               top: move.from.y,
               width: move.from.width,
               height: move.from.height,
-              border: "2px dashed rgba(124, 58, 237, 0.5)",
+              border: "2px dashed rgba(37, 99, 235, 0.5)",
               borderRadius: 4,
               pointerEvents: "none",
             }}
@@ -412,7 +412,7 @@ export function DragHandler({
               >
                 <polygon
                   points="0 0, 8 3, 0 6"
-                  fill="rgba(124, 58, 237, 0.6)"
+                  fill="rgba(37, 99, 235, 0.6)"
                 />
               </marker>
             </defs>
@@ -421,7 +421,7 @@ export function DragHandler({
               y1={move.from.y + move.from.height / 2}
               x2={move.to.x + move.to.width / 2}
               y2={move.to.y + move.to.height / 2}
-              stroke="rgba(124, 58, 237, 0.4)"
+              stroke="rgba(37, 99, 235, 0.4)"
               strokeWidth="1.5"
               strokeDasharray="4 3"
               markerEnd={`url(#arrowhead-${idx})`}
@@ -437,7 +437,7 @@ export function DragHandler({
               width: 18,
               height: 18,
               borderRadius: "50%",
-              background: move.reorderIndex !== undefined ? "#2563eb" : "#7c3aed",
+              background: "#2563eb",
               color: "#fff",
               fontSize: 10,
               fontWeight: 700,

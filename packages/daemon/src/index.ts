@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 import { execa } from "execa";
 import { DEFAULT_CONFIG, type IterateConfig, type IterationInfo } from "iterate-ui-core";
 import { StateStore } from "./state/store.js";
-import { WorktreeManager } from "./worktree/manager.js";
+import { WorktreeManager, type DiscoveredWorktree } from "./worktree/manager.js";
 import { ProcessManager } from "./process/manager.js";
 import { WebSocketHub } from "./websocket/hub.js";
 import { registerProxyRoutes } from "./proxy/router.js";
@@ -82,6 +82,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
         pid: null,
         status: "creating",
         createdAt: new Date().toISOString(),
+        source: "iterate",
       };
       store.setIteration(name, info);
       wsHub.broadcast({ type: "iteration:status", payload: { name, status: "creating" } });
@@ -90,7 +91,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
       info.worktreePath = worktreePath;
       info.branch = branch;
 
-      // Install dependencies
+      // Install dependencies (always at worktree root)
       info.status = "installing";
       store.setIteration(name, info);
       wsHub.broadcast({ type: "iteration:status", payload: { name, status: "installing" } });
@@ -105,7 +106,9 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
         await execa(buildCmd!, buildArgs, { cwd: worktreePath });
       }
 
-      // Start dev server
+      // Start dev server (in appDir subdirectory if configured, for monorepos)
+      const devCwd = config.appDir ? join(worktreePath, config.appDir) : worktreePath;
+
       info.status = "starting";
       store.setIteration(name, info);
       wsHub.broadcast({ type: "iteration:status", payload: { name, status: "starting" } });
@@ -114,8 +117,12 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
       info.port = allocatedPort;
 
       const devCommand = buildDevCommand(config.devCommand, allocatedPort);
-      const { pid } = await processManager.start(name, worktreePath, devCommand, allocatedPort);
+      const { pid } = await processManager.start(name, devCwd, devCommand, allocatedPort);
       info.pid = pid ?? null;
+
+      // Wait for the dev server to actually accept connections before marking ready
+      await processManager.waitForReady(allocatedPort);
+
       info.status = "ready";
       store.setIteration(name, info);
 
@@ -144,11 +151,25 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     }
 
     await processManager.stop(name);
-    try {
-      await worktreeManager.remove(name);
-    } catch {
-      // Worktree may already be removed
+
+    if (iteration.source !== "external") {
+      // Iterate-created worktree: remove worktree and branch
+      try {
+        await worktreeManager.remove(name);
+      } catch {
+        // Worktree may already be removed
+      }
+    } else if (iteration.worktreePath) {
+      // External worktrees: remove the worktree and branch so they're fully cleaned up.
+      try {
+        await worktreeManager.removeByPath(iteration.worktreePath, iteration.branch, true);
+      } catch {
+        // Worktree may already be removed — add to ignored set as fallback
+        // so the discovery loop won't re-register it.
+        ignoredPaths.add(iteration.worktreePath);
+      }
     }
+
     store.removeIteration(name);
     wsHub.broadcast({ type: "iteration:removed", payload: { name } });
 
@@ -168,19 +189,29 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
 
     await processManager.stopAll();
 
-    const allNames = Object.keys(store.getIterations());
+    const allIterations = Object.values(store.getIterations()).map((it) => ({
+      name: it.name,
+      worktreePath: it.worktreePath,
+      branch: it.branch,
+      source: it.source,
+    }));
 
     try {
-      await worktreeManager.pick(name, allNames, strategy);
+      await worktreeManager.pick(
+        iteration.branch,
+        iteration.worktreePath,
+        allIterations,
+        strategy
+      );
     } catch (err) {
       return reply.status(500).send({
         message: `Pick failed: ${(err as Error).message}`,
       });
     }
 
-    for (const n of allNames) {
-      store.removeIteration(n);
-      wsHub.broadcast({ type: "iteration:removed", payload: { name: n } });
+    for (const iter of allIterations) {
+      store.removeIteration(iter.name);
+      wsHub.broadcast({ type: "iteration:removed", payload: { name: iter.name } });
     }
 
     return { ok: true, merged: name };
@@ -289,6 +320,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
           createdAt: new Date().toISOString(),
           commandPrompt: prompt?.trim() ?? "",
           commandId,
+          source: "iterate",
         };
         store.setIteration(name, info);
         // Broadcast as iteration:created so overlay tracks all iterations immediately
@@ -319,6 +351,9 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
               await execa(buildCmd!, buildArgs, { cwd: worktreePath });
             }
 
+            // Start dev server (in appDir subdirectory if configured, for monorepos)
+            const devCwd = config.appDir ? join(worktreePath, config.appDir) : worktreePath;
+
             info.status = "starting";
             store.setIteration(name, info);
             wsHub.broadcast({ type: "iteration:status", payload: { name, status: "starting" } });
@@ -327,8 +362,12 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
             info.port = allocatedPort;
 
             const devCommand = buildDevCommand(config.devCommand, allocatedPort);
-            const { pid } = await processManager.start(name, worktreePath, devCommand, allocatedPort);
+            const { pid } = await processManager.start(name, devCwd, devCommand, allocatedPort);
             info.pid = pid ?? null;
+
+            // Wait for the dev server to actually accept connections before marking ready
+            await processManager.waitForReady(allocatedPort);
+
             info.status = "ready";
             store.setIteration(name, info);
             wsHub.broadcast({ type: "iteration:created", payload: info });
@@ -397,6 +436,27 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     process.exit(1);
   }
 
+  // --- General worktree detection ---
+  // Discover existing worktrees on startup and scan periodically
+  const pendingPaths = new Set<string>();
+  const ignoredPaths = new Set<string>();
+
+  const scanWorktrees = async () => {
+    try {
+      await discoverAndRegisterWorktrees(
+        worktreeManager, processManager, store, wsHub, config, pendingPaths, ignoredPaths
+      );
+    } catch (err) {
+      console.error("[iterate] Worktree scan failed:", err);
+    }
+  };
+
+  // Initial scan
+  await scanWorktrees();
+
+  // Periodic scan every 5 seconds
+  const scanInterval = setInterval(scanWorktrees, 5000);
+
   // Cleanup on exit — guard against double invocation
   let isShuttingDown = false;
 
@@ -404,6 +464,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     if (isShuttingDown) return;
     isShuttingDown = true;
 
+    clearInterval(scanInterval);
     console.log("\nShutting down iterate daemon...");
     try {
       await processManager.stopAll();
@@ -416,6 +477,155 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
 
   process.on("SIGINT", cleanup);
   process.on("SIGTERM", cleanup);
+}
+
+// --- Worktree discovery ---
+
+/** Derive a display name from a branch name */
+function deriveIterationName(branch: string): string {
+  // "iterate/v1-cards" → "v1-cards"
+  if (branch.startsWith("iterate/")) return branch.slice("iterate/".length);
+  // Take the last segment after any slash
+  const parts = branch.split("/");
+  let name = parts[parts.length - 1] ?? branch;
+  // Sanitize: only allow alphanumeric, hyphens, underscores
+  name = name.replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  return name || branch.replace(/[^a-zA-Z0-9_-]/g, "-");
+}
+
+/** Generate a unique iteration name, appending a suffix if needed */
+function uniqueName(baseName: string, store: StateStore): string {
+  if (!store.getIteration(baseName)) return baseName;
+  let i = 2;
+  while (store.getIteration(`${baseName}-${i}`)) i++;
+  return `${baseName}-${i}`;
+}
+
+/**
+ * Discover git worktrees not yet tracked by the daemon and register them.
+ * Also removes iterations for worktrees that have disappeared.
+ */
+async function discoverAndRegisterWorktrees(
+  worktreeManager: WorktreeManager,
+  processManager: ProcessManager,
+  store: StateStore,
+  wsHub: WebSocketHub,
+  config: IterateConfig,
+  pendingPaths: Set<string>,
+  ignoredPaths: Set<string>
+): Promise<void> {
+  const allWorktrees = await worktreeManager.discoverAll();
+  const currentIterations = store.getIterations();
+
+  // Get the actual git repo root (main worktree) to skip it
+  const repoRoot = await worktreeManager.getRepoRoot();
+
+  // Build a set of known worktree paths for quick lookup
+  const knownPaths = new Set(
+    Object.values(currentIterations).map((it) => it.worktreePath)
+  );
+
+  for (const wt of allWorktrees) {
+    // Skip the main worktree (repo root)
+    if (wt.path === repoRoot) continue;
+
+    // Skip detached HEAD worktrees
+    if (wt.detached) continue;
+
+    // Skip if already tracked, currently being registered, or explicitly dismissed
+    if (knownPaths.has(wt.path)) continue;
+    if (pendingPaths.has(wt.path)) continue;
+    if (ignoredPaths.has(wt.path)) continue;
+
+    // Skip if any existing iteration has this branch
+    const alreadyTrackedByBranch = Object.values(currentIterations).some(
+      (it) => it.branch === wt.branch
+    );
+    if (alreadyTrackedByBranch) continue;
+
+    // Respect maxIterations limit
+    const iterationCount = Object.keys(store.getIterations()).length + pendingPaths.size;
+    if (iterationCount >= config.maxIterations) break;
+
+    // This is a new, untracked worktree — register it
+    pendingPaths.add(wt.path);
+    const baseName = deriveIterationName(wt.branch);
+    const name = uniqueName(baseName, store);
+
+    const info: IterationInfo = {
+      name,
+      branch: wt.branch,
+      worktreePath: wt.path,
+      port: 0,
+      pid: null,
+      status: "creating",
+      createdAt: new Date().toISOString(),
+      source: "external",
+    };
+
+    store.setIteration(name, info);
+    wsHub.broadcast({ type: "iteration:created", payload: info });
+
+    // Fire off the startup pipeline asynchronously
+    (async () => {
+      try {
+        info.status = "installing";
+        store.setIteration(name, info);
+        wsHub.broadcast({ type: "iteration:status", payload: { name, status: "installing" } });
+
+        const installCmd = getInstallCommand(config.packageManager);
+        const [cmd, ...args] = installCmd.split(" ");
+        await execa(cmd!, args, { cwd: wt.path });
+
+        if (config.buildCommand) {
+          const [buildCmd, ...buildArgs] = config.buildCommand.split(" ");
+          await execa(buildCmd!, buildArgs, { cwd: wt.path });
+        }
+
+        // Start dev server (in appDir subdirectory if configured)
+        const devCwd = config.appDir
+          ? (existsSync(join(wt.path, config.appDir)) ? join(wt.path, config.appDir) : wt.path)
+          : wt.path;
+
+        info.status = "starting";
+        store.setIteration(name, info);
+        wsHub.broadcast({ type: "iteration:status", payload: { name, status: "starting" } });
+
+        const allocatedPort = await processManager.allocatePort();
+        info.port = allocatedPort;
+
+        const devCommand = buildDevCommand(config.devCommand, allocatedPort);
+        const { pid } = await processManager.start(name, devCwd, devCommand, allocatedPort);
+        info.pid = pid ?? null;
+
+        await processManager.waitForReady(allocatedPort);
+
+        info.status = "ready";
+        store.setIteration(name, info);
+        wsHub.broadcast({ type: "iteration:created", payload: info });
+      } catch (err) {
+        console.error(`[iterate] Failed to start external worktree "${name}":`, (err as Error).message);
+        info.status = "error";
+        store.setIteration(name, info);
+        wsHub.broadcast({ type: "iteration:status", payload: { name, status: "error" } });
+      } finally {
+        pendingPaths.delete(wt.path);
+      }
+    })();
+  }
+
+  // Handle removal: check if any tracked external iterations have disappeared
+  const worktreePaths = new Set(allWorktrees.map((wt) => wt.path));
+  for (const [name, iteration] of Object.entries(currentIterations)) {
+    if (iteration.source !== "external") continue;
+    if (!iteration.worktreePath) continue;
+    if (worktreePaths.has(iteration.worktreePath)) continue;
+
+    console.log(`[iterate] External worktree "${name}" no longer exists, removing...`);
+    await processManager.stop(name);
+    store.removeIteration(name);
+    wsHub.broadcast({ type: "iteration:removed", payload: { name } });
+  }
 }
 
 function getInstallCommand(pm: IterateConfig["packageManager"]): string {
@@ -532,6 +742,7 @@ function getShellHTML(): string {
         tab.className = 'tab' + (name === activeIteration ? ' active' : '');
         const dot = document.createElement('span'); dot.className = 'status-dot ' + (info.status || 'stopped');
         tab.appendChild(dot); tab.appendChild(document.createTextNode(name));
+        if (info.source === 'external') { const badge = document.createElement('span'); badge.style.cssText = 'font-size:9px;color:#666;margin-left:4px;'; badge.textContent = '(ext)'; tab.appendChild(badge); }
         if (info.commandPrompt) tab.title = info.commandPrompt;
         tab.addEventListener('click', () => switchIteration(name)); bar.appendChild(tab);
       }

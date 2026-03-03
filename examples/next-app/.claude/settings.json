@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "iterate-plugins": {
+      "source": {
+        "source": "github",
+        "repo": "connorwhite-online/iterate"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "iterate@iterate-plugins": true
+  }
+}

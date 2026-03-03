@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ToolMode } from "../IterateOverlay.js";
 import type { IterationInfo, IterationStatus } from "iterate-ui-core";
 import {
@@ -10,8 +11,8 @@ import {
   LogoIcon,
   TrashIcon,
   CopyIcon,
+  CheckIcon,
   UndoIcon,
-  PreviewIcon,
   ForkIcon,
   PickIcon,
   SpinnerIcon,
@@ -37,10 +38,6 @@ export interface FloatingPanelProps {
   onCopyBatch?: () => void;
   /** Called when user clicks Undo (revert last move) */
   onUndoMove?: () => void;
-  /** Whether live preview mode is active */
-  previewMode?: boolean;
-  /** Toggle live preview mode */
-  onPreviewModeChange?: (enabled: boolean) => void;
   /** Available iterations (from daemon state) */
   iterations?: Record<string, IterationInfo>;
   /** Currently active iteration name */
@@ -55,6 +52,8 @@ export interface FloatingPanelProps {
   onDiscard?: () => void | Promise<void>;
   /** Whether currently viewing an iteration (not Original) */
   isViewingIteration?: boolean;
+  /** Badge counts per tab (tab name → total pending changes) */
+  tabBadgeCounts?: Record<string, number>;
 }
 
 type Corner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
@@ -64,6 +63,9 @@ const ICON_SIZE = 24;
 
 // Spring-like cubic bezier
 const SPRING = "cubic-bezier(0.34, 1.56, 0.64, 1)";
+
+/** Whether tooltips should appear below (true) or above (false) the buttons */
+const TooltipDirectionContext = React.createContext<boolean>(false);
 
 // Duration for suspense overlay animations (spinner + text sync)
 const SUSPENSE_DURATION = "1.2s";
@@ -82,12 +84,12 @@ const STATUS_COLORS: Record<IterationStatus, string> = {
  * Single container that animates between collapsed (logo only) and expanded states.
  * Can be dragged to any corner of the screen.
  *
- * Toolbar sections (separated by dividers):
- * 1. Annotation tools (cursor, move)
- * 2. Revision tools (undo, preview, trash)
- * 3. Agent context tools (send, copy)
- * 4. Branching tools (fork/iterate, merge/pick, discard)
- * 5. Close/open toggle
+ * All collapsible tools live in a single ToolGroup for consistent flex spacing.
+ * Sections (separated by dividers):
+ * 1. Annotation tools (select, draw, move)
+ * 2. Change tools (undo, trash, copy, send) — no internal divider
+ * 3. Branching tools (fork/iterate, merge/pick, discard)
+ * 4. Close/open toggle (always visible)
  */
 export function FloatingPanel({
   mode,
@@ -100,8 +102,6 @@ export function FloatingPanel({
   onClearBatch,
   onCopyBatch,
   onUndoMove,
-  previewMode = true,
-  onPreviewModeChange,
   iterations,
   activeIteration,
   onIterationChange,
@@ -109,6 +109,7 @@ export function FloatingPanel({
   onPick,
   onDiscard,
   isViewingIteration = false,
+  tabBadgeCounts = {},
 }: FloatingPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [corner, setCorner] = useState<Corner>("bottom-right");
@@ -118,6 +119,10 @@ export function FloatingPanel({
   const [forkLoading, setForkLoading] = useState(false);
   const [pickLoading, setPickLoading] = useState(false);
   const [discardLoading, setDiscardLoading] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [sendSuccess, setSendSuccess] = useState(false);
+  const sendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const iterationNames = iterations
     ? Object.keys(iterations).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
@@ -132,6 +137,23 @@ export function FloatingPanel({
   const totalPending = batchCount + moveCount;
   const isLeftSide = corner === "top-left" || corner === "bottom-left";
   const isTopSide = corner === "top-left" || corner === "top-right";
+
+  // Whether any branching tool is showing (to render divider)
+  const branchingVisible =
+    (!hasIterations && !forkLoading && !isCreating) ||
+    (forkLoading || isCreating) ||
+    (hasIterations && isViewingIteration && !pickLoading && !isCreating) ||
+    pickLoading ||
+    (hasIterations && !isViewingIteration && !discardLoading && !isCreating) ||
+    discardLoading;
+
+  // Clean up success timers on unmount
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      if (sendTimerRef.current) clearTimeout(sendTimerRef.current);
+    };
+  }, []);
 
   // Clear local fork loading state once real iterations appear
   useEffect(() => {
@@ -151,7 +173,7 @@ export function FloatingPanel({
   const suspenseMessage = pickLoading
     ? "Merging preferred changes\u2026"
     : discardLoading
-      ? "Removing iteration branches\u2026"
+      ? "Removing iteration worktrees\u2026"
       : "Creating iteration branches\u2026";
 
   // Hotkey: Alt+Shift+I to toggle
@@ -227,7 +249,7 @@ export function FloatingPanel({
     : "left 0.3s ease, top 0.3s ease, right 0.3s ease, bottom 0.3s ease";
 
   return (
-    <>
+    <TooltipDirectionContext.Provider value={isTopSide}>
       {/* Suspense overlay — covers page while creating/merging worktrees */}
       <SuspenseOverlay active={suspenseActive} message={suspenseMessage} />
 
@@ -239,8 +261,8 @@ export function FloatingPanel({
           ...positionStyle,
           zIndex: 10001,
           pointerEvents: "auto",
-          background: "#fff",
-          border: "1px solid #e0e0e0",
+          background: "#f7f7f7",
+          border: "none",
           borderRadius: 12,
           boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
           display: "flex",
@@ -249,6 +271,7 @@ export function FloatingPanel({
           cursor: isDragging ? "grabbing" : "grab",
           userSelect: "none",
           overflow: "hidden",
+          padding: 4,
           transition: `${positionTransition}`,
         }}
       >
@@ -257,80 +280,76 @@ export function FloatingPanel({
           <div
             style={{
               background: "#f7f7f7",
-              maxHeight: visible ? 40 : 0,
+              maxHeight: visible ? 48 : 0,
+              maxWidth: visible ? 999 : 0,
               opacity: visible ? 1 : 0,
               overflow: "hidden",
-              transition: `max-height 0.25s ease ${visible ? "0s" : "0.15s"}, opacity 0.2s ease ${visible ? "0s" : "0.1s"}`,
+              // 2px gap between tabs and toolbar — collapses with tabs.
+              // In column (bottom-side), tabs are below toolbar → marginTop.
+              // In column-reverse (top-side), tabs are above toolbar → marginBottom.
+              ...(isTopSide
+                ? { marginBottom: visible ? 2 : 0 }
+                : { marginTop: visible ? 2 : 0 }),
+              // Opening: tabs slide in AFTER tools (0.2s delay)
+              // Closing: tabs collapse FIRST and fast (0s delay, 0.12s duration)
+              transition: visible
+                ? `max-height 0.2s ease 0.2s, max-width 0.2s ease 0.2s, opacity 0.15s ease 0.2s, margin 0.2s ease 0.2s`
+                : `max-height 0.12s ease 0s, max-width 0.12s ease 0s, opacity 0.1s ease 0s, margin 0.12s ease 0s`,
             }}
           >
             <div
               style={{
-                padding: "4px 4px 6px 4px",
+                padding: "4px 4px 4px 4px",
               }}
             >
             <div
+              ref={(el) => {
+                // Hide WebKit scrollbar via direct style injection
+                if (el && !el.dataset.scrollbarHidden) {
+                  const style = document.createElement("style");
+                  style.textContent = `[data-iterate-tabs]::-webkit-scrollbar { display: none; }`;
+                  el.appendChild(style);
+                  el.dataset.scrollbarHidden = "1";
+                }
+              }}
+              data-iterate-tabs=""
               style={{
                 display: "flex",
                 alignItems: "center",
                 gap: 2,
                 overflowX: "auto",
-              }}
+                scrollbarWidth: "none",
+              } as React.CSSProperties}
             >
               {/* Original tab — switch back to the base page */}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onIterationChange?.(ORIGINAL_TAB);
-                }}
+              <TabButton
+                active={activeIteration === ORIGINAL_TAB}
+                hasChanges={(tabBadgeCounts[ORIGINAL_TAB] ?? 0) > 0}
                 title="View original page"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 4,
-                  padding: "3px 8px",
-                  borderRadius: 6,
-                  border: "1px solid transparent",
-                  background: activeIteration === ORIGINAL_TAB ? "#e8e8e8" : "transparent",
-                  color: activeIteration === ORIGINAL_TAB ? "#141414" : "#666",
-                  cursor: "pointer",
-                  fontSize: 11,
-                  fontWeight: activeIteration === ORIGINAL_TAB ? 600 : 400,
-                  fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-                  whiteSpace: "nowrap",
-                  flexShrink: 0,
-                  transition: "all 0.15s ease",
-                }}
+                onClick={() => onIterationChange?.(ORIGINAL_TAB)}
               >
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: "50%",
+                    background: STATUS_COLORS.ready,
+                    flexShrink: 0,
+                  }}
+                />
                 Original
-              </button>
+              </TabButton>
               {iterationNames.map((name) => {
                 const info = iterations![name];
                 const isActive = name === activeIteration;
+                const badgeCount = tabBadgeCounts[name] ?? 0;
                 return (
-                  <button
+                  <TabButton
                     key={name}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onIterationChange?.(name);
-                    }}
+                    active={isActive}
+                    hasChanges={badgeCount > 0}
                     title={info?.commandPrompt || name}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 4,
-                      padding: "3px 8px",
-                      borderRadius: 6,
-                      border: "1px solid transparent",
-                      background: isActive ? "#e8e8e8" : "transparent",
-                      color: isActive ? "#141414" : "#666",
-                      cursor: "pointer",
-                      fontSize: 11,
-                      fontWeight: isActive ? 600 : 400,
-                      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-                      whiteSpace: "nowrap",
-                      flexShrink: 0,
-                      transition: "all 0.15s ease",
-                    }}
+                    onClick={() => onIterationChange?.(name)}
                   >
                     <span
                       style={{
@@ -342,7 +361,7 @@ export function FloatingPanel({
                       }}
                     />
                     {name}
-                  </button>
+                  </TabButton>
                 );
               })}
             </div>
@@ -350,21 +369,23 @@ export function FloatingPanel({
           </div>
         )}
 
-        {/* Main toolbar row — upper layer with top radii and upward shadow */}
+        {/* Main toolbar row — upper layer */}
         <div
           style={{
             position: "relative",
             display: "flex",
             flexDirection: isLeftSide ? "row-reverse" : "row",
+            justifyContent: "flex-end",
             alignItems: "center",
             background: "#fff",
-            borderRadius: isTopSide ? "0 0 12px 12px" : "12px 12px 0 0",
-            boxShadow: isTopSide ? "0 3px 8px rgba(0,0,0,0.06)" : "0 -3px 8px rgba(0,0,0,0.06)",
+            border: "1px solid #e0e0e0",
+            borderRadius: 10,
             padding: 4,
           }}
         >
-          {/* === Section 1: Annotation tools === */}
+          {/* === All collapsible tools in a single group === */}
           <ToolGroup reversed={isLeftSide} visible={visible}>
+            {/* Annotation tools */}
             <IconButton
               icon={<CursorIcon size={ICON_SIZE} />}
               label="Select"
@@ -383,192 +404,184 @@ export function FloatingPanel({
               active={mode === "move"}
               onClick={() => onModeChange(mode === "move" ? "browse" : "move")}
             />
-          </ToolGroup>
 
-          {/* === Section 2: Revision tools === */}
-          <ToolGroup reversed={isLeftSide} visible={visible && (moveCount > 0 || totalPending > 0)}>
+            {/* Change tools — always visible, disabled when no pending changes */}
             <Divider />
-            {moveCount > 0 && (
-              <IconButton
-                icon={<PreviewIcon size={ICON_SIZE} />}
-                label={previewMode ? "Showing preview \u2014 click to show original" : "Showing original \u2014 click to show preview"}
-                active={previewMode}
-                onClick={() => onPreviewModeChange?.(!previewMode)}
-              />
-            )}
-            {moveCount > 0 && (
-              <IconButton
-                icon={<UndoIcon size={ICON_SIZE} />}
-                label="Undo last move"
-                onClick={() => onUndoMove?.()}
-              />
-            )}
+            <IconButton
+              icon={<UndoIcon size={ICON_SIZE} />}
+              label="Undo last change"
+              disabled={totalPending === 0}
+              onClick={() => onUndoMove?.()}
+            />
             <IconButton
               icon={<TrashIcon size={ICON_SIZE} />}
               label="Clear all changes"
+              disabled={totalPending === 0}
               onClick={() => onClearBatch?.()}
             />
-            {moveCount > 0 && <MoveBadge count={moveCount} />}
-          </ToolGroup>
-
-          {/* === Section 3: Agent context tools === */}
-          <ToolGroup reversed={isLeftSide} visible={visible && totalPending > 0}>
-            <Divider />
             <IconButton
-              icon={<SendIcon size={ICON_SIZE} />}
-              label={`Submit ${totalPending} change${totalPending !== 1 ? "s" : ""} (${batchCount} annotation${batchCount !== 1 ? "s" : ""}, ${moveCount} move${moveCount !== 1 ? "s" : ""})`}
-              onClick={() => onSubmitBatch?.()}
-            />
-            <IconButton
-              icon={<CopyIcon size={ICON_SIZE} />}
-              label="Copy changes to clipboard"
-              onClick={() => onCopyBatch?.()}
-            />
-          </ToolGroup>
-
-          {/* === Section 4: Branching tools === */}
-
-          {/* Fork / Iterate button — shown when no iterations exist and not loading */}
-          <ToolGroup reversed={isLeftSide} visible={visible && !hasIterations && !forkLoading && !isCreating}>
-            <Divider />
-            <IconButton
-              icon={<ForkIcon size={ICON_SIZE} />}
-              label="Create iterations"
+              icon={
+                <div style={{ position: "relative", width: ICON_SIZE, height: ICON_SIZE }}>
+                  <div style={{
+                    position: "absolute",
+                    inset: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    opacity: copySuccess ? 0 : 1,
+                    transform: copySuccess ? "scale(0.6)" : "scale(1)",
+                    filter: copySuccess ? "blur(4px)" : "blur(0px)",
+                    transition: `opacity 0.25s ${SPRING}, transform 0.3s ${SPRING}, filter 0.25s ease`,
+                  }}>
+                    <CopyIcon size={ICON_SIZE} />
+                  </div>
+                  <div style={{
+                    position: "absolute",
+                    inset: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    opacity: copySuccess ? 1 : 0,
+                    transform: copySuccess ? "scale(1)" : "scale(0.6)",
+                    filter: copySuccess ? "blur(0px)" : "blur(4px)",
+                    transition: `opacity 0.25s ${SPRING}, transform 0.3s ${SPRING}, filter 0.25s ease`,
+                  }}>
+                    <CheckIcon size={ICON_SIZE} color="#22c55e" />
+                  </div>
+                </div>
+              }
+              label={copySuccess ? "Copied!" : "Copy changes to clipboard"}
+              disabled={totalPending === 0}
               onClick={() => {
-                setForkLoading(true);
-                onFork?.();
+                onCopyBatch?.();
+                setCopySuccess(true);
+                if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+                copyTimerRef.current = setTimeout(() => setCopySuccess(false), 3000);
               }}
             />
-          </ToolGroup>
-
-          {/* Fork/Create spinner — shown while creating iterations */}
-          <ToolGroup reversed={isLeftSide} visible={visible && (forkLoading || isCreating)}>
-            <Divider />
             <IconButton
-              icon={<SpinnerIcon size={ICON_SIZE} />}
-              label="Creating iterations\u2026"
-              onClick={() => {}}
-            />
-          </ToolGroup>
-
-          {/* Pick/Merge button — merge the active iteration */}
-          <ToolGroup reversed={isLeftSide} visible={visible && hasIterations && isViewingIteration && !pickLoading && !isCreating}>
-            <Divider />
-            <IconButton
-              icon={<PickIcon size={ICON_SIZE} />}
-              label={`Merge "${activeIteration}"`}
-              onClick={async () => {
-                if (!activeIteration || activeIteration === ORIGINAL_TAB) return;
-                setPickLoading(true);
-                try {
-                  await onPick?.(activeIteration);
-                } finally {
-                  setPickLoading(false);
-                }
+              icon={
+                <div style={{ position: "relative", width: ICON_SIZE, height: ICON_SIZE }}>
+                  <div style={{
+                    position: "absolute",
+                    inset: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    opacity: sendSuccess ? 0 : 1,
+                    transform: sendSuccess ? "scale(0.6)" : "scale(1)",
+                    filter: sendSuccess ? "blur(4px)" : "blur(0px)",
+                    transition: `opacity 0.25s ${SPRING}, transform 0.3s ${SPRING}, filter 0.25s ease`,
+                  }}>
+                    <SendIcon size={ICON_SIZE} />
+                  </div>
+                  <div style={{
+                    position: "absolute",
+                    inset: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    opacity: sendSuccess ? 1 : 0,
+                    transform: sendSuccess ? "scale(1)" : "scale(0.6)",
+                    filter: sendSuccess ? "blur(0px)" : "blur(4px)",
+                    transition: `opacity 0.25s ${SPRING}, transform 0.3s ${SPRING}, filter 0.25s ease`,
+                  }}>
+                    <CheckIcon size={ICON_SIZE} color="#22c55e" />
+                  </div>
+                </div>
+              }
+              label={sendSuccess ? "Submitted!" : `Submit ${totalPending} change${totalPending !== 1 ? "s" : ""}`}
+              disabled={totalPending === 0}
+              badge={totalPending > 0 ? totalPending : undefined}
+              onClick={() => {
+                onSubmitBatch?.();
+                setSendSuccess(true);
+                if (sendTimerRef.current) clearTimeout(sendTimerRef.current);
+                sendTimerRef.current = setTimeout(() => setSendSuccess(false), 3000);
               }}
             />
-          </ToolGroup>
 
-          {/* Pick/Merge spinner — shown while merging */}
-          <ToolGroup reversed={isLeftSide} visible={visible && pickLoading}>
+            {/* Branching tools */}
+            {branchingVisible && <Divider />}
+
+            {/* Fork button */}
+            {!hasIterations && !forkLoading && !isCreating && (
+              <IconButton
+                icon={<ForkIcon size={ICON_SIZE} />}
+                label="Create iterations"
+                onClick={() => {
+                  setForkLoading(true);
+                  onFork?.();
+                }}
+              />
+            )}
+            {/* Fork spinner */}
+            {(forkLoading || isCreating) && (
+              <IconButton
+                icon={<SpinnerIcon size={ICON_SIZE} />}
+                label="Creating iterations\u2026"
+                onClick={() => {}}
+              />
+            )}
+            {/* Pick/Merge button */}
+            {hasIterations && isViewingIteration && !pickLoading && !isCreating && (
+              <IconButton
+                icon={<PickIcon size={ICON_SIZE} />}
+                label={`Merge "${activeIteration}"`}
+                onClick={async () => {
+                  if (!activeIteration || activeIteration === ORIGINAL_TAB) return;
+                  setPickLoading(true);
+                  try {
+                    await onPick?.(activeIteration);
+                  } finally {
+                    setPickLoading(false);
+                  }
+                }}
+              />
+            )}
+            {/* Pick spinner */}
+            {pickLoading && (
+              <IconButton
+                icon={<SpinnerIcon size={ICON_SIZE} />}
+                label="Merging\u2026"
+                onClick={() => {}}
+              />
+            )}
+            {/* Discard button */}
+            {hasIterations && !isViewingIteration && !discardLoading && !isCreating && (
+              <IconButton
+                icon={<DiscardIcon size={ICON_SIZE} />}
+                label="Discard all iterations"
+                onClick={async () => {
+                  setDiscardLoading(true);
+                  try {
+                    await onDiscard?.();
+                  } finally {
+                    setDiscardLoading(false);
+                  }
+                }}
+              />
+            )}
+            {/* Discard spinner */}
+            {discardLoading && (
+              <IconButton
+                icon={<SpinnerIcon size={ICON_SIZE} />}
+                label="Removing iteration worktrees\u2026"
+                onClick={() => {}}
+              />
+            )}
+
             <Divider />
-            <IconButton
-              icon={<SpinnerIcon size={ICON_SIZE} />}
-              label="Merging\u2026"
-              onClick={() => {}}
-            />
           </ToolGroup>
 
-          {/* Discard button — discard all iterations, keep original */}
-          <ToolGroup reversed={isLeftSide} visible={visible && hasIterations && !isViewingIteration && !discardLoading && !isCreating}>
-            <Divider />
-            <IconButton
-              icon={<DiscardIcon size={ICON_SIZE} />}
-              label="Discard all iterations"
-              onClick={async () => {
-                setDiscardLoading(true);
-                try {
-                  await onDiscard?.();
-                } finally {
-                  setDiscardLoading(false);
-                }
-              }}
-            />
-          </ToolGroup>
-
-          {/* Discard spinner — shown while discarding */}
-          <ToolGroup reversed={isLeftSide} visible={visible && discardLoading}>
-            <Divider />
-            <IconButton
-              icon={<SpinnerIcon size={ICON_SIZE} />}
-              label="Removing iterations\u2026"
-              onClick={() => {}}
-            />
-          </ToolGroup>
-
-          {/* === Divider before close/open button === */}
-          <ToolGroup reversed={isLeftSide} visible={visible}>
-            <Divider />
-          </ToolGroup>
-
-          {/* === Section 5: Close/Open toggle — always visible, rightmost === */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onVisibilityChange(!visible);
-            }}
-            title={undefined}
-            style={{
-              position: "relative",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: 4,
-              borderRadius: 8,
-              border: "none",
-              background: "transparent",
-              cursor: "pointer",
-              width: ICON_SIZE + 8,
-              height: ICON_SIZE + 8,
-              flexShrink: 0,
-            }}
-          >
-            {/* Logo icon — fades out when open */}
-            <div
-              style={{
-                position: "absolute",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                opacity: visible ? 0 : 1,
-                transform: visible ? "scale(0.6)" : "scale(1)",
-                filter: visible ? "blur(4px)" : "blur(0px)",
-                transition: `opacity 0.25s ${SPRING}, transform 0.3s ${SPRING}, filter 0.25s ease`,
-                color: "#666",
-              }}
-            >
-              <LogoIcon size={ICON_SIZE} />
-            </div>
-            {/* Close icon — fades in when open */}
-            <div
-              style={{
-                position: "absolute",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                opacity: visible ? 1 : 0,
-                transform: visible ? "scale(1)" : "scale(0.6)",
-                filter: visible ? "blur(0px)" : "blur(4px)",
-                transition: `opacity 0.25s ${SPRING}, transform 0.3s ${SPRING}, filter 0.25s ease`,
-                color: "#999",
-              }}
-            >
-              <CloseIcon size={ICON_SIZE} />
-            </div>
-          </button>
+          {/* === Close/Open toggle — always visible === */}
+          <CloseToggleButton
+            visible={visible}
+            onVisibilityChange={onVisibilityChange}
+          />
         </div>
       </div>
-    </>
+    </TooltipDirectionContext.Provider>
   );
 }
 
@@ -578,6 +591,12 @@ export function FloatingPanel({
  * Uses purely CSS animations for performance.
  */
 function SuspenseOverlay({ active, message }: { active: boolean; message: string }) {
+  const letters = message.split("");
+  const totalLetters = letters.filter((l) => l !== " ").length;
+  // Stagger each letter so the wave takes ~0.6s to traverse the full string
+  const staggerMs = totalLetters > 0 ? Math.round(600 / totalLetters) : 40;
+
+  let charIndex = 0;
   return (
     <div
       style={{
@@ -599,56 +618,82 @@ function SuspenseOverlay({ active, message }: { active: boolean; message: string
         @keyframes iterate-suspense-spin {
           to { transform: rotate(360deg); }
         }
-        @keyframes iterate-suspense-text {
-          0% {
-            background-position: 200% center;
+        @keyframes iterate-suspense-wave {
+          0%, 100% {
+            color: #888;
             transform: scale(1);
           }
-          50% {
-            transform: scale(1.02);
+          30% {
+            color: #333;
+            transform: scale(1.03);
           }
-          100% {
-            background-position: -200% center;
+          60% {
+            color: #888;
             transform: scale(1);
           }
         }
       `}</style>
-      {/* Chunky loading spinner — 40px diameter, 4px stroke */}
-      <div
+      {/* Loading spinner — SVG circle with rounded stroke caps */}
+      <svg
+        width="40"
+        height="40"
+        viewBox="0 0 40 40"
         style={{
-          width: 40,
-          height: 40,
-          borderRadius: "50%",
-          border: "4px solid #e0e0e0",
-          borderTopColor: "#666",
-          boxSizing: "border-box",
           animation: active ? `iterate-suspense-spin ${SUSPENSE_DURATION} linear infinite` : "none",
         }}
-      />
-      {/* Status text with gradient pulse wave synced to spinner rotation */}
+      >
+        <circle cx="20" cy="20" r="17" fill="none" stroke="#e0e0e0" strokeWidth="4" />
+        <circle cx="20" cy="20" r="17" fill="none" stroke="#666" strokeWidth="4"
+          strokeLinecap="round"
+          strokeDasharray={`${Math.PI * 34 * 0.25} ${Math.PI * 34 * 0.75}`}
+        />
+      </svg>
+      {/* Status text with per-letter wave animation */}
       <div
         style={{
           fontSize: 14,
           fontWeight: 500,
           fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-          background: "linear-gradient(90deg, #888 0%, #888 35%, #333 50%, #888 65%, #888 100%)",
-          backgroundSize: "200% 100%",
-          WebkitBackgroundClip: "text",
-          backgroundClip: "text",
-          WebkitTextFillColor: "transparent",
-          color: "transparent",
-          animation: active ? `iterate-suspense-text ${SUSPENSE_DURATION} ease-in-out infinite` : "none",
+          color: "#888",
+          display: "flex",
         }}
       >
-        {message}
+        {letters.map((letter, i) => {
+          const isSpace = letter === " ";
+          const delay = isSpace ? 0 : charIndex * staggerMs;
+          if (!isSpace) charIndex++;
+          return (
+            <span
+              key={i}
+              style={{
+                display: "inline-block",
+                whiteSpace: "pre",
+                animation: active && !isSpace
+                  ? `iterate-suspense-wave 1.6s ease-in-out ${delay}ms infinite`
+                  : "none",
+              }}
+            >
+              {letter}
+            </span>
+          );
+        })}
       </div>
     </div>
   );
 }
 
+/** Per-item stagger delay in ms */
+const STAGGER_MS = 20;
+/** Total time for all stagger items to finish appearing — used as the
+ *  max-width transition duration so the container tracks the content. */
+const GROUP_COLLAPSE_MS = 250;
+
 /**
- * Animated wrapper that scales/fades its children in and out.
- * Uses max-width to animate the container width with a spring curve.
+ * Collapsible wrapper for a group of toolbar items.
+ *
+ * The outer container collapses width via max-width + overflow:hidden.
+ * Each child individually fades/scales in with a subtle stagger delay
+ * from the close-button side, creating a smooth directional reveal.
  */
 function ToolGroup({
   visible,
@@ -659,22 +704,58 @@ function ToolGroup({
   reversed?: boolean;
   children: React.ReactNode;
 }) {
+  const items = React.Children.toArray(children).filter(Boolean);
+  const count = items.length;
+
   return (
     <div
       style={{
         display: "flex",
+        // When reversed (close on left), flip the item order so the trailing
+        // divider sits next to the close button and tools read outward.
+        flexDirection: reversed ? "row-reverse" : "row",
         alignItems: "center",
         gap: 2,
         overflow: "hidden",
-        maxWidth: visible ? 500 : 0,
-        opacity: visible ? 1 : 0,
-        transform: visible ? "scale(1)" : "scale(0.85)",
-        transformOrigin: reversed ? "right center" : "left center",
-        transition: `max-width 0.35s ${SPRING}, opacity 0.2s ease, transform 0.3s ${SPRING}`,
+        // Extra vertical padding so badges (top: -4) aren't clipped by overflow.
+        // Negative margin compensates so it doesn't affect toolbar row layout.
+        paddingTop: 6,
+        paddingBottom: 2,
+        marginTop: -6,
+        marginBottom: -2,
+        maxWidth: visible ? 800 : 0,
+        transition: visible
+          ? `max-width ${GROUP_COLLAPSE_MS}ms ease-out`
+          : `max-width 0.25s cubic-bezier(0.4, 0, 0.2, 1)`,
         pointerEvents: visible ? "auto" : "none",
       }}
     >
-      {children}
+      {items.map((child, i) => {
+        // Stagger from close-button side outward.
+        // Items near close appear first. With row-reverse when reversed,
+        // high DOM indices are visually near close → stagger high index first.
+        // Without reverse, high DOM indices are near close → same logic.
+        const staggerIndex = count - 1 - i;
+        const openDelay = staggerIndex * STAGGER_MS;
+        // Closing: reverse direction, faster
+        const closeDelay = (count - 1 - staggerIndex) * STAGGER_MS * 0.5;
+
+        return (
+          <div
+            key={i}
+            style={{
+              opacity: visible ? 1 : 0,
+              transform: visible ? "scale(1)" : "scale(0.85)",
+              transition: visible
+                ? `opacity 0.15s ease ${openDelay}ms, transform 0.2s ${SPRING} ${openDelay}ms`
+                : `opacity 0.1s ease ${closeDelay}ms, transform 0.12s ease ${closeDelay}ms`,
+              pointerEvents: visible ? "auto" : "none",
+            }}
+          >
+            {child}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -693,29 +774,185 @@ function Divider() {
   );
 }
 
+/** Close/Open toggle button with hover → primary color */
+function CloseToggleButton({
+  visible,
+  onVisibilityChange,
+}: {
+  visible: boolean;
+  onVisibilityChange: (v: boolean) => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const [pressed, setPressed] = useState(false);
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        onVisibilityChange(!visible);
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => { setHovered(false); setPressed(false); }}
+      onMouseDown={() => setPressed(true)}
+      onMouseUp={() => setPressed(false)}
+      title={undefined}
+      style={{
+        position: "relative",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 4,
+        borderRadius: 8,
+        border: "none",
+        background: "transparent",
+        cursor: "pointer",
+        width: ICON_SIZE + 8,
+        height: ICON_SIZE + 8,
+        flexShrink: 0,
+        transform: pressed ? "scale(0.97)" : "scale(1)",
+        transition: "transform 0.1s ease",
+      }}
+    >
+      {/* Logo icon — fades out when open */}
+      <div
+        style={{
+          position: "absolute",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          opacity: visible ? 0 : 1,
+          transform: visible ? "scale(0.6)" : "scale(1)",
+          filter: visible ? "blur(4px)" : "blur(0px)",
+          transition: `opacity 0.25s ${SPRING}, transform 0.3s ${SPRING}, filter 0.25s ease, color 0.15s ease`,
+          color: hovered ? "#141414" : "#666",
+        }}
+      >
+        <LogoIcon size={ICON_SIZE} />
+      </div>
+      {/* Close icon — fades in when open */}
+      <div
+        style={{
+          position: "absolute",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          opacity: visible ? 1 : 0,
+          transform: visible ? "scale(1)" : "scale(0.6)",
+          filter: visible ? "blur(0px)" : "blur(4px)",
+          transition: `opacity 0.25s ${SPRING}, transform 0.3s ${SPRING}, filter 0.25s ease, color 0.15s ease`,
+          color: hovered ? "#141414" : "#999",
+        }}
+      >
+        <CloseIcon size={ICON_SIZE} />
+      </div>
+    </button>
+  );
+}
+
+/** Iteration tab button with hover/active color (no font-weight shift to avoid layout shifts).
+ *  Shows a PortalTooltip with the full title when text is truncated. */
+function TabButton({
+  active,
+  hasChanges,
+  title,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  /** When true, shows a light blue outline to indicate pending changes */
+  hasChanges?: boolean;
+  title: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
+  const [isTruncated, setIsTruncated] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const tooltipBelow = React.useContext(TooltipDirectionContext);
+
+  return (
+    <button
+      ref={buttonRef}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      onMouseEnter={() => {
+        setHovered(true);
+        if (buttonRef.current) {
+          setAnchorRect(buttonRef.current.getBoundingClientRect());
+          // Check if content is truncated (scrollWidth > clientWidth)
+          setIsTruncated(buttonRef.current.scrollWidth > buttonRef.current.clientWidth);
+        }
+      }}
+      onMouseLeave={() => setHovered(false)}
+      title={isTruncated ? undefined : title}
+      style={{
+        position: "relative",
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
+        maxWidth: 80,
+        padding: "3px 8px",
+        borderRadius: 6,
+        border: hasChanges ? "1px solid rgba(37, 99, 235, 0.4)" : "1px solid transparent",
+        background: active ? "#e8e8e8" : "transparent",
+        color: active || hovered ? "#141414" : "#666",
+        cursor: "pointer",
+        fontSize: 11,
+        fontWeight: 500,
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        flexShrink: 0,
+        transition: "all 0.15s ease",
+      }}
+    >
+      {children}
+      {hovered && isTruncated && anchorRect && createPortal(
+        <PortalTooltip label={title} anchorRect={anchorRect} below={tooltipBelow} />,
+        document.body,
+      )}
+    </button>
+  );
+}
+
 function IconButton({
   icon,
   label,
   active,
   disabled,
+  badge,
   onClick,
 }: {
   icon: React.ReactNode;
   label: string;
   active?: boolean;
   disabled?: boolean;
+  /** When set and > 0, renders an animated amber badge at top-right */
+  badge?: number;
   onClick: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const [pressed, setPressed] = useState(false);
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const tooltipBelow = React.useContext(TooltipDirectionContext);
 
   return (
     <button
+      ref={buttonRef}
       onClick={(e) => {
         e.stopPropagation();
         if (!disabled) onClick();
       }}
-      onMouseEnter={() => setHovered(true)}
+      onMouseEnter={() => {
+        setHovered(true);
+        if (buttonRef.current) {
+          setAnchorRect(buttonRef.current.getBoundingClientRect());
+        }
+      }}
       onMouseLeave={() => { setHovered(false); setPressed(false); }}
       onMouseDown={() => { if (!disabled) setPressed(true); }}
       onMouseUp={() => setPressed(false)}
@@ -727,7 +964,7 @@ function IconButton({
         padding: 4,
         borderRadius: 8,
         border: "none",
-        background: active ? "#e8e8e8" : "transparent",
+        background: active ? "#e0e0e0" : hovered ? "#f0f0f0" : "transparent",
         color: (active || hovered) ? "#141414" : "#666",
         cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.35 : 1,
@@ -737,56 +974,177 @@ function IconButton({
       }}
     >
       {icon}
-      {hovered && (
-        <div
-          style={{
-            position: "absolute",
-            bottom: "calc(100% + 6px)",
-            left: "50%",
-            transform: "translateX(-50%)",
-            background: "#fff",
-            color: "#333",
-            border: "1px solid #e0e0e0",
-            borderRadius: 6,
-            padding: "4px 8px",
-            fontSize: 11,
-            fontWeight: 500,
-            fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-            whiteSpace: "nowrap",
-            pointerEvents: "none",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-            zIndex: 10003,
-          }}
-        >
-          {label}
-        </div>
+      {badge != null && badge > 0 && (
+        <AnimatedButtonBadge count={badge} />
+      )}
+      {hovered && anchorRect && createPortal(
+        <PortalTooltip label={label} anchorRect={anchorRect} below={tooltipBelow} />,
+        document.body,
       )}
     </button>
   );
 }
 
-/** Small badge showing the number of pending moves */
-function MoveBadge({ count }: { count: number }) {
+/** Tooltip rendered via createPortal to escape overflow:hidden containers.
+ *  Includes a small arrow pointing towards the anchor button. */
+function PortalTooltip({
+  label,
+  anchorRect,
+  below,
+}: {
+  label: string;
+  anchorRect: DOMRect;
+  below: boolean;
+}) {
+  const centerX = anchorRect.left + anchorRect.width / 2;
+  const anchorY = below ? anchorRect.bottom + 8 : anchorRect.top - 8;
+
   return (
     <div
       style={{
-        display: "flex",
+        position: "fixed",
+        left: centerX,
+        top: anchorY,
+        transform: below
+          ? "translateX(-50%)"
+          : "translateX(-50%) translateY(-100%)",
+        background: "#fff",
+        color: "#333",
+        border: "1px solid #e0e0e0",
+        borderRadius: 6,
+        padding: "4px 8px",
+        fontSize: 11,
+        fontWeight: 500,
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        whiteSpace: "nowrap",
+        pointerEvents: "none",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+        zIndex: 10003,
+      }}
+    >
+      {/* Arrow */}
+      <div
+        style={{
+          position: "absolute",
+          left: "50%",
+          width: 8,
+          height: 8,
+          background: "#fff",
+          ...(below
+            ? {
+                top: -4,
+                transform: "translateX(-50%) rotate(45deg)",
+                boxShadow: "-1px -1px 0 0 #e0e0e0",
+              }
+            : {
+                bottom: -4,
+                transform: "translateX(-50%) rotate(45deg)",
+                boxShadow: "1px 1px 0 0 #e0e0e0",
+              }),
+        }}
+      />
+      {label}
+    </div>
+  );
+}
+
+/** Small amber badge rendered inline within a tab button.
+ *  Perfectly circular for single digits; pill-shaped for double digits.
+ *  Animates in with a spring scale-up on mount and when count changes.
+ *  Uses inline flow (not absolute positioning) so it is never clipped
+ *  by parent overflow containers. */
+function TabBadge({ count }: { count: number }) {
+  const isDouble = count >= 10;
+  const [appeared, setAppeared] = useState(false);
+  const prevCountRef = useRef(count);
+
+  useEffect(() => {
+    // Re-trigger animation on mount or count change
+    setAppeared(false);
+    let frame2 = 0;
+    const frame1 = requestAnimationFrame(() => {
+      frame2 = requestAnimationFrame(() => {
+        setAppeared(true);
+      });
+    });
+    prevCountRef.current = count;
+    return () => {
+      cancelAnimationFrame(frame1);
+      cancelAnimationFrame(frame2);
+    };
+  }, [count]);
+
+  return (
+    <span
+      style={{
+        display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        minWidth: 18,
-        height: 18,
-        borderRadius: 9,
-        background: "#7c3aed",
-        color: "#fff",
-        fontSize: 10,
-        fontWeight: 700,
-        padding: "0 4px",
-        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
         flexShrink: 0,
+        ...(isDouble
+          ? { minWidth: 16, height: 16, borderRadius: 8, padding: "0 4px" }
+          : { width: 16, height: 16, borderRadius: "50%" }),
+        background: "#2563eb",
+        color: "#fff",
+        fontSize: 9,
+        fontWeight: 700,
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        lineHeight: 1,
+        pointerEvents: "none",
+        transform: appeared ? "scale(1)" : "scale(0)",
+        transition: `transform 0.3s ${SPRING}`,
       }}
     >
       {count}
-    </div>
+    </span>
+  );
+}
+
+/** Animated amber badge for IconButton — appears at top-left with spring scale-up.
+ *  Re-triggers animation when count changes. */
+function AnimatedButtonBadge({ count }: { count: number }) {
+  const isDouble = count >= 10;
+  const [appeared, setAppeared] = useState(false);
+
+  useEffect(() => {
+    setAppeared(false);
+    let frame2 = 0;
+    const frame1 = requestAnimationFrame(() => {
+      frame2 = requestAnimationFrame(() => {
+        setAppeared(true);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(frame1);
+      cancelAnimationFrame(frame2);
+    };
+  }, [count]);
+
+  return (
+    <span
+      style={{
+        position: "absolute",
+        top: -4,
+        left: -4,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        ...(isDouble
+          ? { minWidth: 16, height: 16, borderRadius: 8, padding: "0 4px" }
+          : { width: 16, height: 16, borderRadius: "50%" }),
+        background: "#2563eb",
+        color: "#fff",
+        fontSize: 9,
+        fontWeight: 700,
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        lineHeight: 1,
+        pointerEvents: "none",
+        transform: appeared ? "scale(1)" : "scale(0)",
+        transition: `transform 0.3s ${SPRING}`,
+      }}
+    >
+      {count}
+    </span>
   );
 }
 

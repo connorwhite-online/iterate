@@ -1,5 +1,5 @@
 import { execa, type ResultPromise } from "execa";
-import { createServer } from "node:net";
+import { createServer, createConnection } from "node:net";
 
 interface ManagedProcess {
   name: string;
@@ -117,6 +117,33 @@ export class ProcessManager {
   /** Get info about a running process */
   getProcess(name: string): ManagedProcess | undefined {
     return this.processes.get(name);
+  }
+
+  /**
+   * Wait for a dev server to start accepting connections.
+   * Polls the port with TCP connect attempts until it responds or timeout.
+   */
+  async waitForReady(port: number, timeoutMs = 30000): Promise<void> {
+    const start = Date.now();
+    const interval = 500;
+
+    while (Date.now() - start < timeoutMs) {
+      const listening = await this.isPortListening(port);
+      if (listening) return;
+      await new Promise((r) => setTimeout(r, interval));
+    }
+    throw new Error(`Dev server on port ${port} did not start within ${timeoutMs / 1000}s`);
+  }
+
+  /** Check if something is listening on a port (TCP connect probe) */
+  private isPortListening(port: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const socket = createConnection({ port, host: "127.0.0.1" });
+      socket.setTimeout(1000);
+      socket.once("connect", () => { socket.destroy(); resolve(true); });
+      socket.once("error", () => { socket.destroy(); resolve(false); });
+      socket.once("timeout", () => { socket.destroy(); resolve(false); });
+    });
   }
 
   /** Check if a port is available */

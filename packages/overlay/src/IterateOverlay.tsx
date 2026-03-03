@@ -48,6 +48,8 @@ interface PendingAnnotation {
   comment: string;
   intent?: AnnotationIntent;
   severity?: AnnotationSeverity;
+  /** Where the user clicked to create this annotation (for badge placement) */
+  clickPosition?: { x: number; y: number };
 }
 
 /**
@@ -70,6 +72,7 @@ export function IterateOverlay({
   const [selectedElements, setSelectedElements] = useState<PickedElement[]>([]);
   const [textSelection, setTextSelection] = useState<TextSelection | null>(null);
   const [activeDrawing, setActiveDrawing] = useState<DrawingData | null>(null);
+  const [clickPosition, setClickPosition] = useState<{ x: number; y: number } | null>(null);
 
   // Pending batch (accumulated annotations not yet submitted)
   const [pendingBatch, setPendingBatch] = useState<PendingAnnotation[]>([]);
@@ -77,9 +80,21 @@ export function IterateOverlay({
   // Pending moves (accumulated DOM moves not yet submitted)
   const [pendingMoves, setPendingMoves] = useState<PendingMove[]>([]);
 
+  // Track whether marquee drag is in progress (suppresses ElementPicker hover)
+  const [isMarqueeDragging, setIsMarqueeDragging] = useState(false);
+
+  // Unified undo stack — tracks whether each action was an annotation or move
+  const undoStackRef = useRef<Array<"annotation" | "move">>([]);
+
+  // Editing state — when editing an existing annotation badge
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [initialComment, setInitialComment] = useState<string | undefined>(undefined);
+
   // When the selection panel is open, disable pickers so clicks in the panel
-  // don't re-contextualize the selection
-  const isAnnotating = selectedElements.length > 0 || textSelection !== null;
+  // don't re-contextualize the selection.
+  // activeDrawing is included so the popup appears even when the drawn path
+  // doesn't overlap any DOM elements (free-form drawing).
+  const isAnnotating = selectedElements.length > 0 || textSelection !== null || activeDrawing !== null;
 
   // Connect to daemon
   useEffect(() => {
@@ -101,8 +116,9 @@ export function IterateOverlay({
 
   // Handle element selection from ElementPicker (click / ctrl+click)
   const handleElementSelect = useCallback(
-    (elements: PickedElement[]) => {
+    (elements: PickedElement[], clickPos?: { x: number; y: number }) => {
       setSelectedElements(elements);
+      if (clickPos) setClickPosition(clickPos);
     },
     []
   );
@@ -111,6 +127,16 @@ export function IterateOverlay({
   const handleMarqueeSelect = useCallback(
     (elements: PickedElement[]) => {
       setSelectedElements(elements);
+      // Position popup at the center-right of the combined selection bounds
+      if (elements.length > 0) {
+        let maxRight = -Infinity, sumY = 0;
+        for (const el of elements) {
+          const r = el.rect;
+          if (r.x + r.width > maxRight) maxRight = r.x + r.width;
+          sumY += r.y + r.height / 2;
+        }
+        setClickPosition({ x: maxRight, y: sumY / elements.length });
+      }
     },
     []
   );
@@ -128,6 +154,19 @@ export function IterateOverlay({
     (elements: PickedElement[], drawing: DrawingData) => {
       setSelectedElements(elements);
       setActiveDrawing(drawing);
+      // Position popup at the start of the drawing (where the cursor first depressed)
+      const startMatch = drawing.path.match(/^M\s+([\d.]+)\s+([\d.]+)/);
+      if (startMatch) {
+        setClickPosition({
+          x: parseFloat(startMatch[1]!),
+          y: parseFloat(startMatch[2]!),
+        });
+      } else {
+        setClickPosition({
+          x: drawing.bounds.x + drawing.bounds.width,
+          y: drawing.bounds.y + drawing.bounds.height / 2,
+        });
+      }
     },
     []
   );
@@ -144,7 +183,7 @@ export function IterateOverlay({
     []
   );
 
-  // Add current selection as an annotation to the pending batch
+  // Add current selection as an annotation to the pending batch (or update if editing)
   const handleAddToBatch = useCallback(
     (comment: string, intent?: AnnotationIntent, severity?: AnnotationSeverity) => {
       if (selectedElements.length === 0 && !textSelection && !activeDrawing) return;
@@ -166,29 +205,96 @@ export function IterateOverlay({
         comment,
         intent,
         severity,
+        clickPosition: clickPosition ?? undefined,
       };
 
-      setPendingBatch((prev) => [...prev, annotation]);
+      if (editingIndex !== null) {
+        // Replace existing annotation at the editing index
+        setPendingBatch((prev) => prev.map((a, i) => (i === editingIndex ? annotation : a)));
+        setEditingIndex(null);
+        setInitialComment(undefined);
+      } else {
+        // Append new annotation
+        setPendingBatch((prev) => [...prev, annotation]);
+        undoStackRef.current.push("annotation");
+      }
 
       // Clear selection after adding to batch
       setSelectedElements([]);
       setTextSelection(null);
       setActiveDrawing(null);
     },
-    [selectedElements, textSelection, activeDrawing, iteration]
+    [selectedElements, textSelection, activeDrawing, iteration, clickPosition, editingIndex]
   );
+
+  // Delete a single annotation from the pending batch
+  const handleDeleteAnnotation = useCallback(
+    (index: number) => {
+      setPendingBatch((prev) => prev.filter((_, i) => i !== index));
+      // Remove the corresponding "annotation" entry from undo stack
+      let annotationsSeen = 0;
+      const stack = undoStackRef.current;
+      for (let i = 0; i < stack.length; i++) {
+        if (stack[i] === "annotation") {
+          if (annotationsSeen === index) {
+            stack.splice(i, 1);
+            break;
+          }
+          annotationsSeen++;
+        }
+      }
+    },
+    []
+  );
+
+  // Edit an existing annotation — load it into the selection panel
+  const handleEditAnnotation = useCallback(
+    (index: number) => {
+      const annotation = pendingBatch[index];
+      if (!annotation) return;
+
+      // Load annotation data into selection state
+      setSelectedElements(
+        annotation.elements.map((el) => ({
+          ...el,
+          domElement: null as unknown as Element, // DOM ref unavailable during edit
+        }))
+      );
+      setTextSelection(annotation.textSelection ?? null);
+      setActiveDrawing(annotation.drawing ?? null);
+      setClickPosition(annotation.clickPosition ?? null);
+      setEditingIndex(index);
+      setInitialComment(annotation.comment);
+    },
+    [pendingBatch]
+  );
+
+  // Delete annotation while editing (trash button in toolbar)
+  const handleDeleteEditingAnnotation = useCallback(() => {
+    if (editingIndex !== null) {
+      handleDeleteAnnotation(editingIndex);
+    }
+    setEditingIndex(null);
+    setInitialComment(undefined);
+    setSelectedElements([]);
+    setTextSelection(null);
+    setActiveDrawing(null);
+  }, [editingIndex, handleDeleteAnnotation]);
 
   // Clear selection
   const handleClearSelection = useCallback(() => {
     setSelectedElements([]);
     setTextSelection(null);
     setActiveDrawing(null);
+    setEditingIndex(null);
+    setInitialComment(undefined);
   }, []);
 
   // Handle drag move — add to pending moves list with current iteration
   const handleMove = useCallback(
     (move: PendingMove) => {
       setPendingMoves((prev) => [...prev, { ...move, iteration }]);
+      undoStackRef.current.push("move");
     },
     [iteration]
   );
@@ -242,6 +348,7 @@ export function IterateOverlay({
 
       setPendingBatch([]);
       setPendingMoves([]);
+      undoStackRef.current = [];
     };
 
     window.addEventListener("iterate:submit-batch", handler);
@@ -256,22 +363,50 @@ export function IterateOverlay({
       setSelectedElements([]);
       setTextSelection(null);
       setActiveDrawing(null);
+      undoStackRef.current = [];
     };
     window.addEventListener("iterate:clear-batch", handler);
     return () => window.removeEventListener("iterate:clear-batch", handler);
   }, []);
 
-  // Handle undoing the last move
+  // Handle undoing the last change (annotation or move)
   useEffect(() => {
     const handler = () => {
-      setPendingMoves((prev) => {
-        if (prev.length === 0) return prev;
-        return prev.slice(0, -1);
-      });
+      const lastAction = undoStackRef.current.pop();
+      if (!lastAction) return;
+      if (lastAction === "annotation") {
+        setPendingBatch((prev) => (prev.length === 0 ? prev : prev.slice(0, -1)));
+      } else {
+        setPendingMoves((prev) => (prev.length === 0 ? prev : prev.slice(0, -1)));
+      }
     };
-    window.addEventListener("iterate:undo-move", handler);
-    return () => window.removeEventListener("iterate:undo-move", handler);
+    window.addEventListener("iterate:undo", handler);
+    return () => window.removeEventListener("iterate:undo", handler);
   }, []);
+
+  // Handle request for batch text (for cross-tab copy) — returns text via custom event
+  useEffect(() => {
+    const handler = () => {
+      if (pendingBatch.length === 0 && pendingMoves.length === 0) {
+        window.dispatchEvent(new CustomEvent("iterate:batch-text-response", { detail: { text: "" } }));
+        return;
+      }
+
+      const domChanges = pendingMoves.map((m) => ({
+        type: (m.reorderIndex !== undefined ? "reorder" : "move") as string,
+        selector: m.selector,
+        componentName: m.componentName,
+        sourceLocation: m.sourceLocation,
+        before: { rect: m.from },
+        after: { rect: m.to },
+      }));
+
+      const text = formatBatchPrompt(pendingBatch, domChanges, iteration);
+      window.dispatchEvent(new CustomEvent("iterate:batch-text-response", { detail: { text } }));
+    };
+    window.addEventListener("iterate:request-batch-text", handler);
+    return () => window.removeEventListener("iterate:request-batch-text", handler);
+  }, [pendingBatch, pendingMoves, iteration]);
 
   // Handle copying annotations to clipboard as a human-readable prompt
   useEffect(() => {
@@ -309,6 +444,7 @@ export function IterateOverlay({
         iframeRef={iframeRef}
         selectedElements={selectedElements}
         onSelect={handleElementSelect}
+        suppressHover={isMarqueeDragging}
       />
 
       {/* Marquee / rubber-band selection (disabled while annotating) */}
@@ -316,6 +452,7 @@ export function IterateOverlay({
         active={mode === "select" && !isAnnotating}
         iframeRef={iframeRef}
         onSelect={handleMarqueeSelect}
+        onDragStateChange={setIsMarqueeDragging}
       />
 
       {/* Text selection capture (disabled while annotating) */}
@@ -341,6 +478,49 @@ export function IterateOverlay({
         previewMode={previewMode}
       />
 
+      {/* Persistent selection frames — shown while annotating so user maintains context.
+           Hidden for marker/draw tool since the drawn path itself provides context. */}
+      {isAnnotating && !activeDrawing && selectedElements.map((el, i) => (
+        <div
+          key={`sel-frame-${i}`}
+          style={{
+            position: "absolute",
+            left: el.rect.x,
+            top: el.rect.y,
+            width: el.rect.width,
+            height: el.rect.height,
+            border: "1.5px solid #6b9eff",
+            borderRadius: 4,
+            pointerEvents: "none",
+            boxSizing: "border-box",
+          }}
+        />
+      ))}
+
+      {/* Persistent drawing stroke while annotating */}
+      {isAnnotating && activeDrawing && (
+        <svg
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            pointerEvents: "none",
+            overflow: "visible",
+          }}
+        >
+          <path
+            d={activeDrawing.path}
+            fill="none"
+            stroke={activeDrawing.strokeColor}
+            strokeWidth={activeDrawing.strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            opacity={0.7}
+          />
+        </svg>
+      )}
+
       {/* Selection panel (shows when elements are selected) */}
       <SelectionPanel
         selectedElements={selectedElements}
@@ -348,85 +528,204 @@ export function IterateOverlay({
         onRemoveElement={handleRemoveElement}
         onAddToBatch={handleAddToBatch}
         onClearSelection={handleClearSelection}
+        clickPosition={clickPosition}
+        isDrawing={activeDrawing != null}
+        initialComment={initialComment}
+        onDelete={editingIndex !== null ? handleDeleteEditingAnnotation : undefined}
       />
 
-      {/* Pending batch indicator markers on elements */}
-      {pendingBatch.map((annotation, batchIdx) => (
-        <React.Fragment key={`batch-${batchIdx}`}>
-          {/* Drawing strokes for marker annotations */}
-          {annotation.drawing && (
-            <svg
-              style={{
-                position: "absolute",
-                inset: 0,
-                width: "100%",
-                height: "100%",
-                pointerEvents: "none",
-                overflow: "visible",
-              }}
-            >
-              <path
-                d={annotation.drawing.path}
-                fill="none"
-                stroke={annotation.drawing.strokeColor}
-                strokeWidth={annotation.drawing.strokeWidth}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                opacity={0.5}
+      {/* Preview badge — shown at click position while annotating (before Add).
+           When editing, show the editing badge's number instead of a new one. */}
+      {isAnnotating && clickPosition && editingIndex === null && (
+        <AnimatedBadge
+          key={`preview-${pendingBatch.length}-${clickPosition.x}-${clickPosition.y}`}
+          number={pendingBatch.length + 1}
+          x={clickPosition.x}
+          y={clickPosition.y}
+          color="#2563eb"
+        />
+      )}
+
+      {/* Pending batch indicator markers */}
+      {pendingBatch.map((annotation, batchIdx) => {
+        // Determine badge position: use stored click position, or fall back to
+        // center of first element / drawing bounds
+        const pos = annotation.clickPosition
+          ?? (annotation.elements.length > 0
+            ? { x: annotation.elements[0]!.rect.x + annotation.elements[0]!.rect.width / 2, y: annotation.elements[0]!.rect.y + annotation.elements[0]!.rect.height / 2 }
+            : annotation.drawing
+              ? { x: annotation.drawing.bounds.x + annotation.drawing.bounds.width / 2, y: annotation.drawing.bounds.y + annotation.drawing.bounds.height / 2 }
+              : null);
+
+        return (
+          <React.Fragment key={`batch-${batchIdx}`}>
+            {/* Drawing strokes for marker annotations */}
+            {annotation.drawing && (
+              <svg
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  width: "100%",
+                  height: "100%",
+                  pointerEvents: "none",
+                  overflow: "visible",
+                }}
+              >
+                <path
+                  d={annotation.drawing.path}
+                  fill="none"
+                  stroke={annotation.drawing.strokeColor}
+                  strokeWidth={annotation.drawing.strokeWidth}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity={0.5}
+                />
+              </svg>
+            )}
+            {/* Interactive badge at click position — click to edit */}
+            {pos && (
+              <InteractiveBadge
+                number={batchIdx + 1}
+                x={pos.x}
+                y={pos.y}
+                color="#2563eb"
+                onEdit={() => handleEditAnnotation(batchIdx)}
+                isEditing={editingIndex === batchIdx}
               />
-            </svg>
-          )}
-          {/* Element markers */}
-          {annotation.elements.map((el, elIdx) => (
-            <div
-              key={`batch-${batchIdx}-${elIdx}`}
-              style={{
-                position: "absolute",
-                left: el.rect.x + el.rect.width / 2 - 9,
-                top: el.rect.y + el.rect.height / 2 - 9,
-                width: 18,
-                height: 18,
-                borderRadius: "50%",
-                background: annotation.drawing ? "#ef4444" : "#f59e0b",
-                color: "#fff",
-                fontSize: 10,
-                fontWeight: 700,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                pointerEvents: "none",
-                fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-              }}
-            >
-              {batchIdx + 1}
-            </div>
-          ))}
-          {/* Drawing badge when no elements were found */}
-          {annotation.drawing && annotation.elements.length === 0 && (
-            <div
-              style={{
-                position: "absolute",
-                left: annotation.drawing.bounds.x + annotation.drawing.bounds.width / 2 - 9,
-                top: annotation.drawing.bounds.y + annotation.drawing.bounds.height / 2 - 9,
-                width: 18,
-                height: 18,
-                borderRadius: "50%",
-                background: "#ef4444",
-                color: "#fff",
-                fontSize: 10,
-                fontWeight: 700,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                pointerEvents: "none",
-                fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-              }}
-            >
-              {batchIdx + 1}
-            </div>
-          )}
-        </React.Fragment>
-      ))}
+            )}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+}
+
+// Spring-like cubic bezier for badge pop-in
+const BADGE_SPRING = "cubic-bezier(0.34, 1.56, 0.64, 1)";
+
+/**
+ * Animated number badge that pops in at a specific position.
+ * Uses CSS transitions: starts at scale(0.75) + opacity 0, then
+ * springs up to scale(1) + opacity 1 on the next frame.
+ */
+function AnimatedBadge({
+  number,
+  x,
+  y,
+  color,
+}: {
+  number: number;
+  x: number;
+  y: number;
+  color: string;
+}) {
+  const [appeared, setAppeared] = useState(false);
+
+  useEffect(() => {
+    let frame2 = 0;
+    const frame1 = requestAnimationFrame(() => {
+      frame2 = requestAnimationFrame(() => {
+        setAppeared(true);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(frame1);
+      cancelAnimationFrame(frame2);
+    };
+  }, []);
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: x - 9,
+        top: y - 9,
+        width: 18,
+        height: 18,
+        borderRadius: "50%",
+        background: color,
+        color: "#fff",
+        fontSize: 10,
+        fontWeight: 700,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        pointerEvents: "none",
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        transform: appeared ? "scale(1)" : "scale(0.75)",
+        opacity: appeared ? 1 : 0,
+        transition: `transform 0.35s ${BADGE_SPRING}, opacity 0.2s ease`,
+      }}
+    >
+      {number}
+    </div>
+  );
+}
+
+/**
+ * Interactive annotation badge. Clickable circle that opens the edit form
+ * when clicked. Visually highlights with a ring when being edited.
+ */
+function InteractiveBadge({
+  number,
+  x,
+  y,
+  color,
+  onEdit,
+  isEditing,
+}: {
+  number: number;
+  x: number;
+  y: number;
+  color: string;
+  onEdit: () => void;
+  isEditing?: boolean;
+}) {
+  const [appeared, setAppeared] = useState(false);
+
+  useEffect(() => {
+    let frame2 = 0;
+    const frame1 = requestAnimationFrame(() => {
+      frame2 = requestAnimationFrame(() => {
+        setAppeared(true);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(frame1);
+      cancelAnimationFrame(frame2);
+    };
+  }, []);
+
+  return (
+    <div
+      onClick={(e) => {
+        e.stopPropagation();
+        onEdit();
+      }}
+      style={{
+        position: "absolute",
+        left: x - 9,
+        top: y - 9,
+        width: 18,
+        height: 18,
+        borderRadius: "50%",
+        background: color,
+        color: "#fff",
+        fontSize: 10,
+        fontWeight: 700,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        pointerEvents: "auto",
+        cursor: "pointer",
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        transform: appeared ? "scale(1)" : "scale(0.75)",
+        opacity: appeared ? 1 : 0,
+        transition: `transform 0.35s ${BADGE_SPRING}, opacity 0.2s ease`,
+        boxShadow: isEditing ? `0 0 0 3px ${color}44` : "none",
+      }}
+    >
+      {number}
     </div>
   );
 }

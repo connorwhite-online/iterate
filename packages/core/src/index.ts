@@ -9,7 +9,7 @@ export type {
   AnnotationSeverity,
   AnnotationStatus,
 } from "./types/annotations.js";
-export type { IterationInfo, IterationStatus } from "./types/iterations.js";
+export type { IterationInfo, IterationStatus, IterationSource } from "./types/iterations.js";
 export type { DomChange, DomSnapshot } from "./types/dom.js";
 export type { IterateConfig } from "./types/config.js";
 export { DEFAULT_CONFIG } from "./types/config.js";

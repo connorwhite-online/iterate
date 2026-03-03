@@ -122,7 +122,7 @@ export function TextSelect({
           left: tooltipPos.x,
           top: tooltipPos.y,
           transform: "translate(-50%, -100%)",
-          background: "#7c3aed",
+          background: "#2563eb",
           color: "#fff",
           padding: "3px 8px",
           borderRadius: 4,

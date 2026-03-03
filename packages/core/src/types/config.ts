@@ -14,6 +14,8 @@ export interface IterateConfig {
   idleTimeout: number;
   /** Optional build command to run after install (e.g., "pnpm build" for monorepos with workspace deps) */
   buildCommand?: string;
+  /** Subdirectory within the repo where the app lives (for monorepos). Dev command runs here. */
+  appDir?: string;
 }
 
 export const DEFAULT_CONFIG: IterateConfig = {

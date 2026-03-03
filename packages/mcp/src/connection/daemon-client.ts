@@ -168,7 +168,8 @@ export class DaemonClient {
       headers: body ? { "Content-Type": "application/json" } : {},
       body: body ? JSON.stringify(body) : undefined,
     });
-    return res.json();
+    const text = await res.text();
+    return text ? JSON.parse(text) : {};
   }
 
   private handleMessage(msg: ServerMessage): void {

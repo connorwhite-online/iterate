@@ -18,7 +18,9 @@ interface ElementPickerProps {
   active: boolean;
   iframeRef: React.RefObject<HTMLIFrameElement | null>;
   selectedElements: PickedElement[];
-  onSelect: (elements: PickedElement[]) => void;
+  onSelect: (elements: PickedElement[], clickPosition?: { x: number; y: number }) => void;
+  /** When true, suppress hover highlight (e.g. during marquee drag) */
+  suppressHover?: boolean;
 }
 
 /**
@@ -31,6 +33,7 @@ export function ElementPicker({
   iframeRef,
   selectedElements,
   onSelect,
+  suppressHover,
 }: ElementPickerProps) {
   const [highlight, setHighlight] = useState<Rect | null>(null);
   const [hoveredLabel, setHoveredLabel] = useState<string>("");
@@ -42,6 +45,11 @@ export function ElementPicker({
       return document;
     }
   }, [iframeRef]);
+
+  // Clear highlight when hover is suppressed (e.g. during marquee drag)
+  useEffect(() => {
+    if (suppressHover) setHighlight(null);
+  }, [suppressHover]);
 
   useEffect(() => {
     if (!active) {
@@ -55,6 +63,8 @@ export function ElementPicker({
       !!el.closest("#__iterate-overlay-root__");
 
     const handleMouseMove = (e: MouseEvent) => {
+      if (suppressHover) return;
+
       const target = e.target as Element;
       if (!target || target === targetDoc.documentElement || isOverlayElement(target)) {
         setHighlight(null);
@@ -85,6 +95,7 @@ export function ElementPicker({
       e.stopPropagation();
 
       const picked = elementToPicked(target);
+      const clickPos = { x: e.clientX, y: e.clientY };
       const isMultiSelect = e.ctrlKey || e.metaKey;
 
       if (isMultiSelect) {
@@ -94,12 +105,12 @@ export function ElementPicker({
         if (existingIndex >= 0) {
           const updated = [...selectedElements];
           updated.splice(existingIndex, 1);
-          onSelect(updated);
+          onSelect(updated, clickPos);
         } else {
-          onSelect([...selectedElements, picked]);
+          onSelect([...selectedElements, picked], clickPos);
         }
       } else {
-        onSelect([picked]);
+        onSelect([picked], clickPos);
       }
     };
 
@@ -110,7 +121,7 @@ export function ElementPicker({
       targetDoc.removeEventListener("mousemove", handleMouseMove);
       targetDoc.removeEventListener("click", handleClick, { capture: true });
     };
-  }, [active, getTargetDocument, onSelect, selectedElements]);
+  }, [active, getTargetDocument, onSelect, selectedElements, suppressHover]);
 
   if (!active) return null;
 
@@ -126,9 +137,11 @@ export function ElementPicker({
               top: highlight.y,
               width: highlight.width,
               height: highlight.height,
-              border: "2px solid #2563eb",
-              backgroundColor: "rgba(37, 99, 235, 0.08)",
+              border: "1.5px solid #6b9eff",
+              backgroundColor: "rgba(107, 158, 255, 0.06)",
+              borderRadius: 4,
               pointerEvents: "none",
+              boxSizing: "border-box",
               transition: "all 0.1s ease",
             }}
           />
@@ -137,7 +150,7 @@ export function ElementPicker({
               position: "absolute",
               left: highlight.x,
               top: Math.max(0, highlight.y - 26),
-              background: "#2563eb",
+              background: "#6b9eff",
               color: "#fff",
               padding: "2px 8px",
               borderRadius: 4,
@@ -165,9 +178,11 @@ export function ElementPicker({
               top: el.rect.y,
               width: el.rect.width,
               height: el.rect.height,
-              border: "2px solid #10b981",
+              border: "1.5px solid #10b981",
               backgroundColor: "rgba(16, 185, 129, 0.1)",
+              borderRadius: 4,
               pointerEvents: "none",
+              boxSizing: "border-box",
             }}
           />
           <div
@@ -208,7 +223,7 @@ export function ElementPicker({
 /** Convert a DOM element to a PickedElement with full metadata */
 export function elementToPicked(element: Element): PickedElement {
   const rect = element.getBoundingClientRect();
-  const { component, source } = getComponentInfo(element);
+  const { component, source, isComponentRoot } = getComponentInfo(element);
 
   return {
     domElement: element,
@@ -218,7 +233,7 @@ export function elementToPicked(element: Element): PickedElement {
     rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
     computedStyles: getRelevantStyles(element),
     nearbyText: getNearbyText(element),
-    componentName: component,
-    sourceLocation: source,
+    componentName: isComponentRoot ? component : null,
+    sourceLocation: isComponentRoot ? source : null,
   };
 }

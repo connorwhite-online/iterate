@@ -303,7 +303,7 @@ async function main() {
     },
     async ({ annotationId }) => {
       await client.callApi(
-        "POST",
+        "PATCH",
         `/api/annotations/${annotationId}/acknowledge`
       );
       return {
@@ -326,9 +326,9 @@ async function main() {
     },
     async ({ annotationId, reply }) => {
       await client.callApi(
-        "POST",
+        "PATCH",
         `/api/annotations/${annotationId}/resolve`,
-        reply ? { agentReply: reply } : undefined
+        reply ? { summary: reply } : undefined
       );
       return {
         content: [
@@ -353,9 +353,9 @@ async function main() {
     },
     async ({ annotationId, reply }) => {
       await client.callApi(
-        "POST",
+        "PATCH",
         `/api/annotations/${annotationId}/dismiss`,
-        reply ? { agentReply: reply } : undefined
+        reply ? { reason: reply } : undefined
       );
       return {
         content: [

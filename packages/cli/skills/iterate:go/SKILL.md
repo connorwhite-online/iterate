@@ -1,5 +1,5 @@
 ---
-name: go
+name: "iterate:go"
 description: Implement all pending UI feedback annotations from the iterate overlay. Use this after submitting a batch of annotations in the browser.
 ---
 
@@ -28,6 +28,7 @@ The user has submitted UI feedback annotations via the iterate overlay. Your job
    - `fix` intent items before `change` items
    - For DOM position changes (moves), translate the pixel delta into appropriate CSS/layout changes in the source
    - Make changes in the correct iteration worktree — the annotation's `iteration` field tells you which worktree the change belongs to
+   - **IMPORTANT: Worktrees are full repository checkouts.** The worktree path points to the repo root, NOT the app subdirectory. If the app lives at `examples/next-app/` in the repo, you must edit files at `{worktreePath}/examples/next-app/src/...`, not `{worktreePath}/src/...`. Always use the `sourceLocation` path relative to the worktree root.
 
 6. **Resolve each annotation.** After implementing a change, call `iterate_resolve_annotation` with:
    - The annotation's `id`
