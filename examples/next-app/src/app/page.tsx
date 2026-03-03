@@ -97,36 +97,15 @@ function PlaceholderD() {
 }
 
 function PlaceholderE() {
-  const rows = [
-    { label: 60, offset: "0%", width: "45%" },
-    { label: 80, offset: "15%", width: "55%" },
-    { label: 50, offset: "40%", width: "30%" },
-    { label: 70, offset: "10%", width: "65%" },
-    { label: 40, offset: "55%", width: "35%" },
-    { label: 90, offset: "20%", width: "50%" },
-  ];
-
   return (
     <div style={{ ...styles.card, gridColumn: "span 2" }}>
       <div style={styles.cardHeader}>
         <div style={styles.cardTitle} />
-        <div style={styles.cardBadge} />
       </div>
-      <div style={styles.ganttChart}>
-        {rows.map((row, i) => (
-          <div key={i} style={styles.ganttRow}>
-            <div style={{ ...styles.ganttLabel, width: row.label }} />
-            <div style={styles.ganttTrack}>
-              <div
-                style={{
-                  ...styles.ganttBar,
-                  marginLeft: row.offset,
-                  width: row.width,
-                }}
-              />
-            </div>
-          </div>
-        ))}
+      <div style={styles.simpleTimeline}>
+        <div style={{ ...styles.timelineBar, width: "70%" }} />
+        <div style={{ ...styles.timelineBar, width: "45%" }} />
+        <div style={{ ...styles.timelineBar, width: "85%" }} />
       </div>
     </div>
   );
@@ -257,33 +236,16 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 6,
     height: 32,
   },
-  ganttChart: {
+  simpleTimeline: {
     display: "flex",
     flexDirection: "column",
     gap: 8,
   },
-  ganttRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: 12,
-  },
-  ganttLabel: {
-    height: 10,
-    borderRadius: 4,
-    background: "#333",
-    flexShrink: 0,
-  },
-  ganttTrack: {
-    flex: 1,
-    height: 20,
-    background: "#1a1a1a",
-    borderRadius: 6,
-    overflow: "hidden",
-  },
-  ganttBar: {
-    height: "100%",
+  timelineBar: {
+    height: 6,
     background: "linear-gradient(90deg, #2563eb, #7c3aed)",
-    borderRadius: 6,
+    borderRadius: 3,
+    opacity: 0.6,
   },
   footer: {
     textAlign: "center" as const,
