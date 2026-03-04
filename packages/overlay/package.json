@@ -10,7 +10,8 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./standalone": "./dist/standalone.global.js"
+    "./standalone": "./dist/standalone.global.js",
+    "./package.json": "./package.json"
   },
   "scripts": {
     "build": "tsup",
