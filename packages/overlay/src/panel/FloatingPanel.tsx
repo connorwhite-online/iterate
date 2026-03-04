@@ -176,10 +176,10 @@ export function FloatingPanel({
       ? "Removing iteration worktrees\u2026"
       : "Creating iteration branches\u2026";
 
-  // Hotkey: Alt+Shift+I to toggle
+  // Hotkey: Cmd+I (Mac) / Ctrl+I (other) to toggle
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.altKey && e.shiftKey && e.key === "I") {
+      if ((e.metaKey || e.ctrlKey) && e.key === "i") {
         e.preventDefault();
         onVisibilityChange(!visible);
       }

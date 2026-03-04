@@ -53,6 +53,8 @@ export interface DrawingData {
 export interface AnnotationData {
   id: string;
   iteration: string;
+  /** Page URL where the annotation was created */
+  url?: string;
   /** Selected elements this annotation targets */
   elements: SelectedElement[];
   /** Optional highlighted text selection */

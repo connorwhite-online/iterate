@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type {
   AnnotationData,
   AnnotationIntent,
@@ -17,6 +18,7 @@ import { MarkerDraw } from "./inspector/MarkerDraw.js";
 import { SelectionPanel } from "./annotate/SelectionPanel.js";
 import { DragHandler, type PendingMove } from "./manipulate/DragHandler.js";
 import { DaemonConnection } from "./transport/connection.js";
+import { savePendingState, loadPendingState, clearPendingState } from "./storage/persistence.js";
 
 export type ToolMode = "select" | "move" | "draw" | "browse";
 
@@ -40,16 +42,51 @@ export interface IterateOverlayProps {
 }
 
 /** Annotation waiting to be submitted (local-only until batch submit) */
-interface PendingAnnotation {
+export interface PendingAnnotation {
   iteration: string;
+  /** Page URL where this annotation was created */
+  url?: string;
   elements: SelectedElement[];
   textSelection?: TextSelection;
   drawing?: DrawingData;
   comment: string;
   intent?: AnnotationIntent;
   severity?: AnnotationSeverity;
-  /** Where the user clicked to create this annotation (for badge placement) */
+  /** Where the user clicked to create this annotation (viewport coords, for popup placement) */
   clickPosition?: { x: number; y: number };
+  /** Page-absolute coordinates for badge placement (scrolls naturally with the document) */
+  pagePosition?: { x: number; y: number };
+}
+
+/** Get the current URL from the iteration iframe (same-origin with cross-origin fallback). */
+function getIframeUrl(iframeRef: React.RefObject<HTMLIFrameElement | null>): string | undefined {
+  try {
+    return iframeRef.current?.contentWindow?.location.href;
+  } catch {
+    return iframeRef.current?.src || undefined;
+  }
+}
+
+/** Get the current page URL — uses iframe URL if available, otherwise window location. */
+function getCurrentPageUrl(iframeRef: React.RefObject<HTMLIFrameElement | null>): string {
+  return getIframeUrl(iframeRef) ?? window.location.href;
+}
+
+/** Compare two URLs by pathname only (ignoring hash, query, origin differences). */
+function urlsMatchPage(a: string, b: string): boolean {
+  try {
+    return new URL(a).pathname === new URL(b).pathname;
+  } catch {
+    return a === b;
+  }
+}
+
+/** Get the current page scroll offset (works for window scroll and document element scroll). */
+function getScrollOffset(): { x: number; y: number } {
+  return {
+    x: window.scrollX || document.documentElement.scrollLeft || document.body.scrollLeft || 0,
+    y: window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0,
+  };
 }
 
 /**
@@ -74,17 +111,137 @@ export function IterateOverlay({
   const [activeDrawing, setActiveDrawing] = useState<DrawingData | null>(null);
   const [clickPosition, setClickPosition] = useState<{ x: number; y: number } | null>(null);
 
+  // Restore pending state from localStorage (survives navigation and refresh)
+  const savedState = useMemo(() => loadPendingState(iteration), [iteration]);
+
   // Pending batch (accumulated annotations not yet submitted)
-  const [pendingBatch, setPendingBatch] = useState<PendingAnnotation[]>([]);
+  const [pendingBatch, setPendingBatch] = useState<PendingAnnotation[]>(savedState?.pendingBatch ?? []);
 
   // Pending moves (accumulated DOM moves not yet submitted)
-  const [pendingMoves, setPendingMoves] = useState<PendingMove[]>([]);
+  const [pendingMoves, setPendingMoves] = useState<PendingMove[]>(savedState?.pendingMoves ?? []);
 
   // Track whether marquee drag is in progress (suppresses ElementPicker hover)
   const [isMarqueeDragging, setIsMarqueeDragging] = useState(false);
 
+  const overlayRef = useRef<HTMLDivElement>(null);
+
+  // Lazily create (or find) a position:absolute markers layer on the document body.
+  // Badges rendered here scroll naturally with the page — no JS scroll tracking needed.
+  const markersLayerRef = useRef<HTMLDivElement | null>(null);
+  if (!markersLayerRef.current && typeof document !== "undefined") {
+    let el = document.getElementById("__iterate-markers-layer__") as HTMLDivElement | null;
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "__iterate-markers-layer__";
+      el.style.cssText = "position:absolute;top:0;left:0;width:0;height:0;overflow:visible;pointer-events:none;z-index:9998;";
+      document.body.appendChild(el);
+    }
+    markersLayerRef.current = el;
+  }
+
+  // Track the current page URL so we can hide annotations that belong to other pages.
+  // In SPAs (Next.js), the overlay persists across client-side navigations, so we
+  // need to detect URL changes and only show annotations matching the current page.
+  const [currentUrl, setCurrentUrl] = useState(() => getCurrentPageUrl(iframeRef));
+
+  useEffect(() => {
+    // Detect URL changes from client-side navigation (pushState/replaceState/popstate)
+    const update = () => setCurrentUrl(getCurrentPageUrl(iframeRef));
+    update();
+
+    // Patch pushState/replaceState to detect SPA navigations
+    const origPush = history.pushState.bind(history);
+    const origReplace = history.replaceState.bind(history);
+    history.pushState = (...args) => { origPush(...args); update(); };
+    history.replaceState = (...args) => { origReplace(...args); update(); };
+
+    window.addEventListener("popstate", update);
+
+    // Also poll to catch iframe navigations and any edge cases
+    const intervalId = setInterval(update, 500);
+
+    return () => {
+      history.pushState = origPush;
+      history.replaceState = origReplace;
+      window.removeEventListener("popstate", update);
+      clearInterval(intervalId);
+    };
+  }, [iframeRef]);
+
+  // Move markers still need scroll-based delta tracking (they render in the fixed overlay).
+  // Annotation badges no longer need this — they're in the absolute markers layer.
+  useEffect(() => {
+    if (pendingMoves.length === 0) return;
+
+    const getDoc = (): Document => {
+      try {
+        return iframeRef.current?.contentDocument ?? document;
+      } catch {
+        return document;
+      }
+    };
+
+    const applyMoveDeltas = () => {
+      const overlay = overlayRef.current;
+      if (!overlay) return;
+      const doc = getDoc();
+      const pageUrl = getCurrentPageUrl(iframeRef);
+
+      for (let i = 0; i < pendingMoves.length; i++) {
+        const move = pendingMoves[i]!;
+        const nodes = overlay.querySelectorAll(`[data-move-idx="${i}"]`);
+        if (nodes.length === 0) continue;
+
+        const onDifferentPage = move.url && pageUrl && !urlsMatchPage(move.url, pageUrl);
+        if (onDifferentPage) {
+          for (let n = 0; n < nodes.length; n++) {
+            (nodes[n] as HTMLElement).style.display = "none";
+          }
+          continue;
+        }
+
+        const stored = move.from;
+        let dx = 0, dy = 0;
+        let found = false;
+        try {
+          const el = doc.querySelector(move.selector);
+          if (el) {
+            const cur = el.getBoundingClientRect();
+            dx = (cur.x + cur.width / 2) - (stored.x + stored.width / 2);
+            dy = (cur.y + cur.height / 2) - (stored.y + stored.height / 2);
+            found = true;
+          }
+        } catch { /* cross-origin or invalid selector */ }
+
+        for (let n = 0; n < nodes.length; n++) {
+          const node = nodes[n] as HTMLElement;
+          node.style.translate = found ? `${dx}px ${dy}px` : "";
+          if (node.style.display === "none") node.style.display = "";
+        }
+      }
+    };
+
+    applyMoveDeltas();
+    const doc = getDoc();
+    doc.addEventListener("scroll", applyMoveDeltas, { capture: true, passive: true });
+    const win = doc.defaultView ?? window;
+    win.addEventListener("scroll", applyMoveDeltas, { passive: true });
+    win.addEventListener("resize", applyMoveDeltas, { passive: true });
+
+    return () => {
+      doc.removeEventListener("scroll", applyMoveDeltas, { capture: true });
+      win.removeEventListener("scroll", applyMoveDeltas);
+      win.removeEventListener("resize", applyMoveDeltas);
+    };
+  }, [pendingMoves, iframeRef, currentUrl]);
+
   // Unified undo stack — tracks whether each action was an annotation or move
-  const undoStackRef = useRef<Array<"annotation" | "move">>([]);
+  const undoStackRef = useRef<Array<"annotation" | "move">>(savedState?.undoStack ?? []);
+
+  // Persist pending state to localStorage on every change
+  useEffect(() => {
+    savePendingState(iteration, pendingBatch, pendingMoves, undoStackRef.current);
+  }, [iteration, pendingBatch, pendingMoves]);
 
   // Editing state — when editing an existing annotation badge
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -103,6 +260,17 @@ export function IterateOverlay({
     conn.connect();
     return () => conn.disconnect();
   }, [wsUrl]);
+
+  // Clear localStorage when the agent acknowledges annotations
+  useEffect(() => {
+    const conn = connectionRef.current;
+    if (!conn) return;
+    return conn.onMessage((msg) => {
+      if (msg.type === "annotation:updated" && msg.payload.status === "acknowledged") {
+        clearPendingState(iteration);
+      }
+    });
+  }, [iteration, wsUrl]);
 
   // Notify parent of batch count changes
   useEffect(() => {
@@ -188,8 +356,29 @@ export function IterateOverlay({
     (comment: string, intent?: AnnotationIntent, severity?: AnnotationSeverity) => {
       if (selectedElements.length === 0 && !textSelection && !activeDrawing) return;
 
+      // Convert viewport click position to page-absolute coordinates for the
+      // markers layer (position:absolute). Badges placed at page coords scroll
+      // naturally with the document — no JS scroll tracking needed.
+      const scroll = getScrollOffset();
+      let pagePos: { x: number; y: number } | undefined;
+      if (clickPosition) {
+        pagePos = { x: clickPosition.x + scroll.x, y: clickPosition.y + scroll.y };
+      } else if (selectedElements.length > 0) {
+        const el = selectedElements[0]!;
+        pagePos = {
+          x: el.rect.x + el.rect.width / 2 + scroll.x,
+          y: el.rect.y + el.rect.height / 2 + scroll.y,
+        };
+      } else if (activeDrawing) {
+        pagePos = {
+          x: activeDrawing.bounds.x + activeDrawing.bounds.width / 2 + scroll.x,
+          y: activeDrawing.bounds.y + activeDrawing.bounds.height / 2 + scroll.y,
+        };
+      }
+
       const annotation: PendingAnnotation = {
         iteration,
+        url: getCurrentPageUrl(iframeRef),
         elements: selectedElements.map((el) => ({
           selector: el.selector,
           elementName: el.elementName,
@@ -206,6 +395,7 @@ export function IterateOverlay({
         intent,
         severity,
         clickPosition: clickPosition ?? undefined,
+        pagePosition: pagePos,
       };
 
       if (editingIndex !== null) {
@@ -224,7 +414,7 @@ export function IterateOverlay({
       setTextSelection(null);
       setActiveDrawing(null);
     },
-    [selectedElements, textSelection, activeDrawing, iteration, clickPosition, editingIndex]
+    [selectedElements, textSelection, activeDrawing, iteration, iframeRef, clickPosition, editingIndex]
   );
 
   // Delete a single annotation from the pending batch
@@ -293,10 +483,10 @@ export function IterateOverlay({
   // Handle drag move — add to pending moves list with current iteration
   const handleMove = useCallback(
     (move: PendingMove) => {
-      setPendingMoves((prev) => [...prev, { ...move, iteration }]);
+      setPendingMoves((prev) => [...prev, { ...move, iteration, url: getCurrentPageUrl(iframeRef) }]);
       undoStackRef.current.push("move");
     },
-    [iteration]
+    [iteration, iframeRef]
   );
 
   // Convert pending moves to DomChange format for the wire protocol
@@ -306,6 +496,7 @@ export function IterateOverlay({
       return {
         id: `pending-move-${idx}-${Date.now()}`,
         iteration: move.iteration ?? iteration,
+        url: move.url,
         selector: move.selector,
         type: isReorder ? ("reorder" as const) : ("move" as const),
         componentName: move.componentName,
@@ -335,6 +526,7 @@ export function IterateOverlay({
           iteration,
           annotations: pendingBatch.map((a) => ({
             iteration: a.iteration,
+            url: a.url,
             elements: a.elements,
             textSelection: a.textSelection,
             drawing: a.drawing,
@@ -349,6 +541,7 @@ export function IterateOverlay({
       setPendingBatch([]);
       setPendingMoves([]);
       undoStackRef.current = [];
+      clearPendingState(iteration);
     };
 
     window.addEventListener("iterate:submit-batch", handler);
@@ -360,6 +553,7 @@ export function IterateOverlay({
     const handler = () => {
       setPendingBatch([]);
       setPendingMoves([]);
+      clearPendingState(iteration);
       setSelectedElements([]);
       setTextSelection(null);
       setActiveDrawing(null);
@@ -430,7 +624,8 @@ export function IterateOverlay({
   }, [pendingBatch, pendingMoves, iteration]);
 
   return (
-    <div
+    <><div
+      ref={overlayRef}
       style={{
         position: "absolute",
         inset: 0,
@@ -546,57 +741,64 @@ export function IterateOverlay({
         />
       )}
 
-      {/* Pending batch indicator markers */}
-      {pendingBatch.map((annotation, batchIdx) => {
-        // Determine badge position: use stored click position, or fall back to
-        // center of first element / drawing bounds
-        const pos = annotation.clickPosition
-          ?? (annotation.elements.length > 0
-            ? { x: annotation.elements[0]!.rect.x + annotation.elements[0]!.rect.width / 2, y: annotation.elements[0]!.rect.y + annotation.elements[0]!.rect.height / 2 }
-            : annotation.drawing
-              ? { x: annotation.drawing.bounds.x + annotation.drawing.bounds.width / 2, y: annotation.drawing.bounds.y + annotation.drawing.bounds.height / 2 }
-              : null);
-
-        return (
-          <React.Fragment key={`batch-${batchIdx}`}>
-            {/* Drawing strokes for marker annotations */}
-            {annotation.drawing && (
-              <svg
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  width: "100%",
-                  height: "100%",
-                  pointerEvents: "none",
-                  overflow: "visible",
-                }}
-              >
-                <path
-                  d={annotation.drawing.path}
-                  fill="none"
-                  stroke={annotation.drawing.strokeColor}
-                  strokeWidth={annotation.drawing.strokeWidth}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  opacity={0.5}
-                />
-              </svg>
-            )}
-            {/* Interactive badge at click position — click to edit */}
-            {pos && (
-              <InteractiveBadge
-                number={batchIdx + 1}
-                x={pos.x}
-                y={pos.y}
-                color="#2563eb"
-                onEdit={() => handleEditAnnotation(batchIdx)}
-                isEditing={editingIndex === batchIdx}
-              />
-            )}
-          </React.Fragment>
-        );
-      })}
+      {/* Drawing strokes for marker annotations (stay in fixed overlay) */}
+      {pendingBatch.map((annotation, batchIdx) =>
+        annotation.drawing ? (
+          <svg
+            key={`drawing-${batchIdx}`}
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              pointerEvents: "none",
+              overflow: "visible",
+            }}
+          >
+            <path
+              d={annotation.drawing.path}
+              fill="none"
+              stroke={annotation.drawing.strokeColor}
+              strokeWidth={annotation.drawing.strokeWidth}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              opacity={0.5}
+            />
+          </svg>
+        ) : null
+      )}
     </div>
+    {/* Annotation badges rendered in the absolute markers layer — they scroll
+        naturally with the page (no JS scroll tracking). Uses createPortal to
+        render outside the fixed overlay into a position:absolute container. */}
+    {markersLayerRef.current && createPortal(
+      <>
+        {pendingBatch.map((annotation, batchIdx) => {
+          // Hide annotations on a different page
+          const onDifferentPage = annotation.url && currentUrl && !urlsMatchPage(annotation.url, currentUrl);
+          if (onDifferentPage) return null;
+
+          // Use page-absolute coordinates (stored at creation time).
+          // Fall back to clickPosition for old annotations loaded from localStorage.
+          const pos = annotation.pagePosition ?? annotation.clickPosition;
+          if (!pos) return null;
+
+          return (
+            <InteractiveBadge
+              key={`batch-${batchIdx}`}
+              number={batchIdx + 1}
+              x={pos.x}
+              y={pos.y}
+              color="#2563eb"
+              onEdit={() => handleEditAnnotation(batchIdx)}
+              isEditing={editingIndex === batchIdx}
+            />
+          );
+        })}
+      </>,
+      markersLayerRef.current,
+    )}
+    </>
   );
 }
 
@@ -665,6 +867,7 @@ function AnimatedBadge({
 /**
  * Interactive annotation badge. Clickable circle that opens the edit form
  * when clicked. Visually highlights with a ring when being edited.
+ * Rendered inside the absolute markers layer so it scrolls naturally with the page.
  */
 function InteractiveBadge({
   number,

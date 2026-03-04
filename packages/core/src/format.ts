@@ -11,6 +11,7 @@ export interface FormatAnnotation {
   intent?: AnnotationIntent;
   severity?: AnnotationSeverity;
   iteration?: string;
+  url?: string;
 }
 
 /**
@@ -23,6 +24,7 @@ export interface FormatDomChange {
   sourceLocation: string | null;
   before: { rect: Rect };
   after: { rect: Rect };
+  url?: string;
 }
 
 /**
@@ -57,6 +59,9 @@ export function formatBatchPrompt(
 
     if (!singleIteration && a.iteration) {
       text += `- **Iteration**: ${a.iteration}\n`;
+    }
+    if (a.url) {
+      text += `- **Page**: ${a.url}\n`;
     }
 
     const tags: string[] = [];
@@ -106,6 +111,7 @@ export function formatBatchPrompt(
       const dcName = dc.componentName ? `<${dc.componentName}>` : dc.selector;
       const dcSource = dc.sourceLocation ? ` — \`${dc.sourceLocation}\`` : "";
       text += `- **${dc.type}** on ${dcName}${dcSource}\n`;
+      if (dc.url) text += `  Page: ${dc.url}\n`;
       text += `  Selector: \`${dc.selector}\`\n`;
       const before = dc.before.rect;
       const after = dc.after.rect;

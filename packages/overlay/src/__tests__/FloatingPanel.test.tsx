@@ -93,7 +93,7 @@ describe("FloatingPanel", () => {
     }
   });
 
-  it("toggles visibility on Alt+Shift+I hotkey", () => {
+  it("toggles visibility on Cmd+I hotkey", () => {
     const onVisibilityChange = vi.fn();
     render(
       <FloatingPanel
@@ -102,7 +102,7 @@ describe("FloatingPanel", () => {
         onVisibilityChange={onVisibilityChange}
       />
     );
-    fireEvent.keyDown(window, { key: "I", altKey: true, shiftKey: true });
+    fireEvent.keyDown(window, { key: "i", metaKey: true });
     expect(onVisibilityChange).toHaveBeenCalledWith(false);
   });
 

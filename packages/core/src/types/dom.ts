@@ -4,6 +4,8 @@ import type { Rect } from "./annotations.js";
 export interface DomChange {
   id: string;
   iteration: string;
+  /** Page URL where the DOM change was made */
+  url?: string;
   selector: string;
   type: "move" | "reorder" | "resize" | "style";
   /** React component name from babel plugin */

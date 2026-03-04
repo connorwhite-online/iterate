@@ -5,6 +5,8 @@ import { generateSelector, getRelevantStyles, getComponentInfo } from "../inspec
 /** A completed move with rollback info for live preview */
 export interface PendingMove {
   iteration?: string;
+  /** Page URL where this move was made */
+  url?: string;
   selector: string;
   from: Rect;
   to: Rect;
@@ -15,6 +17,8 @@ export interface PendingMove {
   reorderIndex?: number;
   /** The parent selector for reorder context */
   parentSelector?: string;
+  /** Window scroll offset when this move was created (for scroll-aware rendering) */
+  scrollOffset?: { x: number; y: number };
 }
 
 interface DragHandlerProps {
@@ -26,6 +30,8 @@ interface DragHandlerProps {
   pendingMoves: PendingMove[];
   /** Whether to show the live preview (transforms applied) vs original positions */
   previewMode: boolean;
+  /** @deprecated No longer used — deltas applied via direct DOM mutation in IterateOverlay */
+  moveDeltas?: Record<number, { dx: number; dy: number }>;
 }
 
 /**
@@ -48,6 +54,7 @@ export function DragHandler({
   onMove,
   pendingMoves,
   previewMode,
+  moveDeltas = {},
 }: DragHandlerProps) {
   const [dragging, setDragging] = useState(false);
   const [dragElement, setDragElement] = useState<Element | null>(null);
@@ -246,6 +253,7 @@ export function DragHandler({
         computedStyles: getRelevantStyles(dragElement),
         componentName: component,
         sourceLocation: source,
+        scrollOffset: { x: 0, y: 0 },
       };
 
       // For flex/grid children, determine reorder index
@@ -372,9 +380,10 @@ export function DragHandler({
         </>
       )}
 
-      {/* Persistent markers for all pending moves */}
+      {/* Persistent markers for all pending moves.
+           data-move-idx lets the scroll handler in IterateOverlay apply CSS translate directly. */}
       {pendingMoves.map((move, idx) => (
-        <div key={`move-${idx}`}>
+        <div key={`move-${idx}`} data-move-idx={idx}>
           {/* Dotted border at element's current position */}
           <div
             style={{
