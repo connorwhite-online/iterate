@@ -1,6 +1,23 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, execSync, type ChildProcess } from "node:child_process";
 import { createConnection } from "node:net";
-import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+import { join, dirname } from "node:path";
+import { readFileSync } from "node:fs";
+
+/**
+ * Resolve a package's entry point via require.resolve, falling back to
+ * reading the package.json for ESM-only packages without a "require" export.
+ */
+function resolvePackageEntry(packageName: string, _require: NodeRequire): string {
+  try {
+    return _require.resolve(packageName);
+  } catch {
+    const pkgJsonPath = _require.resolve(`${packageName}/package.json`);
+    const pkg = JSON.parse(readFileSync(pkgJsonPath, "utf-8"));
+    const main = pkg.exports?.["."]?.import ?? pkg.main ?? "index.js";
+    return join(dirname(pkgJsonPath), main);
+  }
+}
 
 export interface IterateNextOptions {
   /** Port for the iterate daemon (default: 4000) */
@@ -47,7 +64,8 @@ export function withIterate(
   // Start the daemon when the config is loaded (dev only)
   if (!daemon && !daemonStarting) {
     daemonStarting = true;
-    startDaemonIfNeeded(daemonPort, process.cwd()).then((child) => {
+    const repoRoot = getGitRoot() ?? process.cwd();
+    startDaemonIfNeeded(daemonPort, repoRoot).then((child) => {
       if (child) {
         daemon = child;
 
@@ -66,12 +84,14 @@ export function withIterate(
   }
 
   // Resolve the overlay bundle path at config time
+  // Use createRequire for CJS compatibility (Next.js loads config via CJS)
+  const _require = typeof require !== "undefined" ? require : createRequire(import.meta.url);
   let overlayBundlePath: string | undefined;
   let babelPluginPath: string | undefined;
   try {
-    overlayBundlePath = fileURLToPath(import.meta.resolve("iterate-ui-overlay/standalone"));
+    overlayBundlePath = resolvePackageEntry("iterate-ui-overlay/standalone", _require);
     if (!options.disableBabelPlugin) {
-      babelPluginPath = fileURLToPath(import.meta.resolve("iterate-ui-babel-plugin"));
+      babelPluginPath = resolvePackageEntry("iterate-ui-babel-plugin", _require);
     }
   } catch {
     console.warn("[iterate] Could not resolve overlay bundle or babel plugin");
@@ -79,23 +99,6 @@ export function withIterate(
 
   return {
     ...nextConfig,
-
-    // Inject iterate babel plugin for component name/source resolution
-    ...(babelPluginPath ? {
-      experimental: {
-        ...nextConfig.experimental,
-        // Next.js supports custom SWC plugins, but for broadest compatibility
-        // we use the babel config approach
-      },
-      // Add our babel plugin to any existing babel config
-      babel: {
-        ...nextConfig.babel,
-        plugins: [
-          ...(nextConfig.babel?.plugins ?? []),
-          [babelPluginPath, { root: process.cwd() }],
-        ],
-      },
-    } : {}),
 
     // Add rewrites to proxy to the daemon
     async rewrites() {
@@ -213,6 +216,14 @@ function isPortInUse(port: number): Promise<boolean> {
   });
 }
 
+function getGitRoot(): string | null {
+  try {
+    return execSync("git rev-parse --show-toplevel", { encoding: "utf-8" }).trim();
+  } catch {
+    return null;
+  }
+}
+
 async function startDaemonIfNeeded(port: number, cwd: string): Promise<ChildProcess | null> {
   if (await isPortInUse(port)) {
     console.log(`[iterate] daemon already running on port ${port}`);
@@ -220,7 +231,10 @@ async function startDaemonIfNeeded(port: number, cwd: string): Promise<ChildProc
   }
 
   // Resolve iterate-ui-daemon from this package's location, not the app's cwd
-  const daemonPath = import.meta.resolve("iterate-ui-daemon");
+  const _req = typeof require !== "undefined" ? require : createRequire(import.meta.url);
+  const daemonEntryPath = resolvePackageEntry("iterate-ui-daemon", _req);
+  // Convert to file:// URL for ESM import in the spawned child
+  const daemonPath = `file://${daemonEntryPath}`;
 
   const child = spawn(
     process.execPath,

@@ -4,3 +4,4 @@ dist/
 *.tsbuildinfo
 .iterate/
 .next/
+out/

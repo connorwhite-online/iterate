@@ -1,5 +1,5 @@
 import type { Plugin, ViteDevServer } from "vite";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, execSync, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import http from "node:http";
@@ -102,7 +102,8 @@ export function iterate(options: IteratePluginOptions = {}): Plugin[] {
 
     configureServer(server: ViteDevServer) {
       // Start the daemon
-      daemon = startDaemon(daemonPort, server.config.root);
+      const repoRoot = getGitRoot() ?? server.config.root;
+      daemon = startDaemon(daemonPort, repoRoot);
 
       // Serve the overlay bundle directly (avoids extra proxy hop)
       server.middlewares.use("/__iterate__/overlay.js", (_req, res) => {
@@ -201,6 +202,14 @@ export function iterate(options: IteratePluginOptions = {}): Plugin[] {
   });
 
   return plugins;
+}
+
+function getGitRoot(): string | null {
+  try {
+    return execSync("git rev-parse --show-toplevel", { encoding: "utf-8" }).trim();
+  } catch {
+    return null;
+  }
 }
 
 function startDaemon(port: number, cwd: string): ChildProcess {

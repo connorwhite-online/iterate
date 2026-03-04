@@ -123,7 +123,7 @@ export class ProcessManager {
    * Wait for a dev server to start accepting connections.
    * Polls the port with TCP connect attempts until it responds or timeout.
    */
-  async waitForReady(port: number, timeoutMs = 30000): Promise<void> {
+  async waitForReady(port: number, timeoutMs = 120000): Promise<void> {
     const start = Date.now();
     const interval = 500;
 
