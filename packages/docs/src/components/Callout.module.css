@@ -1,0 +1,21 @@
+.callout {
+  background: var(--color-bg-code);
+  border-left: 3px solid var(--color-border);
+  padding: 0.85rem 1rem;
+  margin-bottom: 1.5rem;
+  border-radius: 2px 6px 6px 2px;
+  font-size: 0.9rem;
+}
+
+.callout p:last-child {
+  margin-bottom: 0;
+}
+
+.label {
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+  margin-bottom: 0.35rem;
+}

@@ -1,0 +1,24 @@
+{
+  "name": "iterate-ui-docs",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3200",
+    "build": "next build",
+    "start": "next start",
+    "clean": "rm -rf .next out"
+  },
+  "dependencies": {
+    "beautiful-mermaid": "^1.1.3",
+    "iterate-ui-next": "workspace:*",
+    "next": "^15.3.3",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "shiki": "^3.4.2"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "typescript": "^5.7.0"
+  }
+}

@@ -1,0 +1,21 @@
+.button {
+  position: absolute;
+  top: 0.45rem;
+  right: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.button:hover {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-code);
+}

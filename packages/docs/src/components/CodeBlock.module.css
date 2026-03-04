@@ -1,0 +1,18 @@
+.container {
+  position: relative;
+  margin-bottom: 1.5rem;
+}
+
+.container pre {
+  margin-bottom: 0;
+}
+
+.label {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.75rem;
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  color: var(--color-text-tertiary);
+  user-select: none;
+}

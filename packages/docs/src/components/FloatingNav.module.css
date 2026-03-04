@@ -1,0 +1,93 @@
+.floatingNav {
+  position: fixed;
+  top: 4rem;
+  /* Position: right edge is nav-gap to the left of content's left edge */
+  /* Content left edge = 50vw - content-max-width/2 */
+  left: calc(50vw - var(--content-max-width) / 2 - var(--nav-gap));
+  transform: translateX(-100%);
+  z-index: 100;
+
+  background: var(--color-bg-nav);
+  border-radius: 16px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 200px;
+}
+
+/* Header: logo + npm/github row */
+.header {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.logoLink {
+  text-decoration: none;
+}
+
+.logoLink:hover {
+  text-decoration: none;
+}
+
+.externalLinks {
+  display: flex;
+  gap: 8px;
+}
+
+.externalLink {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+  transition: color 0.15s;
+}
+
+.externalLink:hover {
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+/* Nav links container */
+.navLinks {
+  background: var(--color-bg-nav-inner);
+  border: 1px solid var(--color-border-nav);
+  border-radius: 12px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.link {
+  display: block;
+  padding: 4px 10px;
+  font-size: 0.825rem;
+  color: var(--color-text-secondary);
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+  text-decoration: none;
+}
+
+.link:hover {
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.linkActive {
+  color: var(--color-text);
+  font-weight: 600;
+  background: var(--color-bg-nav);
+}
+
+/* Hide on narrow screens where nav would overlap content */
+@media (max-width: 1100px) {
+  .floatingNav {
+    display: none;
+  }
+}
