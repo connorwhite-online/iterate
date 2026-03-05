@@ -43,4 +43,4 @@ export default defineConfig({ plugins: [react(), iterate()] })
 
 ## License
 
-PolyForm Shield 1.0.0
+MIT
