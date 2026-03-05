@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { StateStore } from "../state/store.js";
 import { DEFAULT_CONFIG } from "iterate-ui-core";
-import type { AnnotationData, IterationInfo, DomChange } from "iterate-ui-core";
+import type { Change, IterationInfo, DomChange } from "iterate-ui-core";
 
 function createStore() {
   return new StateStore({ ...DEFAULT_CONFIG });
@@ -20,9 +20,9 @@ function mockIteration(overrides?: Partial<IterationInfo>): IterationInfo {
   };
 }
 
-function mockAnnotation(overrides?: Partial<AnnotationData>): AnnotationData {
+function mockChange(overrides?: Partial<Change>): Change {
   return {
-    id: "ann-1",
+    id: "chg-1",
     iteration: "iter-a",
     elements: [{
       selector: "div.card",
@@ -35,7 +35,7 @@ function mockAnnotation(overrides?: Partial<AnnotationData>): AnnotationData {
     }],
     comment: "Fix this",
     timestamp: 1000,
-    status: "pending",
+    status: "queued",
     ...overrides,
   };
 }
@@ -67,7 +67,7 @@ describe("StateStore", () => {
       const state = store.getState();
       expect(state).toHaveProperty("config");
       expect(state).toHaveProperty("iterations");
-      expect(state).toHaveProperty("annotations");
+      expect(state).toHaveProperty("changes");
       expect(state).toHaveProperty("domChanges");
     });
 
@@ -105,57 +105,57 @@ describe("StateStore", () => {
     });
   });
 
-  describe("annotations", () => {
-    it("getAnnotations returns empty array initially", () => {
-      expect(store.getAnnotations()).toEqual([]);
+  describe("changes", () => {
+    it("getChanges returns empty array initially", () => {
+      expect(store.getChanges()).toEqual([]);
     });
 
-    it("addAnnotation + getAnnotation retrieves by id", () => {
-      const ann = mockAnnotation({ id: "x1" });
-      store.addAnnotation(ann);
-      expect(store.getAnnotation("x1")).toEqual(ann);
+    it("addChange + getChange retrieves by id", () => {
+      const chg = mockChange({ id: "x1" });
+      store.addChange(chg);
+      expect(store.getChange("x1")).toEqual(chg);
     });
 
-    it("getAnnotation returns undefined for nonexistent id", () => {
-      expect(store.getAnnotation("nope")).toBeUndefined();
+    it("getChange returns undefined for nonexistent id", () => {
+      expect(store.getChange("nope")).toBeUndefined();
     });
 
-    it("getPendingAnnotations filters by status", () => {
-      store.addAnnotation(mockAnnotation({ id: "a1", status: "pending" }));
-      store.addAnnotation(mockAnnotation({ id: "a2", status: "resolved" }));
-      store.addAnnotation(mockAnnotation({ id: "a3", status: "pending" }));
-      const pending = store.getPendingAnnotations();
+    it("getPendingChanges filters by status", () => {
+      store.addChange(mockChange({ id: "a1", status: "queued" }));
+      store.addChange(mockChange({ id: "a2", status: "implemented" }));
+      store.addChange(mockChange({ id: "a3", status: "queued" }));
+      const pending = store.getPendingChanges();
       expect(pending).toHaveLength(2);
       expect(pending.map((a) => a.id)).toEqual(["a1", "a3"]);
     });
 
-    it("updateAnnotation applies partial updates", () => {
-      store.addAnnotation(mockAnnotation({ id: "a1", comment: "old" }));
-      const result = store.updateAnnotation("a1", { comment: "new", status: "resolved" });
+    it("updateChange applies partial updates", () => {
+      store.addChange(mockChange({ id: "a1", comment: "old" }));
+      const result = store.updateChange("a1", { comment: "new", status: "implemented" });
       expect(result?.comment).toBe("new");
-      expect(result?.status).toBe("resolved");
+      expect(result?.status).toBe("implemented");
       expect(result?.id).toBe("a1");
     });
 
-    it("updateAnnotation returns null for nonexistent id", () => {
-      expect(store.updateAnnotation("nope", { comment: "x" })).toBeNull();
+    it("updateChange returns null for nonexistent id", () => {
+      expect(store.updateChange("nope", { comment: "x" })).toBeNull();
     });
 
-    it("removeAnnotation returns true and deletes", () => {
-      store.addAnnotation(mockAnnotation({ id: "a1" }));
-      expect(store.removeAnnotation("a1")).toBe(true);
-      expect(store.getAnnotation("a1")).toBeUndefined();
+    it("removeChange returns true and deletes", () => {
+      store.addChange(mockChange({ id: "a1" }));
+      expect(store.removeChange("a1")).toBe(true);
+      expect(store.getChange("a1")).toBeUndefined();
     });
 
-    it("removeAnnotation returns false for nonexistent id", () => {
-      expect(store.removeAnnotation("nope")).toBe(false);
+    it("removeChange returns false for nonexistent id", () => {
+      expect(store.removeChange("nope")).toBe(false);
     });
 
-    it("handles multiple annotations", () => {
+    it("handles multiple changes", () => {
       for (let i = 0; i < 5; i++) {
-        store.addAnnotation(mockAnnotation({ id: `a${i}` }));
+        store.addChange(mockChange({ id: `a${i}` }));
       }
-      expect(store.getAnnotations()).toHaveLength(5);
+      expect(store.getChanges()).toHaveLength(5);
     });
   });
 
@@ -223,12 +223,12 @@ describe("StateStore", () => {
   describe("state mutations reflect in getState", () => {
     it("mutations are visible through getState", () => {
       store.setIteration("test", mockIteration());
-      store.addAnnotation(mockAnnotation());
+      store.addChange(mockChange());
       store.addDomChange(mockDomChange());
 
       const state = store.getState();
       expect(Object.keys(state.iterations)).toHaveLength(1);
-      expect(state.annotations).toHaveLength(1);
+      expect(state.changes).toHaveLength(1);
       expect(state.domChanges).toHaveLength(1);
     });
   });

@@ -165,6 +165,8 @@ function injectOverlayScript(html: string, daemonPort: number, iterationName: st
 if(typeof window!=='undefined'&&!window.__iterate_shell__){
 window.__iterate_shell__={activeTool:'browse',activeIteration:${safeIterationName},daemonPort:${daemonPort}};
 var s=document.createElement('script');s.src='/__iterate__/overlay.js';s.defer=true;document.head.appendChild(s);
+function __iterateReady(){try{window.parent.postMessage({type:'iterate:frame-ready',iteration:${safeIterationName}},'*')}catch(e){}}
+window.addEventListener('load',function(){(typeof requestIdleCallback==='function'?requestIdleCallback:function(cb){setTimeout(cb,100)})(__iterateReady)});
 }
 </script>`;
 

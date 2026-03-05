@@ -3,7 +3,7 @@ import type { WebSocket } from "ws";
 import type {
   ClientMessage,
   ServerMessage,
-  AnnotationData,
+  Change,
   DomChange,
 } from "iterate-ui-core";
 import type { StateStore } from "../state/store.js";
@@ -72,23 +72,45 @@ export class WebSocketHub {
   /** Handle incoming messages from the browser overlay */
   private handleMessage(msg: ClientMessage, _socket: WebSocket): void {
     switch (msg.type) {
-      case "annotation:create": {
-        const annotation: AnnotationData = {
+      case "change:create": {
+        const change: Change = {
           ...msg.payload,
           id: crypto.randomUUID(),
           timestamp: Date.now(),
-          status: "pending",
+          status: "queued",
         };
-        this.store.addAnnotation(annotation);
-        this.broadcast({ type: "annotation:created", payload: annotation });
+        this.store.addChange(change);
+        this.broadcast({ type: "change:created", payload: change });
         break;
       }
 
-      case "annotation:delete": {
-        const removed = this.store.removeAnnotation(msg.payload.id);
+      case "change:delete": {
+        const removed = this.store.removeChange(msg.payload.id);
         if (removed) {
           this.broadcast({
-            type: "annotation:deleted",
+            type: "change:deleted",
+            payload: { id: msg.payload.id },
+          });
+        }
+        break;
+      }
+
+      case "dom-change:create": {
+        const domChange: DomChange = {
+          ...msg.payload,
+          id: crypto.randomUUID(),
+          timestamp: Date.now(),
+        };
+        this.store.addDomChange(domChange);
+        this.broadcast({ type: "dom:changed", payload: domChange });
+        break;
+      }
+
+      case "dom-change:delete": {
+        const removed = this.store.removeDomChange(msg.payload.id);
+        if (removed) {
+          this.broadcast({
+            type: "dom:deleted",
             payload: { id: msg.payload.id },
           });
         }
@@ -97,24 +119,24 @@ export class WebSocketHub {
 
       case "batch:submit": {
         const batchId = crypto.randomUUID();
-        const { annotations, domChanges } = msg.payload;
+        const { changes, domChanges } = msg.payload;
 
-        // Store all annotations from the batch
-        for (const annotationPayload of annotations) {
-          const annotation: AnnotationData = {
-            ...annotationPayload,
+        // Store all changes from the batch
+        for (const changePayload of changes) {
+          const change: Change = {
+            ...changePayload,
             id: crypto.randomUUID(),
             timestamp: Date.now(),
-            status: "pending",
+            status: "queued",
           };
-          this.store.addAnnotation(annotation);
-          this.broadcast({ type: "annotation:created", payload: annotation });
+          this.store.addChange(change);
+          this.broadcast({ type: "change:created", payload: change });
         }
 
         // Store any DOM changes from the batch
-        for (const change of domChanges) {
-          this.store.addDomChange(change);
-          this.broadcast({ type: "dom:changed", payload: change });
+        for (const domChange of domChanges) {
+          this.store.addDomChange(domChange);
+          this.broadcast({ type: "dom:changed", payload: domChange });
         }
 
         // Notify all clients (including MCP) that a batch was submitted
@@ -122,7 +144,7 @@ export class WebSocketHub {
           type: "batch:submitted",
           payload: {
             batchId,
-            annotationCount: annotations.length,
+            changeCount: changes.length,
             domChangeCount: domChanges.length,
           },
         });
@@ -130,7 +152,7 @@ export class WebSocketHub {
       }
 
       case "dom:move": {
-        const change: DomChange = {
+        const domChange: DomChange = {
           id: crypto.randomUUID(),
           iteration: msg.payload.iteration,
           selector: msg.payload.selector,
@@ -141,13 +163,13 @@ export class WebSocketHub {
           after: { rect: msg.payload.to, computedStyles: {} },
           timestamp: Date.now(),
         };
-        this.store.addDomChange(change);
-        this.broadcast({ type: "dom:changed", payload: change });
+        this.store.addDomChange(domChange);
+        this.broadcast({ type: "dom:changed", payload: domChange });
         break;
       }
 
       case "dom:reorder": {
-        const change: DomChange = {
+        const domChange: DomChange = {
           id: crypto.randomUUID(),
           iteration: msg.payload.iteration,
           selector: msg.payload.selector,
@@ -158,8 +180,8 @@ export class WebSocketHub {
           after: { rect: { x: 0, y: 0, width: 0, height: 0 }, computedStyles: {}, siblingIndex: msg.payload.newIndex },
           timestamp: Date.now(),
         };
-        this.store.addDomChange(change);
-        this.broadcast({ type: "dom:changed", payload: change });
+        this.store.addDomChange(domChange);
+        this.broadcast({ type: "dom:changed", payload: domChange });
         break;
       }
 

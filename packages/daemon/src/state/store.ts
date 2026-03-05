@@ -2,8 +2,8 @@ import type {
   IterateState,
   IterateConfig,
   IterationInfo,
-  AnnotationData,
-  AnnotationStatus,
+  Change,
+  ChangeStatus,
   DomChange,
 } from "iterate-ui-core";
 
@@ -24,7 +24,7 @@ export class StateStore {
     this.state = {
       config,
       iterations: {},
-      annotations: [],
+      changes: [],
       domChanges: [],
     };
   }
@@ -55,35 +55,35 @@ export class StateStore {
     delete this.state.iterations[name];
   }
 
-  // --- Annotations ---
+  // --- Changes ---
 
-  getAnnotations(): AnnotationData[] {
-    return this.state.annotations;
+  getChanges(): Change[] {
+    return this.state.changes;
   }
 
-  getAnnotation(id: string): AnnotationData | undefined {
-    return this.state.annotations.find((a) => a.id === id);
+  getChange(id: string): Change | undefined {
+    return this.state.changes.find((a) => a.id === id);
   }
 
-  getPendingAnnotations(): AnnotationData[] {
-    return this.state.annotations.filter((a) => a.status === "pending");
+  getPendingChanges(): Change[] {
+    return this.state.changes.filter((a) => a.status === "queued");
   }
 
-  addAnnotation(annotation: AnnotationData): void {
-    this.state.annotations.push(annotation);
+  addChange(change: Change): void {
+    this.state.changes.push(change);
   }
 
-  updateAnnotation(id: string, updates: Partial<AnnotationData>): AnnotationData | null {
-    const annotation = this.state.annotations.find((a) => a.id === id);
-    if (!annotation) return null;
-    Object.assign(annotation, updates);
-    return annotation;
+  updateChange(id: string, updates: Partial<Change>): Change | null {
+    const change = this.state.changes.find((a) => a.id === id);
+    if (!change) return null;
+    Object.assign(change, updates);
+    return change;
   }
 
-  removeAnnotation(id: string): boolean {
-    const idx = this.state.annotations.findIndex((a) => a.id === id);
+  removeChange(id: string): boolean {
+    const idx = this.state.changes.findIndex((a) => a.id === id);
     if (idx === -1) return false;
-    this.state.annotations.splice(idx, 1);
+    this.state.changes.splice(idx, 1);
     return true;
   }
 
@@ -97,8 +97,30 @@ export class StateStore {
     this.state.domChanges.push(change);
   }
 
+  removeDomChange(id: string): boolean {
+    const idx = this.state.domChanges.findIndex((c) => c.id === id);
+    if (idx === -1) return false;
+    this.state.domChanges.splice(idx, 1);
+    return true;
+  }
+
   clearDomChanges(): void {
     this.state.domChanges = [];
+  }
+
+  /** Remove all changes and DOM changes belonging to an iteration */
+  removeIterationData(iteration: string): { changeIds: string[]; domChangeIds: string[] } {
+    const changeIds = this.state.changes
+      .filter((a) => a.iteration === iteration)
+      .map((a) => a.id);
+    const domChangeIds = this.state.domChanges
+      .filter((c) => c.iteration === iteration)
+      .map((c) => c.id);
+
+    this.state.changes = this.state.changes.filter((a) => a.iteration !== iteration);
+    this.state.domChanges = this.state.domChanges.filter((c) => c.iteration !== iteration);
+
+    return { changeIds, domChangeIds };
   }
 
   // --- Commands ---

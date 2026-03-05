@@ -11,6 +11,7 @@ import { StateStore } from "./state/store.js";
 import { WorktreeManager, type DiscoveredWorktree } from "./worktree/manager.js";
 import { ProcessManager } from "./process/manager.js";
 import { WebSocketHub } from "./websocket/hub.js";
+import { copyFilesToWorktree, copyUncommittedFiles } from "./worktree/copy-files.js";
 import { registerProxyRoutes } from "./proxy/router.js";
 
 export interface DaemonOptions {
@@ -91,6 +92,10 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
       info.worktreePath = worktreePath;
       info.branch = branch;
 
+      // Copy config files (e.g., .env.local) and uncommitted changes into the new worktree
+      copyFilesToWorktree(cwd, worktreePath, config.copyFiles ?? [".env*"]);
+      copyUncommittedFiles(cwd, worktreePath);
+
       // Install dependencies (always at worktree root)
       info.status = "installing";
       store.setIteration(name, info);
@@ -170,6 +175,15 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
       }
     }
 
+    // Clean up changes and DOM changes belonging to this iteration
+    const { changeIds, domChangeIds } = store.removeIterationData(name);
+    for (const id of changeIds) {
+      wsHub.broadcast({ type: "change:deleted", payload: { id } });
+    }
+    for (const id of domChangeIds) {
+      wsHub.broadcast({ type: "dom:deleted", payload: { id } });
+    }
+
     store.removeIteration(name);
     wsHub.broadcast({ type: "iteration:removed", payload: { name } });
 
@@ -210,6 +224,13 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     }
 
     for (const iter of allIterations) {
+      const { changeIds, domChangeIds } = store.removeIterationData(iter.name);
+      for (const id of changeIds) {
+        wsHub.broadcast({ type: "change:deleted", payload: { id } });
+      }
+      for (const id of domChangeIds) {
+        wsHub.broadcast({ type: "dom:deleted", payload: { id } });
+      }
       store.removeIteration(iter.name);
       wsHub.broadcast({ type: "iteration:removed", payload: { name: iter.name } });
     }
@@ -217,49 +238,35 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     return { ok: true, merged: name };
   });
 
-  app.get("/api/annotations", async () => {
-    return store.getAnnotations();
+  app.get("/api/changes", async () => {
+    return store.getChanges();
   });
 
-  app.get("/api/annotations/pending", async () => {
-    const pending = store.getPendingAnnotations();
-    return { count: pending.length, annotations: pending };
+  app.get("/api/changes/pending", async () => {
+    const pending = store.getPendingChanges();
+    return { count: pending.length, changes: pending };
   });
 
-  /** Acknowledge an annotation (agent has seen it) */
-  app.patch("/api/annotations/:id/acknowledge", async (request, reply) => {
+  /** Mark a change as in-progress (agent has seen it and is working on it) */
+  app.patch("/api/changes/:id/start", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const updated = store.updateAnnotation(id, { status: "acknowledged" });
-    if (!updated) return reply.status(404).send({ message: "Annotation not found" });
-    wsHub.broadcast({ type: "annotation:updated", payload: updated });
+    const updated = store.updateChange(id, { status: "in-progress" });
+    if (!updated) return reply.status(404).send({ message: "Change not found" });
+    wsHub.broadcast({ type: "change:updated", payload: updated });
     return updated;
   });
 
-  /** Resolve an annotation (agent addressed the feedback) */
-  app.patch("/api/annotations/:id/resolve", async (request, reply) => {
+  /** Mark a change as implemented (agent addressed the feedback) */
+  app.patch("/api/changes/:id/implement", async (request, reply) => {
     const { id } = request.params as { id: string };
     const { summary } = (request.body as { summary?: string }) ?? {};
-    const updated = store.updateAnnotation(id, {
-      status: "resolved",
-      resolvedBy: "agent",
-      agentReply: summary,
+    const updated = store.updateChange(id, {
+      status: "implemented",
+      implementedBy: "agent",
+      agentSummary: summary,
     });
-    if (!updated) return reply.status(404).send({ message: "Annotation not found" });
-    wsHub.broadcast({ type: "annotation:updated", payload: updated });
-    return updated;
-  });
-
-  /** Dismiss an annotation (agent chose not to address it) */
-  app.patch("/api/annotations/:id/dismiss", async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const { reason } = (request.body as { reason?: string }) ?? {};
-    const updated = store.updateAnnotation(id, {
-      status: "dismissed",
-      resolvedBy: "agent",
-      agentReply: reason,
-    });
-    if (!updated) return reply.status(404).send({ message: "Annotation not found" });
-    wsHub.broadcast({ type: "annotation:updated", payload: updated });
+    if (!updated) return reply.status(404).send({ message: "Change not found" });
+    wsHub.broadcast({ type: "change:updated", payload: updated });
     return updated;
   });
 
@@ -336,6 +343,10 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
             const { worktreePath, branch } = await worktreeManager.create(name);
             info.worktreePath = worktreePath;
             info.branch = branch;
+
+            // Copy config files (e.g., .env.local) and uncommitted changes into the new worktree
+            copyFilesToWorktree(cwd, worktreePath, config.copyFiles ?? [".env*"]);
+            copyUncommittedFiles(cwd, worktreePath);
 
             info.status = "installing";
             store.setIteration(name, info);
@@ -674,6 +685,10 @@ function getShellHTML(): string {
     .tool-btn.active { color: #fff; background: #2563eb; border-color: #2563eb; }
     #viewport { flex: 1; position: relative; overflow: hidden; }
     #viewport iframe { width: 100%; height: 100%; border: none; }
+    .iframe-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #0a0a0a; color: #555; font-size: 14px; z-index: 10; transition: opacity 0.3s; }
+    .iframe-loading.hidden { opacity: 0; pointer-events: none; }
+    .iframe-loading .spinner { width: 20px; height: 20px; border: 2px solid #333; border-top-color: #22c55e; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 10px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
     .empty-state { display: flex; align-items: center; justify-content: center; height: 100%; color: #555; font-size: 14px; flex-direction: column; gap: 8px; }
     .empty-state code { background: #1a1a1a; padding: 4px 8px; border-radius: 4px; font-size: 13px; }
     #status-bar { padding: 4px 12px; background: #111; border-top: 1px solid #2a2a2a; font-size: 11px; color: #555; display: flex; justify-content: space-between; }
@@ -705,7 +720,7 @@ function getShellHTML(): string {
   </div>
 
   <script>
-    let state = { iterations: {}, annotations: [], domChanges: [], config: {} };
+    let state = { iterations: {}, changes: [], domChanges: [], config: {} };
     let activeIteration = null;
     let activeTool = 'select';
     let ws = null;
@@ -726,8 +741,8 @@ function getShellHTML(): string {
         case 'iteration:created': state.iterations[msg.payload.name] = msg.payload; render(); break;
         case 'iteration:status': if (state.iterations[msg.payload.name]) state.iterations[msg.payload.name].status = msg.payload.status; render(); break;
         case 'iteration:removed': delete state.iterations[msg.payload.name]; if (activeIteration === msg.payload.name) activeIteration = null; render(); break;
-        case 'annotation:created': state.annotations.push(msg.payload); break;
-        case 'annotation:deleted': state.annotations = state.annotations.filter(a => a.id !== msg.payload.id); break;
+        case 'change:created': state.changes.push(msg.payload); break;
+        case 'change:deleted': state.changes = state.changes.filter(a => a.id !== msg.payload.id); break;
         case 'command:started': if (msg.payload.iterations.length > 0 && !activeIteration) switchIteration(msg.payload.iterations[0]); break;
       }
     }
@@ -751,15 +766,23 @@ function getShellHTML(): string {
       if (!activeIteration && names.length > 0) { activeIteration = names[0]; window.__iterate_shell__.activeIteration = activeIteration; window.dispatchEvent(new CustomEvent('iterate:iteration-change', { detail: { iteration: activeIteration } })); }
     }
 
+    const iframeCache = {};
+
     function renderViewport() {
       const viewport = document.getElementById('viewport'); const names = Object.keys(state.iterations);
-      if (names.length === 0) { viewport.innerHTML = '<div class="empty-state"><p>No iterations yet.</p><p>Type <code>/iterate &lt;prompt&gt;</code> above to get started.</p></div>'; return; }
+      if (names.length === 0) { viewport.innerHTML = '<div class="empty-state"><p>No iterations yet.</p><p>Type <code>/iterate &lt;prompt&gt;</code> above to get started.</p></div>'; iframeCache && Object.keys(iframeCache).forEach(k => delete iframeCache[k]); return; }
       if (!activeIteration) return; const info = state.iterations[activeIteration]; if (!info) return;
-      const existingIframe = viewport.querySelector('iframe');
-      if (existingIframe && existingIframe.dataset.iteration === activeIteration) return;
-      viewport.innerHTML = '';
-      if (info.status === 'ready') { const iframe = document.createElement('iframe'); iframe.src = '/' + encodeURIComponent(activeIteration) + '/'; iframe.dataset.iteration = activeIteration; iframe.loading = 'lazy'; viewport.appendChild(iframe); }
-      else { const empty = document.createElement('div'); empty.className = 'empty-state'; empty.textContent = 'Iteration "' + activeIteration + '" is ' + (info.status || 'unknown') + '...'; viewport.appendChild(empty); }
+      // Hide all iframes, show only the active one
+      viewport.querySelectorAll('iframe').forEach(f => f.style.display = 'none');
+      // Remove stale overlays and empty states
+      viewport.querySelectorAll('.iframe-loading, .empty-state').forEach(el => el.remove());
+      if (info.status === 'ready') {
+        let iframe = iframeCache[activeIteration];
+        if (!iframe) { iframe = document.createElement('iframe'); iframe.src = '/' + encodeURIComponent(activeIteration) + '/'; iframe.dataset.iteration = activeIteration; viewport.appendChild(iframe); iframeCache[activeIteration] = iframe; }
+        iframe.style.display = '';
+      } else {
+        const empty = document.createElement('div'); empty.className = 'empty-state'; empty.textContent = 'Iteration "' + activeIteration + '" is ' + (info.status || 'unknown') + '...'; viewport.appendChild(empty);
+      }
     }
 
     function renderPickButton() { const btn = document.getElementById('pick-btn'); btn.style.display = (activeIteration && Object.keys(state.iterations).length > 0) ? 'block' : 'none'; }
@@ -768,6 +791,7 @@ function getShellHTML(): string {
 
     // Listen for iteration switch requests from the overlay's FloatingPanel
     window.addEventListener('iterate:request-switch', (e) => { const name = e.detail?.iteration; if (name && state.iterations[name]) switchIteration(name); });
+
 
     document.getElementById('pick-btn').addEventListener('click', async () => {
       if (!activeIteration) return;

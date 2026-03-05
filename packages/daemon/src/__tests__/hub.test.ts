@@ -34,11 +34,11 @@ describe("WebSocketHub", () => {
     vi.restoreAllMocks();
   });
 
-  describe("annotation:create", () => {
-    it("stores annotation with generated id, timestamp, and pending status", () => {
+  describe("change:create", () => {
+    it("stores change with generated id, timestamp, and queued status", () => {
       const { hub, store } = createHub();
       sendMessage(hub, {
-        type: "annotation:create",
+        type: "change:create",
         payload: {
           iteration: "iter-a",
           elements: [{
@@ -54,17 +54,17 @@ describe("WebSocketHub", () => {
         } as any,
       });
 
-      const annotations = store.getAnnotations();
-      expect(annotations).toHaveLength(1);
-      expect(annotations[0]!.id).toBe("uuid-1");
-      expect(annotations[0]!.timestamp).toBe(1700000000000);
-      expect(annotations[0]!.status).toBe("pending");
+      const changes = store.getChanges();
+      expect(changes).toHaveLength(1);
+      expect(changes[0]!.id).toBe("uuid-1");
+      expect(changes[0]!.timestamp).toBe(1700000000000);
+      expect(changes[0]!.status).toBe("queued");
     });
 
-    it("broadcasts annotation:created", () => {
+    it("broadcasts change:created", () => {
       const { hub, sent } = createHub();
       sendMessage(hub, {
-        type: "annotation:create",
+        type: "change:create",
         payload: {
           iteration: "iter-a",
           elements: [],
@@ -73,44 +73,44 @@ describe("WebSocketHub", () => {
       });
 
       expect(sent).toHaveLength(1);
-      expect(sent[0]!.type).toBe("annotation:created");
+      expect(sent[0]!.type).toBe("change:created");
     });
   });
 
-  describe("annotation:delete", () => {
-    it("removes annotation and broadcasts", () => {
+  describe("change:delete", () => {
+    it("removes change and broadcasts", () => {
       const { hub, store, sent } = createHub();
-      store.addAnnotation({
+      store.addChange({
         id: "existing",
         iteration: "iter-a",
         elements: [],
         comment: "test",
         timestamp: 1000,
-        status: "pending",
+        status: "queued",
       });
 
-      sendMessage(hub, { type: "annotation:delete", payload: { id: "existing" } });
+      sendMessage(hub, { type: "change:delete", payload: { id: "existing" } });
 
-      expect(store.getAnnotations()).toHaveLength(0);
+      expect(store.getChanges()).toHaveLength(0);
       expect(sent).toHaveLength(1);
-      expect(sent[0]!.type).toBe("annotation:deleted");
+      expect(sent[0]!.type).toBe("change:deleted");
     });
 
-    it("does not broadcast if annotation not found", () => {
+    it("does not broadcast if change not found", () => {
       const { hub, sent } = createHub();
-      sendMessage(hub, { type: "annotation:delete", payload: { id: "nonexistent" } });
+      sendMessage(hub, { type: "change:delete", payload: { id: "nonexistent" } });
       expect(sent).toHaveLength(0);
     });
   });
 
   describe("batch:submit", () => {
-    it("creates all annotations from batch with pending status", () => {
+    it("creates all changes from batch with queued status", () => {
       const { hub, store } = createHub();
       sendMessage(hub, {
         type: "batch:submit",
         payload: {
           iteration: "iter-a",
-          annotations: [
+          changes: [
             { iteration: "iter-a", elements: [], comment: "a" } as any,
             { iteration: "iter-a", elements: [], comment: "b" } as any,
           ],
@@ -118,8 +118,8 @@ describe("WebSocketHub", () => {
         },
       });
 
-      expect(store.getAnnotations()).toHaveLength(2);
-      expect(store.getAnnotations().every((a) => a.status === "pending")).toBe(true);
+      expect(store.getChanges()).toHaveLength(2);
+      expect(store.getChanges().every((a) => a.status === "queued")).toBe(true);
     });
 
     it("stores DOM changes from batch", () => {
@@ -140,7 +140,7 @@ describe("WebSocketHub", () => {
         type: "batch:submit",
         payload: {
           iteration: "iter-a",
-          annotations: [],
+          changes: [],
           domChanges: [change],
         },
       });
@@ -148,13 +148,13 @@ describe("WebSocketHub", () => {
       expect(store.getDomChanges()).toHaveLength(1);
     });
 
-    it("broadcasts annotation:created for each plus batch:submitted", () => {
+    it("broadcasts change:created for each plus batch:submitted", () => {
       const { hub, sent } = createHub();
       sendMessage(hub, {
         type: "batch:submit",
         payload: {
           iteration: "iter-a",
-          annotations: [
+          changes: [
             { iteration: "iter-a", elements: [], comment: "a" } as any,
             { iteration: "iter-a", elements: [], comment: "b" } as any,
           ],
@@ -163,7 +163,7 @@ describe("WebSocketHub", () => {
       });
 
       const types = sent.map((m) => m.type);
-      expect(types.filter((t) => t === "annotation:created")).toHaveLength(2);
+      expect(types.filter((t) => t === "change:created")).toHaveLength(2);
       expect(types).toContain("batch:submitted");
     });
 
@@ -173,7 +173,7 @@ describe("WebSocketHub", () => {
         type: "batch:submit",
         payload: {
           iteration: "iter-a",
-          annotations: [
+          changes: [
             { iteration: "iter-a", elements: [], comment: "a" } as any,
             { iteration: "iter-a", elements: [], comment: "b" } as any,
             { iteration: "iter-a", elements: [], comment: "c" } as any,
@@ -184,7 +184,7 @@ describe("WebSocketHub", () => {
 
       const batchMsg = sent.find((m) => m.type === "batch:submitted");
       expect(batchMsg).toBeDefined();
-      expect((batchMsg as any).payload.annotationCount).toBe(3);
+      expect((batchMsg as any).payload.changeCount).toBe(3);
       expect((batchMsg as any).payload.domChangeCount).toBe(1);
     });
   });
