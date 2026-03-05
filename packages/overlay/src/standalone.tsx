@@ -62,6 +62,7 @@ function StandaloneOverlay() {
   const [tabCounts, setTabCounts] = useState<Record<string, { batch: number; move: number }>>({});
   const [previewMode, setPreviewMode] = useState(true);
   const [iterations, setIterations] = useState<Record<string, IterationInfo>>({});
+  const [readyIframes, setReadyIframes] = useState<Set<string>>(new Set());
 
   // Detect context
   const isDaemonShell = typeof document !== "undefined" && !!document.getElementById("viewport");
@@ -240,6 +241,13 @@ function StandaloneOverlay() {
         // Find which iframe sent this ready message and sync state to it
         for (const [name, iframe] of Object.entries(iterationIframeRefs.current)) {
           if (iframe?.contentWindow === e.source) {
+            // Track that this iframe's overlay is loaded and ready
+            setReadyIframes((prev) => {
+              if (prev.has(name)) return prev;
+              const next = new Set(prev);
+              next.add(name);
+              return next;
+            });
             const win = e.source as Window;
             win.postMessage(
               { __iterate: true, type: "set-iteration", iteration: name } as IterateMessage,
@@ -539,7 +547,7 @@ function StandaloneOverlay() {
     [iterations]
   );
 
-  // Clean up stale iframe refs when iterations are removed
+  // Clean up stale iframe refs and readyIframes when iterations are removed
   useEffect(() => {
     const currentNames = new Set(Object.keys(iterations));
     for (const name of Object.keys(iterationIframeRefs.current)) {
@@ -547,6 +555,19 @@ function StandaloneOverlay() {
         delete iterationIframeRefs.current[name];
       }
     }
+    // Remove stale entries from readyIframes
+    setReadyIframes((prev) => {
+      let changed = false;
+      for (const name of prev) {
+        if (!currentNames.has(name)) { changed = true; break; }
+      }
+      if (!changed) return prev;
+      const next = new Set<string>();
+      for (const name of prev) {
+        if (currentNames.has(name)) next.add(name);
+      }
+      return next;
+    });
     // Also clean up stale tabCounts for removed iterations
     setTabCounts((prev) => {
       const cleaned: Record<string, { batch: number; move: number }> = {};
@@ -601,6 +622,8 @@ function StandaloneOverlay() {
     }
     const iframe = iterationIframeRefs.current[iteration];
     if (!iframe) { setThemeTargetDoc(null); return; }
+    // Reset to parent doc while we attempt to read the iframe's document
+    setThemeTargetDoc(null);
     // The iframe may not have loaded yet — wait for it
     const tryRead = () => {
       try {
@@ -714,6 +737,7 @@ function StandaloneOverlay() {
         onDiscard={handleDiscard}
         isViewingIteration={isViewingIteration}
         tabBadgeCounts={tabBadgeCounts}
+        readyIframes={readyIframes}
       />
     </>
     </ThemeProvider>

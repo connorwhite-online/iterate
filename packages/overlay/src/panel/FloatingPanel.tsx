@@ -52,6 +52,8 @@ export interface FloatingPanelProps {
   isViewingIteration?: boolean;
   /** Badge counts per tab (tab name → total pending changes) */
   tabBadgeCounts?: Record<string, number>;
+  /** Set of iteration names whose iframes have sent a "ready" postMessage */
+  readyIframes?: Set<string>;
 }
 
 type Corner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
@@ -66,7 +68,7 @@ const SPRING = "cubic-bezier(0.34, 1.56, 0.64, 1)";
 const TooltipDirectionContext = React.createContext<boolean>(false);
 
 // Duration for suspense overlay animations (spinner + text sync)
-const SUSPENSE_DURATION = "1.2s";
+const SUSPENSE_DURATION = "0.8s";
 
 const STATUS_COLORS: Record<IterationStatus, string> = {
   ready: "#22c55e",
@@ -107,6 +109,7 @@ export function FloatingPanel({
   onDiscard,
   isViewingIteration = false,
   tabBadgeCounts = {},
+  readyIframes,
 }: FloatingPanelProps) {
   const theme = useTheme();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -171,32 +174,20 @@ export function FloatingPanel({
     }
   }, [hasIterations]);
 
-  // Track whether the page has rendered meaningful content (not just the overlay)
-  const [contentReady, setContentReady] = useState(false);
+  // Track whether we were recently creating iterations (to bridge the gap
+  // between "daemon says ready" and "iframe actually loaded").
   const wasCreatingRef = useRef(false);
-  useEffect(() => {
-    if (isCreating || forkLoading) {
-      wasCreatingRef.current = true;
-      setContentReady(false);
-      return;
-    }
-    if (!wasCreatingRef.current || !hasIterations) return;
-    // Poll for actual visible content in the page (beyond just the overlay root)
-    let rafId: number;
-    const check = () => {
-      const children = Array.from(document.body.children);
-      const hasContent = children.some(
-        (el) => el.id !== "__iterate-overlay-root__" && (el as HTMLElement).offsetHeight > 0 && el.children.length > 0
-      );
-      if (hasContent) { setContentReady(true); wasCreatingRef.current = false; }
-      else { rafId = requestAnimationFrame(check); }
-    };
-    rafId = requestAnimationFrame(check);
-    return () => cancelAnimationFrame(rafId);
-  }, [isCreating, forkLoading, hasIterations]);
+  if (isCreating || forkLoading) { wasCreatingRef.current = true; }
 
-  // Suspense overlay — also show while page content hasn't rendered after iterations are ready
-  const pageStillLoading = wasCreatingRef.current && hasIterations && !contentReady && !pickLoading && !discardLoading;
+  // All iteration iframes have sent their "ready" postMessage
+  const allIframesReady = readyIframes != null && hasIterations
+    && iterationNames.every((n) => iterations![n]?.status !== "ready" || readyIframes.has(n));
+
+  // Once all iframes are ready, clear the wasCreating flag
+  if (allIframesReady && wasCreatingRef.current) { wasCreatingRef.current = false; }
+
+  // Suspense overlay — keep showing while iframes haven't loaded after creation
+  const pageStillLoading = wasCreatingRef.current && hasIterations && !allIframesReady && !pickLoading && !discardLoading;
   const suspenseActive = forkLoading || isCreating || pickLoading || discardLoading || pageStillLoading;
   const suspenseMessage = pickLoading
     ? "Merging preferred changes\u2026"
@@ -655,9 +646,9 @@ function SuspenseOverlay({ active, message }: { active: boolean; message: string
         @keyframes iterate-suspense-spin {
           to { transform: rotate(360deg); }
         }
-        @keyframes iterate-suspense-pulse {
-          0%, 100% { opacity: 0.4; }
-          50% { opacity: 1; }
+        @keyframes iterate-suspense-shimmer {
+          0% { background-position: 200% center; }
+          100% { background-position: -200% center; }
         }
       `}</style>
       <svg
@@ -679,8 +670,12 @@ function SuspenseOverlay({ active, message }: { active: boolean; message: string
           fontSize: 14,
           fontWeight: 500,
           fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-          color: theme.textSecondary,
-          animation: active ? "iterate-suspense-pulse 2s ease-in-out infinite" : "none",
+          backgroundImage: `linear-gradient(90deg, ${theme.textTertiary} 0%, ${theme.textPrimary} 50%, ${theme.textTertiary} 100%)`,
+          backgroundSize: "200% 100%",
+          backgroundClip: "text",
+          WebkitBackgroundClip: "text",
+          color: "transparent",
+          animation: active ? `iterate-suspense-shimmer 1.6s linear infinite` : "none",
         }}
       >
         {message}
