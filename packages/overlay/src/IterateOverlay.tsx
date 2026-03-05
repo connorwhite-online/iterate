@@ -151,6 +151,7 @@ export function IterateOverlay({
 
   // Server-side DOM changes — synced from daemon via WebSocket
   const [domChanges, setDomChanges] = useState<DomChange[]>([]);
+  const domChangesRef = useRef<DomChange[]>([]);
 
   // Track whether marquee drag is in progress (suppresses ElementPicker hover)
   const [isMarqueeDragging, setIsMarqueeDragging] = useState(false);
@@ -194,6 +195,7 @@ export function IterateOverlay({
   // Editing state — when editing an existing change badge
   const [editingId, setEditingId] = useState<string | null>(null);
   const [initialComment, setInitialComment] = useState<string | undefined>(undefined);
+  const [editingIsFixed, setEditingIsFixed] = useState(false);
 
   // When toolbar is hidden, force browse mode (disables all tools)
   const effectiveMode: ToolMode = visible ? mode : "browse";
@@ -252,7 +254,11 @@ export function IterateOverlay({
           if (msg.payload.iteration === iteration) {
             setDomChanges((prev) => {
               if (prev.some((dc) => dc.id === msg.payload.id)) return prev;
-              return [...prev, msg.payload];
+              // For reorders, replace any existing entry for the same selector (coalescing)
+              const filtered = msg.payload.type === "reorder"
+                ? prev.filter((dc) => !(dc.type === "reorder" && dc.selector === msg.payload.selector))
+                : prev;
+              return [...filtered, msg.payload];
             });
           }
           break;
@@ -387,7 +393,10 @@ export function IterateOverlay({
 
       // Detect if the element is fixed/sticky — if so, store viewport coords
       // and render the badge in the fixed layer instead of the absolute (scrolling) layer.
-      const fixed = selectedElements.length > 0 && isElementFixed(selectedElements[0]!.domElement);
+      // When editing, domElement is null, so fall back to the original change's flag.
+      const fixed = editingId !== null
+        ? editingIsFixed
+        : selectedElements.length > 0 && isElementFixed(selectedElements[0]!.domElement);
 
       const scroll = getScrollOffset();
       let pagePos: { x: number; y: number } | undefined;
@@ -446,7 +455,7 @@ export function IterateOverlay({
       setTextSelection(null);
       setActiveDrawing(null);
     },
-    [selectedElements, textSelection, activeDrawing, iteration, iframeRef, clickPosition, editingId]
+    [selectedElements, textSelection, activeDrawing, iteration, iframeRef, clickPosition, editingId, editingIsFixed]
   );
 
   // Delete a change from the daemon
@@ -471,8 +480,20 @@ export function IterateOverlay({
       );
       setTextSelection(change.textSelection ?? null);
       setActiveDrawing(change.drawing ?? null);
-      setClickPosition(change.pagePosition ?? null);
+      // Fixed-position changes store viewport coords — convert to page coords
+      // since the SelectionPanel is rendered in the absolute markers layer
+      if (change.pagePosition) {
+        const scroll = getScrollOffset();
+        setClickPosition(
+          change.isFixedPosition
+            ? { x: change.pagePosition.x + scroll.x, y: change.pagePosition.y + scroll.y }
+            : change.pagePosition
+        );
+      } else {
+        setClickPosition(null);
+      }
       setEditingId(id);
+      setEditingIsFixed(!!change.isFixedPosition);
       setInitialComment(change.comment);
     },
     [changes]
@@ -484,6 +505,7 @@ export function IterateOverlay({
       handleDeleteChange(editingId);
     }
     setEditingId(null);
+    setEditingIsFixed(false);
     setInitialComment(undefined);
     setSelectedElements([]);
     setTextSelection(null);
@@ -496,8 +518,12 @@ export function IterateOverlay({
     setTextSelection(null);
     setActiveDrawing(null);
     setEditingId(null);
+    setEditingIsFixed(false);
     setInitialComment(undefined);
   }, []);
+
+  // Keep ref in sync for use in callbacks without stale closures
+  useEffect(() => { domChangesRef.current = domChanges; }, [domChanges]);
 
   // Handle drag move — send directly to daemon
   const handleMove = useCallback(
@@ -506,18 +532,40 @@ export function IterateOverlay({
       if (!conn) return;
 
       const isReorder = move.reorderIndex !== undefined;
+
+      // Coalesce reorders: if there's already a reorder for this element,
+      // delete the old one and preserve its original before.siblingIndex
+      let originalSiblingIndex = move.originalSiblingIndex;
+      if (isReorder) {
+        const existing = domChangesRef.current.find(
+          (dc) => dc.type === "reorder" && dc.selector === move.selector
+        );
+        if (existing) {
+          // Preserve the true original position from the first move
+          originalSiblingIndex = existing.before.siblingIndex;
+          conn.send({ type: "dom-change:delete", payload: { id: existing.id } });
+        }
+
+        // If dragged back to original position, just delete — no net change
+        if (move.reorderIndex === originalSiblingIndex) {
+          return;
+        }
+      }
+
       conn.send({
         type: "dom-change:create",
         payload: {
           iteration,
           url: getCurrentPageUrl(iframeRef),
           selector: move.selector,
+          parentSelector: move.parentSelector,
           type: isReorder ? "reorder" : "move",
           componentName: move.componentName,
           sourceLocation: move.sourceLocation,
           before: {
             rect: move.from,
             computedStyles: move.computedStyles,
+            siblingIndex: originalSiblingIndex,
           },
           after: {
             rect: move.to,
@@ -533,15 +581,26 @@ export function IterateOverlay({
   // Helper: revert a single reorder move in the DOM
   const revertDomChange = useCallback(
     (change: DomChange) => {
-      if (change.type !== "reorder" || change.after.siblingIndex === undefined) return;
+      if (change.type !== "reorder" || change.before.siblingIndex === undefined) return;
       const doc = (() => { try { return iframeRef.current?.contentDocument ?? document; } catch { return document; } })();
       try {
-        const el = doc.querySelector(change.selector);
+        // Find the element: prefer using parentSelector + after.siblingIndex (stable after DOM reorder)
+        // since the element's own selector uses nth-child which becomes stale after reordering
+        let el: Element | null = null;
+        if (change.parentSelector && change.after.siblingIndex !== undefined) {
+          const parent = doc.querySelector(change.parentSelector);
+          if (parent) {
+            el = parent.children[change.after.siblingIndex] ?? null;
+          }
+        }
+        // Fallback to direct selector
+        if (!el) el = doc.querySelector(change.selector);
         if (!el || !el.parentElement) return;
         const parent = el.parentElement;
-        const children = Array.from(parent.children);
-        const refChild = children[change.before.siblingIndex ?? 0] ?? null;
-        if (refChild !== el) parent.insertBefore(el, refChild);
+        // Filter out the element itself to get the correct insertion reference
+        const children = Array.from(parent.children).filter((c) => c !== el);
+        const refChild = children[change.before.siblingIndex] ?? null;
+        parent.insertBefore(el, refChild);
       } catch { /* cross-origin or invalid selector */ }
     },
     [iframeRef]
@@ -568,6 +627,7 @@ export function IterateOverlay({
     componentName: dc.componentName,
     sourceLocation: dc.sourceLocation,
     reorderIndex: dc.after.siblingIndex,
+    originalSiblingIndex: dc.before.siblingIndex,
   }));
 
   // Handle clearing all pending changes and moves

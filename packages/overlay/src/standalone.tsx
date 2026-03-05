@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { IterateOverlay, type ToolMode } from "./IterateOverlay.js";
 import { FloatingPanel, ORIGINAL_TAB } from "./panel/FloatingPanel.js";
 import { DaemonConnection } from "./transport/connection.js";
+import { ThemeProvider } from "./theme.js";
 import type { IterationInfo } from "iterate-ui-core";
 
 /** postMessage types for parent <-> iframe communication */
@@ -590,9 +591,34 @@ function StandaloneOverlay() {
   // actual tools are handled by the embedded overlay inside each iteration iframe.
   const activeIframeRef = iframeRef;
 
+  // Derive the target document for theme detection — when viewing an iteration,
+  // detect from that iframe's document so the toolbar adapts per-worktree.
+  const [themeTargetDoc, setThemeTargetDoc] = useState<Document | null>(null);
+  useEffect(() => {
+    if (!isViewingIteration) {
+      setThemeTargetDoc(null); // fall back to parent document
+      return;
+    }
+    const iframe = iterationIframeRefs.current[iteration];
+    if (!iframe) { setThemeTargetDoc(null); return; }
+    // The iframe may not have loaded yet — wait for it
+    const tryRead = () => {
+      try {
+        const doc = iframe.contentDocument;
+        if (doc && doc.body) { setThemeTargetDoc(doc); return true; }
+      } catch { /* cross-origin — can't read, fall back */ }
+      return false;
+    };
+    if (tryRead()) return;
+    const onLoad = () => { tryRead(); };
+    iframe.addEventListener("load", onLoad);
+    return () => iframe.removeEventListener("load", onLoad);
+  }, [iteration, isViewingIteration]);
+
   // If embedded in an iframe, only render the IterateOverlay (no FloatingPanel)
   if (isEmbedded) {
     return (
+      <ThemeProvider>
       <IterateOverlay
         mode={mode}
         iteration={iteration}
@@ -612,10 +638,12 @@ function StandaloneOverlay() {
         }}
         previewMode={previewMode}
       />
+      </ThemeProvider>
     );
   }
 
   return (
+    <ThemeProvider targetDocument={themeTargetDoc}>
     <>
       {/* Iteration preview iframes — ALL ready iterations are rendered simultaneously
           via portal OUTSIDE overlay root to avoid pointer-events:none inheritance.
@@ -688,6 +716,7 @@ function StandaloneOverlay() {
         tabBadgeCounts={tabBadgeCounts}
       />
     </>
+    </ThemeProvider>
   );
 }
 

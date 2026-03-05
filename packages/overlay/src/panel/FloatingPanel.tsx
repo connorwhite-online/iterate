@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ToolMode } from "../IterateOverlay.js";
 import type { IterationInfo, IterationStatus } from "iterate-ui-core";
+import { useTheme } from "../theme.js";
 import {
   CursorIcon,
   MoveIcon,
@@ -107,6 +108,7 @@ export function FloatingPanel({
   isViewingIteration = false,
   tabBadgeCounts = {},
 }: FloatingPanelProps) {
+  const theme = useTheme();
   const panelRef = useRef<HTMLDivElement>(null);
   const [corner, setCorner] = useState<Corner>("bottom-right");
   const [isDragging, setIsDragging] = useState(false);
@@ -338,7 +340,7 @@ export function FloatingPanel({
           ...positionStyle,
           zIndex: 10001,
           pointerEvents: "auto",
-          background: "#f7f7f7",
+          background: theme.panelBg,
           border: "none",
           borderRadius: 12,
           boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
@@ -360,7 +362,7 @@ export function FloatingPanel({
         {hasIterations && (
           <div
             style={{
-              background: "#f7f7f7",
+              background: theme.panelBg,
               maxHeight: visible ? 48 : 0,
               maxWidth: visible ? 999 : 0,
               opacity: visible ? 1 : 0,
@@ -458,8 +460,8 @@ export function FloatingPanel({
             flexDirection: isLeftSide ? "row-reverse" : "row",
             justifyContent: "flex-end",
             alignItems: "center",
-            background: "#fff",
-            border: "1px solid #e0e0e0",
+            background: theme.toolbarBg,
+            border: `1px solid ${theme.border}`,
             borderRadius: 10,
             padding: 4,
           }}
@@ -469,19 +471,19 @@ export function FloatingPanel({
             {/* Annotation tools */}
             <IconButton
               icon={<CursorIcon size={ICON_SIZE} />}
-              label="Select"
+              label="Select (S)"
               active={mode === "select"}
               onClick={() => onModeChange(mode === "select" ? "browse" : "select")}
             />
             <IconButton
               icon={<MarkerIcon size={ICON_SIZE} />}
-              label="Draw"
+              label="Draw (D)"
               active={mode === "draw"}
               onClick={() => onModeChange(mode === "draw" ? "browse" : "draw")}
             />
             <IconButton
               icon={<MoveIcon size={ICON_SIZE} />}
-              label="Move"
+              label="Move (M)"
               active={mode === "move"}
               onClick={() => onModeChange(mode === "move" ? "browse" : "move")}
             />
@@ -490,13 +492,13 @@ export function FloatingPanel({
             <Divider />
             <IconButton
               icon={<UndoIcon size={ICON_SIZE} />}
-              label="Undo last change"
+              label="Undo last change (U)"
               disabled={totalPending === 0}
               onClick={() => onUndoMove?.()}
             />
             <IconButton
               icon={<TrashIcon size={ICON_SIZE} />}
-              label="Clear all changes"
+              label="Clear all changes (X)"
               disabled={totalPending === 0}
               onClick={() => onClearBatch?.()}
             />
@@ -531,7 +533,7 @@ export function FloatingPanel({
                   </div>
                 </div>
               }
-              label={copySuccess ? "Copied!" : "Copy changes to clipboard"}
+              label={copySuccess ? "Copied!" : "Copy changes to clipboard (C)"}
               disabled={totalPending === 0}
               onClick={() => {
                 onCopyBatch?.();
@@ -631,13 +633,14 @@ export function FloatingPanel({
  * Uses purely CSS animations for performance.
  */
 function SuspenseOverlay({ active, message }: { active: boolean; message: string }) {
+  const theme = useTheme();
   return (
     <div
       style={{
         position: "fixed",
         inset: 0,
         zIndex: 10000,
-        background: "rgba(255, 255, 255, 0.96)",
+        background: theme.suspenseOverlay,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
@@ -665,8 +668,8 @@ function SuspenseOverlay({ active, message }: { active: boolean; message: string
           animation: active ? `iterate-suspense-spin ${SUSPENSE_DURATION} linear infinite` : "none",
         }}
       >
-        <circle cx="20" cy="20" r="17" fill="none" stroke="#e0e0e0" strokeWidth="4" />
-        <circle cx="20" cy="20" r="17" fill="none" stroke="#666" strokeWidth="4"
+        <circle cx="20" cy="20" r="17" fill="none" stroke={theme.spinnerBg} strokeWidth="4" />
+        <circle cx="20" cy="20" r="17" fill="none" stroke={theme.spinnerFg} strokeWidth="4"
           strokeLinecap="round"
           strokeDasharray={`${Math.PI * 34 * 0.25} ${Math.PI * 34 * 0.75}`}
         />
@@ -676,7 +679,7 @@ function SuspenseOverlay({ active, message }: { active: boolean; message: string
           fontSize: 14,
           fontWeight: 500,
           fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-          color: "#555",
+          color: theme.textSecondary,
           animation: active ? "iterate-suspense-pulse 2s ease-in-out infinite" : "none",
         }}
       >
@@ -765,12 +768,13 @@ function ToolGroup({
 }
 
 function Divider() {
+  const theme = useTheme();
   return (
     <div
       style={{
         width: 1,
         height: 20,
-        background: "#e0e0e0",
+        background: theme.border,
         margin: "0 2px",
         flexShrink: 0,
       }}
@@ -786,6 +790,7 @@ function CloseToggleButton({
   visible: boolean;
   onVisibilityChange: (v: boolean) => void;
 }) {
+  const theme = useTheme();
   const [hovered, setHovered] = useState(false);
   const [pressed, setPressed] = useState(false);
   return (
@@ -827,7 +832,7 @@ function CloseToggleButton({
           transform: visible ? "scale(0.6)" : "scale(1)",
           filter: visible ? "blur(4px)" : "blur(0px)",
           transition: `opacity 0.25s ${SPRING}, transform 0.3s ${SPRING}, filter 0.25s ease, color 0.15s ease`,
-          color: hovered ? "#141414" : "#666",
+          color: hovered ? theme.iconHover : theme.iconDefault,
         }}
       >
         <LogoIcon size={ICON_SIZE} />
@@ -843,7 +848,7 @@ function CloseToggleButton({
           transform: visible ? "scale(1)" : "scale(0.6)",
           filter: visible ? "blur(0px)" : "blur(4px)",
           transition: `opacity 0.25s ${SPRING}, transform 0.3s ${SPRING}, filter 0.25s ease, color 0.15s ease`,
-          color: hovered ? "#141414" : "#999",
+          color: hovered ? theme.iconHover : theme.textTertiary,
         }}
       >
         <CloseIcon size={ICON_SIZE} />
@@ -868,6 +873,7 @@ function TabButton({
   onClick: () => void;
   children: React.ReactNode;
 }) {
+  const theme = useTheme();
   const [hovered, setHovered] = useState(false);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
   const [isTruncated, setIsTruncated] = useState(false);
@@ -900,8 +906,8 @@ function TabButton({
         padding: "3px 8px",
         borderRadius: 6,
         border: hasChanges ? "1px solid rgba(37, 99, 235, 0.4)" : "1px solid transparent",
-        background: active ? "#e8e8e8" : "transparent",
-        color: active || hovered ? "#141414" : "#666",
+        background: active ? theme.activeBg : "transparent",
+        color: active || hovered ? theme.iconHover : theme.iconDefault,
         cursor: "pointer",
         fontSize: 11,
         fontWeight: 500,
@@ -938,6 +944,7 @@ function IconButton({
   badge?: number;
   onClick: () => void;
 }) {
+  const theme = useTheme();
   const [hovered, setHovered] = useState(false);
   const [pressed, setPressed] = useState(false);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
@@ -969,8 +976,8 @@ function IconButton({
         borderRadius: 8,
         border: "none",
         outline: "none",
-        background: active ? "#e0e0e0" : hovered ? "#f0f0f0" : "transparent",
-        color: (active || hovered) ? "#141414" : "#666",
+        background: active ? theme.activeBg : hovered ? theme.hoverBg : "transparent",
+        color: (active || hovered) ? theme.iconHover : theme.iconDefault,
         cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.35 : 1,
         transform: pressed ? "scale(0.97)" : "scale(1)",
@@ -992,6 +999,14 @@ function IconButton({
 
 /** Tooltip rendered via createPortal to escape overflow:hidden containers.
  *  Includes a small arrow pointing towards the anchor button. */
+/** Parse a label like "Select (S)" into { text: "Select", hotkey: "S" }.
+ *  Returns null hotkey if no trailing parenthesized shortcut is found. */
+function parseHotkey(label: string): { text: string; hotkey: string | null } {
+  const match = label.match(/^(.+?)\s+\(([A-Za-z])\)$/);
+  if (match) return { text: match[1], hotkey: match[2] };
+  return { text: label, hotkey: null };
+}
+
 function PortalTooltip({
   label,
   anchorRect,
@@ -1001,8 +1016,10 @@ function PortalTooltip({
   anchorRect: DOMRect;
   below: boolean;
 }) {
+  const theme = useTheme();
   const centerX = anchorRect.left + anchorRect.width / 2;
   const anchorY = below ? anchorRect.bottom + 8 : anchorRect.top - 8;
+  const { text, hotkey } = parseHotkey(label);
 
   return (
     <div
@@ -1013,9 +1030,9 @@ function PortalTooltip({
         transform: below
           ? "translateX(-50%)"
           : "translateX(-50%) translateY(-100%)",
-        background: "#fff",
-        color: "#333",
-        border: "1px solid #e0e0e0",
+        background: theme.tooltipBg,
+        color: theme.tooltipText,
+        border: `1px solid ${theme.border}`,
         borderRadius: 6,
         padding: "4px 8px",
         fontSize: 11,
@@ -1025,6 +1042,9 @@ function PortalTooltip({
         pointerEvents: "none",
         boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
         zIndex: 10003,
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
       }}
     >
       {/* Arrow */}
@@ -1034,21 +1054,41 @@ function PortalTooltip({
           left: "50%",
           width: 8,
           height: 8,
-          background: "#fff",
+          background: theme.tooltipBg,
           ...(below
             ? {
                 top: -4,
                 transform: "translateX(-50%) rotate(45deg)",
-                boxShadow: "-1px -1px 0 0 #e0e0e0",
+                boxShadow: `-1px -1px 0 0 ${theme.border}`,
               }
             : {
                 bottom: -4,
                 transform: "translateX(-50%) rotate(45deg)",
-                boxShadow: "1px 1px 0 0 #e0e0e0",
+                boxShadow: `1px 1px 0 0 ${theme.border}`,
               }),
         }}
       />
-      {label}
+      {text}
+      {hotkey && (
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            minWidth: 18,
+            height: 18,
+            padding: "0 4px",
+            borderRadius: 4,
+            background: theme.tooltipKeyBg,
+            color: theme.tooltipKeyText,
+            fontSize: 10,
+            fontWeight: 600,
+            lineHeight: 1,
+          }}
+        >
+          {hotkey}
+        </span>
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { TextSelection } from "iterate-ui-core";
 import type { PickedElement } from "../inspector/ElementPicker.js";
 import { TrashIcon } from "../panel/icons.js";
+import { useTheme } from "../theme.js";
 
 interface SelectionPanelProps {
   selectedElements: PickedElement[];
@@ -21,11 +22,14 @@ interface SelectionPanelProps {
 const FONT_STACK = "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 const SPRING = "cubic-bezier(0.34, 1.56, 0.64, 1)";
 
-const CHEVRON_SVG = (
-  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none">
-    <path d="M20 9L12.7071 16.2929C12.3166 16.6834 11.6834 16.6834 11.2929 16.2929L4 9" stroke="#999" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-  </svg>
-);
+function ChevronSvg() {
+  const theme = useTheme();
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none">
+      <path d="M20 9L12.7071 16.2929C12.3166 16.6834 11.6834 16.6834 11.2929 16.2929L4 9" stroke={theme.textTertiary} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
 
 type AnimState = "hidden" | "entering" | "visible" | "exiting";
 
@@ -48,6 +52,7 @@ export function SelectionPanel({
   initialComment,
   onDelete,
 }: SelectionPanelProps) {
+  const theme = useTheme();
   const [comment, setComment] = useState("");
   const [expandedCSS, setExpandedCSS] = useState<Set<number>>(new Set());
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -232,14 +237,14 @@ export function SelectionPanel({
           border: "none",
           boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
           fontFamily: FONT_STACK,
-          background: "#f7f7f7",
+          background: theme.panelBg,
           padding: 4,
         }}
       >
         {/* Header layer — recessed lower layer */}
         <div
           style={{
-            background: "#f7f7f7",
+            background: theme.panelBg,
             padding: "4px 8px",
             maxHeight: 400,
             overflowY: "auto",
@@ -265,7 +270,7 @@ export function SelectionPanel({
                     cursor: isPathOnly || !hasStyles ? "default" : "pointer",
                     fontSize: 12,
                     fontWeight: 500,
-                    color: "#333",
+                    color: theme.textPrimary,
                     fontFamily: FONT_STACK,
                     textAlign: "left",
                   }}
@@ -275,14 +280,14 @@ export function SelectionPanel({
                     <span
                       style={{
                         display: "inline-flex",
-                        color: "#999",
+                        color: theme.textTertiary,
                         transition: "transform 0.15s ease",
                         transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)",
                         flexShrink: 0,
                         marginLeft: 6,
                       }}
                     >
-                      {CHEVRON_SVG}
+                      {<ChevronSvg />}
                     </span>
                   )}
                 </button>
@@ -301,11 +306,11 @@ export function SelectionPanel({
                         padding: "6px 8px",
                         marginTop: 4,
                         marginBottom: 4,
-                        background: "#efefef",
+                        background: theme.drawerBg,
                         borderRadius: 4,
                         fontSize: 10,
                         fontFamily: "monospace",
-                        color: "#666",
+                        color: theme.textSecondary,
                         lineHeight: 1.7,
                         maxHeight: 180,
                         overflow: "auto",
@@ -313,7 +318,7 @@ export function SelectionPanel({
                     >
                       {styleEntries.map(([prop, val]) => (
                         <div key={prop}>
-                          <span style={{ color: "#999" }}>{prop}:</span> {val}
+                          <span style={{ color: theme.textTertiary }}>{prop}:</span> {val}
                         </div>
                       ))}
                     </div>
@@ -328,8 +333,8 @@ export function SelectionPanel({
         <div
           style={{
             position: "relative",
-            background: "#fff",
-            border: "1px solid #e0e0e0",
+            background: theme.cardBg,
+            border: `1px solid ${theme.border}`,
             borderRadius: 10,
             padding: 8,
             display: "flex",
@@ -351,10 +356,10 @@ export function SelectionPanel({
             rows={3}
             style={{
               width: "100%",
-              background: "#fff",
-              border: "1px solid #e0e0e0",
+              background: theme.cardBg,
+              border: `1px solid ${theme.border}`,
               borderRadius: 6,
-              color: "#333",
+              color: theme.textPrimary,
               padding: 8,
               fontSize: 13,
               fontFamily: FONT_STACK,
@@ -389,9 +394,9 @@ export function SelectionPanel({
                 style={{
                   padding: "6px 14px",
                   background: "transparent",
-                  border: "1px solid #e0e0e0",
+                  border: `1px solid ${theme.border}`,
                   borderRadius: 6,
-                  color: "#888",
+                  color: theme.textDisabled,
                   cursor: "pointer",
                   fontSize: 12,
                   fontFamily: FONT_STACK,
@@ -404,10 +409,10 @@ export function SelectionPanel({
                 disabled={!comment.trim()}
                 style={{
                   padding: "6px 14px",
-                  background: comment.trim() ? "#333" : "#f0f0f0",
-                  border: "1px solid " + (comment.trim() ? "#333" : "#e0e0e0"),
+                  background: comment.trim() ? theme.buttonBg : theme.hoverBg,
+                  border: `1px solid ${comment.trim() ? theme.buttonBg : theme.border}`,
                   borderRadius: 6,
-                  color: comment.trim() ? "#fff" : "#999",
+                  color: comment.trim() ? theme.buttonText : theme.textTertiary,
                   cursor: comment.trim() ? "pointer" : "default",
                   fontSize: 12,
                   fontWeight: 600,
@@ -426,6 +431,7 @@ export function SelectionPanel({
 
 /** Square trash button with rounded hover background */
 function TrashButton({ onClick }: { onClick: () => void }) {
+  const theme = useTheme();
   const [hovered, setHovered] = React.useState(false);
   return (
     <button
@@ -441,8 +447,8 @@ function TrashButton({ onClick }: { onClick: () => void }) {
         height: 32,
         borderRadius: 8,
         border: "none",
-        background: hovered ? "#f0f0f0" : "transparent",
-        color: "#888",
+        background: hovered ? theme.hoverBg : "transparent",
+        color: theme.textDisabled,
         cursor: "pointer",
         padding: 0,
         flexShrink: 0,

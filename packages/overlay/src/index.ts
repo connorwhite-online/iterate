@@ -13,6 +13,10 @@ export type { PendingMove } from "./manipulate/DragHandler.js";
 export { DaemonConnection } from "./transport/connection.js";
 export { FloatingPanel } from "./panel/FloatingPanel.js";
 
+// Theme
+export { ThemeProvider, useTheme } from "./theme.js";
+export type { ThemeTokens } from "./theme.js";
+
 // Utilities
 export {
   generateSelector,
