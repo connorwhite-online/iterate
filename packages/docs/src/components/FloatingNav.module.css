@@ -16,12 +16,11 @@
   width: 200px;
 }
 
-/* Header: logo + npm/github row */
+/* Header: logo */
 .header {
-  padding: 8px 12px;
+  padding: 10px 12px 4px;
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  justify-content: center;
 }
 
 .logoLink {
@@ -32,27 +31,6 @@
 }
 
 .logoLink:hover {
-  text-decoration: none;
-}
-
-.externalLinks {
-  display: flex;
-  gap: 4px;
-}
-
-.externalLink {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  color: var(--color-text-secondary);
-  transition: color 0.15s;
-}
-
-.externalLink:hover {
-  color: var(--color-text);
   text-decoration: none;
 }
 
@@ -92,9 +70,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
+  width: 100%;
   height: 28px;
-  margin: 0 auto 4px;
+  margin: 0 0 4px;
   border: none;
   border-radius: 6px;
   background: transparent;
