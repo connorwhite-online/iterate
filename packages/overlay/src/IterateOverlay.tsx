@@ -144,6 +144,7 @@ export function IterateOverlay({
   const [textSelection, setTextSelection] = useState<TextSelection | null>(null);
   const [activeDrawing, setActiveDrawing] = useState<DrawingData | null>(null);
   const [clickPosition, setClickPosition] = useState<{ x: number; y: number } | null>(null);
+  const [drawingScroll, setDrawingScroll] = useState({ x: 0, y: 0 });
 
   // Server-side changes — synced from daemon via WebSocket
   const [changes, setChanges] = useState<Change[]>([]);
@@ -348,6 +349,7 @@ export function IterateOverlay({
         rect: { ...el.rect, x: el.rect.x + scroll.x, y: el.rect.y + scroll.y },
       })));
       setActiveDrawing(drawing);
+      setDrawingScroll(scroll);
       const startMatch = drawing.path.match(/^M\s+([\d.]+)\s+([\d.]+)/);
       if (startMatch) {
         setClickPosition({
@@ -721,29 +723,6 @@ export function IterateOverlay({
       />
 
 
-      {/* Persistent drawing stroke while annotating */}
-      {isAnnotating && activeDrawing && (
-        <svg
-          style={{
-            position: "absolute",
-            inset: 0,
-            width: "100%",
-            height: "100%",
-            pointerEvents: "none",
-            overflow: "visible",
-          }}
-        >
-          <path
-            d={activeDrawing.path}
-            fill="none"
-            stroke={activeDrawing.strokeColor}
-            strokeWidth={activeDrawing.strokeWidth}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            opacity={0.7}
-          />
-        </svg>
-      )}
 
     </div>
     {/* Change badges rendered in two layers:
@@ -752,8 +731,33 @@ export function IterateOverlay({
         Hidden when toolbar is closed. */}
     {visible && markersLayer && createPortal(
       <>
+        {/* Persistent drawing stroke while annotating — page coordinates */}
+        {isAnnotating && activeDrawing && (
+          <svg
+            style={{
+              position: "absolute",
+              left: drawingScroll.x,
+              top: drawingScroll.y,
+              width: "100vw",
+              height: "100vh",
+              pointerEvents: "none",
+              overflow: "visible",
+            }}
+          >
+            <path
+              d={activeDrawing.path}
+              fill="none"
+              stroke={activeDrawing.strokeColor}
+              strokeWidth={activeDrawing.strokeWidth}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              opacity={0.7}
+            />
+          </svg>
+        )}
+
         {/* Selected element highlights — page coordinates so they scroll with the page */}
-        {selectedElements.map((el, i) => {
+        {!activeDrawing && selectedElements.map((el, i) => {
           const px = el.rect.x;
           const py = el.rect.y;
           return (
