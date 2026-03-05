@@ -1,6 +1,6 @@
 # iterate
 
-Iterate packages git worktrees into an easily navigable toolbar system, allowing you to ideate in parallel easily.
+Iterate manages git worktrees with an easily navigable toolbar system, allowing you to ideate in parallel easily.
 
 ## Quick Start
 
