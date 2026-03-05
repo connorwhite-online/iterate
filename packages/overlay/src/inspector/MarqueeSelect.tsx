@@ -8,6 +8,8 @@ interface MarqueeSelectProps {
   onSelect: (elements: PickedElement[]) => void;
   /** Called when marquee drag starts/stops */
   onDragStateChange?: (isDragging: boolean) => void;
+  /** Shared ref — set to true after a successful drag so ElementPicker can swallow the click */
+  justFinishedDragRef?: React.RefObject<boolean>;
 }
 
 /**
@@ -21,6 +23,7 @@ export function MarqueeSelect({
   iframeRef,
   onSelect,
   onDragStateChange,
+  justFinishedDragRef,
 }: MarqueeSelectProps) {
   const [marquee, setMarquee] = useState<Rect | null>(null);
   const [startPoint, setStartPoint] = useState<{ x: number; y: number } | null>(null);
@@ -51,19 +54,13 @@ export function MarqueeSelect({
       // Only start marquee on left-click without modifier (Ctrl+Click is for ElementPicker toggle)
       if (e.button !== 0 || e.ctrlKey || e.metaKey) return;
 
-      // Check if we're clicking on a "significant" element (button, link, input, etc.)
-      // If so, let ElementPicker handle it. Only start marquee on container/body clicks.
+      // Skip overlay/marker elements
       const target = e.target as Element;
-      const tag = target.tagName.toLowerCase();
-      const isInteractive = ["button", "a", "input", "select", "textarea", "img", "video"].includes(tag)
-        || target.getAttribute("role") === "button"
-        || target.getAttribute("role") === "link";
+      if (target.closest("#__iterate-overlay-root__") || target.closest("#__iterate-markers-layer__")) return;
 
-      // Only start marquee on double-purpose containers (check if element is "large")
-      const rect = target.getBoundingClientRect();
-      const isLargeContainer = rect.width > 200 && rect.height > 200;
-
-      if (isInteractive || !isLargeContainer) return;
+      // Prevent native text selection during drag — otherwise TextSelect's
+      // selectionchange handler fires mid-drag and opens the annotation popup.
+      e.preventDefault();
 
       isDragging = true;
       start = { x: e.clientX, y: e.clientY };
@@ -116,6 +113,8 @@ export function MarqueeSelect({
       // Find all elements within the marquee
       const elements = findElementsInRect(targetDoc, currentMarquee);
       if (elements.length > 0) {
+        // Signal to ElementPicker to swallow the click that follows mouseup
+        if (justFinishedDragRef) justFinishedDragRef.current = true;
         onSelect(elements);
       }
     };
@@ -185,7 +184,7 @@ function isContained(elRect: DOMRect, rect: Rect, tolerance: number): boolean {
 const SKIP_TAGS = new Set(["html", "body", "head", "script", "style", "meta", "link", "noscript"]);
 
 /** Check if an element is part of the iterate overlay (must not be selected) */
-const isOverlayElement = (el: Element) => !!el.closest("#__iterate-overlay-root__");
+const isOverlayElement = (el: Element) => !!el.closest("#__iterate-overlay-root__") || !!el.closest("#__iterate-markers-layer__");
 
 /**
  * Tolerance in px for containment checks. Lets the marquee "forgive" a few

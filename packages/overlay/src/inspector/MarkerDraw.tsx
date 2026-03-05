@@ -57,6 +57,11 @@ export function MarkerDraw({
 
     const handleMouseDown = (e: MouseEvent) => {
       if (e.button !== 0) return;
+
+      // Skip clicks on iterate overlay elements (badges, popups, markers layers)
+      const target = e.target as Element;
+      if (target?.closest?.("#__iterate-markers-layer__, #__iterate-fixed-markers-layer__, [data-iterate-popup]")) return;
+
       e.preventDefault();
       e.stopPropagation();
 
@@ -248,7 +253,7 @@ function findElementsUnderDrawing(
     }
 
     // Skip iterate overlay elements (badges, SVGs, panels, etc.)
-    if (el.closest("#__iterate-overlay-root__")) continue;
+    if (el.closest("#__iterate-overlay-root__") || el.closest("#__iterate-markers-layer__")) continue;
 
     const elRect = el.getBoundingClientRect();
     if (elRect.width === 0 || elRect.height === 0) continue;

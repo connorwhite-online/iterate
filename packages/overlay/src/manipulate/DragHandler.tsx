@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import type { Rect } from "iterate-ui-core";
 import { generateSelector, getRelevantStyles, getComponentInfo } from "../inspector/selector.js";
+import { TrashIcon } from "../panel/icons.js";
 
 /** A completed move with rollback info for live preview */
 export interface PendingMove {
@@ -30,6 +31,8 @@ interface DragHandlerProps {
   pendingMoves: PendingMove[];
   /** Whether to show the live preview (transforms applied) vs original positions */
   previewMode: boolean;
+  /** Called when user deletes a pending move via its badge popup */
+  onDeleteMove?: (index: number) => void;
   /** @deprecated No longer used — deltas applied via direct DOM mutation in IterateOverlay */
   moveDeltas?: Record<number, { dx: number; dy: number }>;
 }
@@ -54,8 +57,11 @@ export function DragHandler({
   onMove,
   pendingMoves,
   previewMode,
+  onDeleteMove,
   moveDeltas = {},
 }: DragHandlerProps) {
+  // Index of the move badge whose popup is open (-1 = none)
+  const [editingMoveIdx, setEditingMoveIdx] = useState(-1);
   const [dragging, setDragging] = useState(false);
   const [dragElement, setDragElement] = useState<Element | null>(null);
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
@@ -178,6 +184,9 @@ export function DragHandler({
       // Skip non-visual/structural elements
       const tag = target.tagName.toLowerCase();
       if (["html", "body", "head", "script", "style"].includes(tag)) return;
+
+      // Skip clicks on iterate overlay elements (badges, popups, markers layers)
+      if (target.closest?.("#__iterate-markers-layer__, #__iterate-fixed-markers-layer__, [data-iterate-popup]")) return;
 
       e.preventDefault();
       e.stopPropagation();
@@ -439,6 +448,10 @@ export function DragHandler({
 
           {/* Reorder badge or move badge */}
           <div
+            onClick={(e) => {
+              e.stopPropagation();
+              setEditingMoveIdx(editingMoveIdx === idx ? -1 : idx);
+            }}
             style={{
               position: "absolute",
               left: move.from.x + move.from.width - 8,
@@ -453,14 +466,157 @@ export function DragHandler({
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              pointerEvents: "none",
-              fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+              pointerEvents: "auto",
+              cursor: "pointer",
+              fontFamily: FONT_STACK,
+              boxShadow: editingMoveIdx === idx ? "0 0 0 3px #2563eb44" : "none",
             }}
           >
             {idx + 1}
           </div>
+
+          {/* Minimal popup for move badge */}
+          {editingMoveIdx === idx && (
+            <MovePopup
+              x={move.from.x + move.from.width + 12}
+              y={move.from.y - 8}
+              onDelete={() => {
+                onDeleteMove?.(idx);
+                setEditingMoveIdx(-1);
+              }}
+              onClose={() => setEditingMoveIdx(-1)}
+            />
+          )}
         </div>
       ))}
     </div>
+  );
+}
+
+const FONT_STACK = "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+const SPRING = "cubic-bezier(0.34, 1.56, 0.64, 1)";
+
+/** Minimal popup for move badges — shows "Move" label with delete and cancel buttons. */
+function MovePopup({
+  x,
+  y,
+  onDelete,
+  onClose,
+}: {
+  x: number;
+  y: number;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  const [appeared, setAppeared] = useState(false);
+
+  useEffect(() => {
+    let frame2 = 0;
+    const frame1 = requestAnimationFrame(() => {
+      frame2 = requestAnimationFrame(() => setAppeared(true));
+    });
+    return () => {
+      cancelAnimationFrame(frame1);
+      cancelAnimationFrame(frame2);
+    };
+  }, []);
+
+  // Clamp position to viewport
+  const popupWidth = 180;
+  const margin = 16;
+  let left = x;
+  if (left + popupWidth + margin > window.innerWidth) {
+    left = x - popupWidth - 30; // flip left of badge
+  }
+  left = Math.max(margin, left);
+  const top = Math.max(margin, Math.min(y, window.innerHeight - 80));
+
+  return (
+    <div
+      data-iterate-popup
+      style={{
+        position: "fixed",
+        left,
+        top,
+        zIndex: 10002,
+        pointerEvents: "auto",
+        width: popupWidth,
+        opacity: appeared ? 1 : 0,
+        transform: appeared ? "scale(1)" : "scale(0.92)",
+        transition: `opacity 0.2s ease, transform 0.25s ${SPRING}`,
+      }}
+    >
+      <div
+        style={{
+          borderRadius: 10,
+          overflow: "hidden",
+          boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+          fontFamily: FONT_STACK,
+          background: "#fff",
+          border: "1px solid #e0e0e0",
+          padding: 8,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <MoveTrashButton onClick={(e) => { e.stopPropagation(); onDelete(); }} />
+        <div
+          style={{
+            fontSize: 12,
+            fontWeight: 500,
+            color: "#333",
+          }}
+        >
+          Move
+        </div>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onClose(); }}
+          style={{
+            padding: "5px 12px",
+            background: "transparent",
+            border: "1px solid #e0e0e0",
+            borderRadius: 6,
+            color: "#888",
+            cursor: "pointer",
+            fontSize: 12,
+            fontFamily: FONT_STACK,
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Square trash button with red icon and rounded hover background */
+function MoveTrashButton({ onClick }: { onClick: (e: React.MouseEvent) => void }) {
+  const [hovered, setHovered] = React.useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 32,
+        height: 32,
+        borderRadius: 8,
+        border: "none",
+        background: hovered ? "#fef2f2" : "transparent",
+        color: "#dc2626",
+        cursor: "pointer",
+        padding: 0,
+        flexShrink: 0,
+        transition: "background 0.1s ease",
+      }}
+    >
+      <TrashIcon size={16} />
+    </button>
   );
 }

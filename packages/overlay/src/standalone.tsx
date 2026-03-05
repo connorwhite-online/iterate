@@ -12,7 +12,6 @@ interface IterateMessage {
   type:
     | "set-mode"
     | "set-iteration"
-    | "submit-batch"
     | "clear-batch"
     | "copy-batch"
     | "undo"
@@ -142,9 +141,6 @@ function StandaloneOverlay() {
           break;
         case "set-iteration":
           if (msg.iteration) setIteration(msg.iteration);
-          break;
-        case "submit-batch":
-          window.dispatchEvent(new CustomEvent("iterate:submit-batch"));
           break;
         case "clear-batch":
           window.dispatchEvent(new CustomEvent("iterate:clear-batch"));
@@ -406,20 +402,6 @@ function StandaloneOverlay() {
     }
   }, [iterations, iteration, isEmbedded, handleIterationChange]);
 
-  // Handle batch submission — submit from ALL tabs that have changes
-  const handleSubmitBatch = useCallback(() => {
-    const origCounts = tabCounts[ORIGINAL_TAB];
-    if (origCounts && (origCounts.batch > 0 || origCounts.move > 0)) {
-      window.dispatchEvent(new CustomEvent("iterate:submit-batch"));
-    }
-    for (const [name, counts] of Object.entries(tabCounts)) {
-      if (name === ORIGINAL_TAB) continue;
-      if (counts.batch > 0 || counts.move > 0) {
-        postToIframe({ __iterate: true, type: "submit-batch" }, name);
-      }
-    }
-  }, [tabCounts, postToIframe]);
-
   // Handle clearing all annotations and moves — clear ALL tabs
   const handleClearBatch = useCallback(() => {
     window.dispatchEvent(new CustomEvent("iterate:clear-batch"));
@@ -666,7 +648,7 @@ function StandaloneOverlay() {
           actual tool interactions for iterations. */}
       <IterateOverlay
         mode={isViewingIteration ? "browse" : mode}
-        iteration={iteration}
+        iteration={ORIGINAL_TAB}
         wsUrl={wsUrl}
         iframeRef={activeIframeRef}
         onBatchCountChange={(count) => {
@@ -682,6 +664,7 @@ function StandaloneOverlay() {
           }));
         }}
         previewMode={previewMode}
+        visible={visible && !isViewingIteration}
       />
 
       {/* Floating toolbar panel */}
@@ -692,7 +675,6 @@ function StandaloneOverlay() {
         onVisibilityChange={setVisible}
         batchCount={totalBatchCount}
         moveCount={totalMoveCount}
-        onSubmitBatch={handleSubmitBatch}
         onClearBatch={handleClearBatch}
         onCopyBatch={handleCopyBatch}
         onUndoMove={handleUndoMove}

@@ -17,8 +17,8 @@ export { FloatingPanel } from "./panel/FloatingPanel.js";
 export {
   generateSelector,
   getRelevantStyles,
-  identifyElement,
-  getElementPath,
-  getNearbyText,
+  describeElement,
+  buildAncestorPath,
+  captureContextText,
   getComponentInfo,
 } from "./inspector/selector.js";

@@ -1,13 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type {
-  AnnotationData,
-  AnnotationIntent,
-  AnnotationSeverity,
+  Change,
   SelectedElement,
   TextSelection,
   DrawingData,
-  Rect,
   DomChange,
 } from "iterate-ui-core";
 import { formatBatchPrompt } from "iterate-ui-core";
@@ -18,7 +15,7 @@ import { MarkerDraw } from "./inspector/MarkerDraw.js";
 import { SelectionPanel } from "./annotate/SelectionPanel.js";
 import { DragHandler, type PendingMove } from "./manipulate/DragHandler.js";
 import { DaemonConnection } from "./transport/connection.js";
-import { savePendingState, loadPendingState, clearPendingState } from "./storage/persistence.js";
+import { saveState, loadState } from "./storage/persistence.js";
 
 export type ToolMode = "select" | "move" | "draw" | "browse";
 
@@ -31,31 +28,14 @@ export interface IterateOverlayProps {
   wsUrl?: string;
   /** Reference to the iteration iframe */
   iframeRef: React.RefObject<HTMLIFrameElement | null>;
-  /** Current pending batch count (passed up for toolbar badge) */
+  /** Current pending change count (passed up for toolbar badge) */
   onBatchCountChange?: (count: number) => void;
   /** Current pending move count (passed up for toolbar badge) */
   onMoveCountChange?: (count: number) => void;
   /** Whether live preview is enabled */
   previewMode?: boolean;
-  /** Callback to submit the pending batch */
-  onSubmitBatch?: () => void;
-}
-
-/** Annotation waiting to be submitted (local-only until batch submit) */
-export interface PendingAnnotation {
-  iteration: string;
-  /** Page URL where this annotation was created */
-  url?: string;
-  elements: SelectedElement[];
-  textSelection?: TextSelection;
-  drawing?: DrawingData;
-  comment: string;
-  intent?: AnnotationIntent;
-  severity?: AnnotationSeverity;
-  /** Where the user clicked to create this annotation (viewport coords, for popup placement) */
-  clickPosition?: { x: number; y: number };
-  /** Page-absolute coordinates for badge placement (scrolls naturally with the document) */
-  pagePosition?: { x: number; y: number };
+  /** Whether the toolbar is visible — when false, badges are hidden and tools are disabled */
+  visible?: boolean;
 }
 
 /** Get the current URL from the iteration iframe (same-origin with cross-origin fallback). */
@@ -90,9 +70,62 @@ function getScrollOffset(): { x: number; y: number } {
 }
 
 /**
+ * Check if an element or any of its ancestors has position:fixed or position:sticky.
+ * Returns true if the badge should render in a fixed layer (viewport coords)
+ * rather than the absolute layer (page coords).
+ */
+function isElementFixed(element: Element | null): boolean {
+  let current = element;
+  while (current && current !== document.documentElement) {
+    const pos = window.getComputedStyle(current).position;
+    if (pos === "fixed" || pos === "sticky") return true;
+    current = current.parentElement;
+  }
+  return false;
+}
+
+/** Create or find a layer div on document.body. */
+function getOrCreateLayer(id: string, cssText: string): HTMLDivElement {
+  let el = document.getElementById(id) as HTMLDivElement | null;
+  if (!el) {
+    el = document.createElement("div");
+    el.id = id;
+    el.style.cssText = cssText;
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+/**
+ * Lazily create (or find) the position:absolute markers layer on document.body.
+ * Badges rendered inside this layer scroll naturally with the page content.
+ */
+function getOrCreateMarkersLayer(): HTMLDivElement {
+  return getOrCreateLayer(
+    "__iterate-markers-layer__",
+    "position:absolute;top:0;left:0;width:0;height:0;overflow:visible;pointer-events:none;z-index:10001;"
+  );
+}
+
+/**
+ * Lazily create (or find) the position:fixed markers layer on document.body.
+ * Badges for fixed/sticky elements render here so they stay in the viewport.
+ */
+function getOrCreateFixedMarkersLayer(): HTMLDivElement {
+  return getOrCreateLayer(
+    "__iterate-fixed-markers-layer__",
+    "position:fixed;top:0;left:0;width:0;height:0;overflow:visible;pointer-events:none;z-index:9998;"
+  );
+}
+
+/**
  * Main overlay component for iterate.
- * Renders element selection tools, annotation panel, and drag handler
+ * Renders element selection tools, change panel, and drag handler
  * on top of an iteration's iframe.
+ *
+ * Changes and DOM changes are pushed to the daemon immediately on creation
+ * (no local batching). The daemon is the source of truth — state is synced via
+ * WebSocket and badges are removed when the agent implements them.
  */
 export function IterateOverlay({
   mode,
@@ -102,6 +135,7 @@ export function IterateOverlay({
   onBatchCountChange,
   onMoveCountChange,
   previewMode = true,
+  visible = true,
 }: IterateOverlayProps) {
   const connectionRef = useRef<DaemonConnection | null>(null);
 
@@ -111,55 +145,43 @@ export function IterateOverlay({
   const [activeDrawing, setActiveDrawing] = useState<DrawingData | null>(null);
   const [clickPosition, setClickPosition] = useState<{ x: number; y: number } | null>(null);
 
-  // Restore pending state from localStorage (survives navigation and refresh)
-  const savedState = useMemo(() => loadPendingState(iteration), [iteration]);
+  // Server-side changes — synced from daemon via WebSocket
+  const [changes, setChanges] = useState<Change[]>([]);
 
-  // Pending batch (accumulated annotations not yet submitted)
-  const [pendingBatch, setPendingBatch] = useState<PendingAnnotation[]>(savedState?.pendingBatch ?? []);
-
-  // Pending moves (accumulated DOM moves not yet submitted)
-  const [pendingMoves, setPendingMoves] = useState<PendingMove[]>(savedState?.pendingMoves ?? []);
+  // Server-side DOM changes — synced from daemon via WebSocket
+  const [domChanges, setDomChanges] = useState<DomChange[]>([]);
 
   // Track whether marquee drag is in progress (suppresses ElementPicker hover)
   const [isMarqueeDragging, setIsMarqueeDragging] = useState(false);
 
+  // Shared ref: MarqueeSelect sets this after a successful drag so
+  // ElementPicker swallows the subsequent click event.
+  const justFinishedDragRef = useRef(false);
+
   const overlayRef = useRef<HTMLDivElement>(null);
 
-  // Lazily create (or find) a position:absolute markers layer on the document body.
-  // Badges rendered here scroll naturally with the page — no JS scroll tracking needed.
-  const markersLayerRef = useRef<HTMLDivElement | null>(null);
-  if (!markersLayerRef.current && typeof document !== "undefined") {
-    let el = document.getElementById("__iterate-markers-layer__") as HTMLDivElement | null;
-    if (!el) {
-      el = document.createElement("div");
-      el.id = "__iterate-markers-layer__";
-      el.style.cssText = "position:absolute;top:0;left:0;width:0;height:0;overflow:visible;pointer-events:none;z-index:9998;";
-      document.body.appendChild(el);
-    }
-    markersLayerRef.current = el;
-  }
+  // Markers layers — created once, reused across renders
+  // Absolute layer: for normal elements (badges scroll with page)
+  // Fixed layer: for fixed/sticky elements (badges stay in viewport)
+  const [markersLayer] = useState(() =>
+    typeof document !== "undefined" ? getOrCreateMarkersLayer() : null
+  );
+  const [fixedMarkersLayer] = useState(() =>
+    typeof document !== "undefined" ? getOrCreateFixedMarkersLayer() : null
+  );
 
-  // Track the current page URL so we can hide annotations that belong to other pages.
-  // In SPAs (Next.js), the overlay persists across client-side navigations, so we
-  // need to detect URL changes and only show annotations matching the current page.
+  // Track the current page URL so we can hide changes that belong to other pages.
   const [currentUrl, setCurrentUrl] = useState(() => getCurrentPageUrl(iframeRef));
 
   useEffect(() => {
-    // Detect URL changes from client-side navigation (pushState/replaceState/popstate)
     const update = () => setCurrentUrl(getCurrentPageUrl(iframeRef));
     update();
-
-    // Patch pushState/replaceState to detect SPA navigations
     const origPush = history.pushState.bind(history);
     const origReplace = history.replaceState.bind(history);
     history.pushState = (...args) => { origPush(...args); update(); };
     history.replaceState = (...args) => { origReplace(...args); update(); };
-
     window.addEventListener("popstate", update);
-
-    // Also poll to catch iframe navigations and any edge cases
     const intervalId = setInterval(update, 500);
-
     return () => {
       history.pushState = origPush;
       history.replaceState = origReplace;
@@ -168,125 +190,116 @@ export function IterateOverlay({
     };
   }, [iframeRef]);
 
-  // Move markers still need scroll-based delta tracking (they render in the fixed overlay).
-  // Annotation badges no longer need this — they're in the absolute markers layer.
-  useEffect(() => {
-    if (pendingMoves.length === 0) return;
-
-    const getDoc = (): Document => {
-      try {
-        return iframeRef.current?.contentDocument ?? document;
-      } catch {
-        return document;
-      }
-    };
-
-    const applyMoveDeltas = () => {
-      const overlay = overlayRef.current;
-      if (!overlay) return;
-      const doc = getDoc();
-      const pageUrl = getCurrentPageUrl(iframeRef);
-
-      for (let i = 0; i < pendingMoves.length; i++) {
-        const move = pendingMoves[i]!;
-        const nodes = overlay.querySelectorAll(`[data-move-idx="${i}"]`);
-        if (nodes.length === 0) continue;
-
-        const onDifferentPage = move.url && pageUrl && !urlsMatchPage(move.url, pageUrl);
-        if (onDifferentPage) {
-          for (let n = 0; n < nodes.length; n++) {
-            (nodes[n] as HTMLElement).style.display = "none";
-          }
-          continue;
-        }
-
-        const stored = move.from;
-        let dx = 0, dy = 0;
-        let found = false;
-        try {
-          const el = doc.querySelector(move.selector);
-          if (el) {
-            const cur = el.getBoundingClientRect();
-            dx = (cur.x + cur.width / 2) - (stored.x + stored.width / 2);
-            dy = (cur.y + cur.height / 2) - (stored.y + stored.height / 2);
-            found = true;
-          }
-        } catch { /* cross-origin or invalid selector */ }
-
-        for (let n = 0; n < nodes.length; n++) {
-          const node = nodes[n] as HTMLElement;
-          node.style.translate = found ? `${dx}px ${dy}px` : "";
-          if (node.style.display === "none") node.style.display = "";
-        }
-      }
-    };
-
-    applyMoveDeltas();
-    const doc = getDoc();
-    doc.addEventListener("scroll", applyMoveDeltas, { capture: true, passive: true });
-    const win = doc.defaultView ?? window;
-    win.addEventListener("scroll", applyMoveDeltas, { passive: true });
-    win.addEventListener("resize", applyMoveDeltas, { passive: true });
-
-    return () => {
-      doc.removeEventListener("scroll", applyMoveDeltas, { capture: true });
-      win.removeEventListener("scroll", applyMoveDeltas);
-      win.removeEventListener("resize", applyMoveDeltas);
-    };
-  }, [pendingMoves, iframeRef, currentUrl]);
-
-  // Unified undo stack — tracks whether each action was an annotation or move
-  const undoStackRef = useRef<Array<"annotation" | "move">>(savedState?.undoStack ?? []);
-
-  // Persist pending state to localStorage on every change
-  useEffect(() => {
-    savePendingState(iteration, pendingBatch, pendingMoves, undoStackRef.current);
-  }, [iteration, pendingBatch, pendingMoves]);
-
-  // Editing state — when editing an existing annotation badge
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  // Editing state — when editing an existing change badge
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [initialComment, setInitialComment] = useState<string | undefined>(undefined);
 
-  // When the selection panel is open, disable pickers so clicks in the panel
-  // don't re-contextualize the selection.
-  // activeDrawing is included so the popup appears even when the drawn path
-  // doesn't overlap any DOM elements (free-form drawing).
+  // When toolbar is hidden, force browse mode (disables all tools)
+  const effectiveMode: ToolMode = visible ? mode : "browse";
+
   const isAnnotating = selectedElements.length > 0 || textSelection !== null || activeDrawing !== null;
 
-  // Connect to daemon
+  // Connect to daemon and sync change/dom change state
   useEffect(() => {
     const conn = new DaemonConnection(wsUrl);
     connectionRef.current = conn;
     conn.connect();
-    return () => conn.disconnect();
-  }, [wsUrl]);
 
-  // Clear localStorage when the agent acknowledges annotations
-  useEffect(() => {
-    const conn = connectionRef.current;
-    if (!conn) return;
-    return conn.onMessage((msg) => {
-      if (msg.type === "annotation:updated" && msg.payload.status === "acknowledged") {
-        clearPendingState(iteration);
+    const unsub = conn.onMessage((msg) => {
+      switch (msg.type) {
+        case "state:sync": {
+          // Initial state — load all changes and dom changes for this iteration
+          const syncChanges = msg.payload.changes.filter((a: Change) => a.iteration === iteration);
+          const syncDomChanges = msg.payload.domChanges.filter((dc: DomChange) => dc.iteration === iteration);
+
+          if (syncChanges.length === 0 && syncDomChanges.length === 0) {
+            // Daemon is empty — restore from localStorage (e.g. after daemon restart)
+            const cached = loadState(iteration);
+            if (cached && (cached.changes.length > 0 || cached.domChanges.length > 0)) {
+              // Re-push cached changes to daemon
+              for (const a of cached.changes) {
+                const { id: _id, timestamp: _ts, status: _st, ...payload } = a;
+                conn.send({ type: "change:create", payload });
+              }
+              for (const dc of cached.domChanges) {
+                const { id: _id, timestamp: _ts, ...payload } = dc;
+                conn.send({ type: "dom-change:create", payload });
+              }
+              // State will be populated via the resulting broadcasts
+              break;
+            }
+          }
+
+          setChanges(syncChanges);
+          setDomChanges(syncDomChanges);
+          break;
+        }
+        case "change:created":
+          if (msg.payload.iteration === iteration) {
+            setChanges((prev) => [...prev, msg.payload]);
+          }
+          break;
+        case "change:updated":
+          setChanges((prev) =>
+            prev.map((a) => (a.id === msg.payload.id ? msg.payload : a))
+          );
+          break;
+        case "change:deleted":
+          setChanges((prev) => prev.filter((a) => a.id !== msg.payload.id));
+          break;
+        case "dom:changed":
+          if (msg.payload.iteration === iteration) {
+            setDomChanges((prev) => {
+              if (prev.some((dc) => dc.id === msg.payload.id)) return prev;
+              return [...prev, msg.payload];
+            });
+          }
+          break;
+        case "dom:deleted":
+          setDomChanges((prev) => prev.filter((dc) => dc.id !== msg.payload.id));
+          break;
       }
     });
-  }, [iteration, wsUrl]);
 
-  // Notify parent of batch count changes
-  useEffect(() => {
-    onBatchCountChange?.(pendingBatch.length);
-  }, [pendingBatch.length, onBatchCountChange]);
+    return () => {
+      unsub();
+      conn.disconnect();
+    };
+  }, [wsUrl, iteration]);
 
-  // Notify parent of move count changes
+  // Mirror daemon state to localStorage (survives daemon restarts)
   useEffect(() => {
-    onMoveCountChange?.(pendingMoves.length);
-  }, [pendingMoves.length, onMoveCountChange]);
+    saveState(iteration, changes, domChanges);
+  }, [iteration, changes, domChanges]);
+
+  // Visible changes: queued or in-progress, matching current page
+  const visibleChanges = changes.filter((a) => {
+    if (a.status === "implemented") return false;
+    if (a.url && currentUrl && !urlsMatchPage(a.url, currentUrl)) return false;
+    return true;
+  });
+
+  // Pending counts for toolbar badges
+  const pendingChangeCount = changes.filter((a) => a.status === "queued" || a.status === "in-progress").length;
+  const pendingDomChangeCount = domChanges.length;
+
+  // Notify parent of count changes
+  useEffect(() => {
+    onBatchCountChange?.(pendingChangeCount);
+  }, [pendingChangeCount, onBatchCountChange]);
+
+  useEffect(() => {
+    onMoveCountChange?.(pendingDomChangeCount);
+  }, [pendingDomChangeCount, onMoveCountChange]);
 
   // Handle element selection from ElementPicker (click / ctrl+click)
   const handleElementSelect = useCallback(
     (elements: PickedElement[], clickPos?: { x: number; y: number }) => {
       setSelectedElements(elements);
-      if (clickPos) setClickPosition(clickPos);
+      if (clickPos) {
+        const scroll = getScrollOffset();
+        setClickPosition({ x: clickPos.x + scroll.x, y: clickPos.y + scroll.y });
+      }
     },
     []
   );
@@ -295,15 +308,15 @@ export function IterateOverlay({
   const handleMarqueeSelect = useCallback(
     (elements: PickedElement[]) => {
       setSelectedElements(elements);
-      // Position popup at the center-right of the combined selection bounds
       if (elements.length > 0) {
+        const scroll = getScrollOffset();
         let maxRight = -Infinity, sumY = 0;
         for (const el of elements) {
           const r = el.rect;
           if (r.x + r.width > maxRight) maxRight = r.x + r.width;
           sumY += r.y + r.height / 2;
         }
-        setClickPosition({ x: maxRight, y: sumY / elements.length });
+        setClickPosition({ x: maxRight + scroll.x, y: sumY / elements.length + scroll.y });
       }
     },
     []
@@ -322,17 +335,17 @@ export function IterateOverlay({
     (elements: PickedElement[], drawing: DrawingData) => {
       setSelectedElements(elements);
       setActiveDrawing(drawing);
-      // Position popup at the start of the drawing (where the cursor first depressed)
+      const scroll = getScrollOffset();
       const startMatch = drawing.path.match(/^M\s+([\d.]+)\s+([\d.]+)/);
       if (startMatch) {
         setClickPosition({
-          x: parseFloat(startMatch[1]!),
-          y: parseFloat(startMatch[2]!),
+          x: parseFloat(startMatch[1]!) + scroll.x,
+          y: parseFloat(startMatch[2]!) + scroll.y,
         });
       } else {
         setClickPosition({
-          x: drawing.bounds.x + drawing.bounds.width,
-          y: drawing.bounds.y + drawing.bounds.height / 2,
+          x: drawing.bounds.x + drawing.bounds.width + scroll.x,
+          y: drawing.bounds.y + drawing.bounds.height / 2 + scroll.y,
         });
       }
     },
@@ -351,24 +364,30 @@ export function IterateOverlay({
     []
   );
 
-  // Add current selection as an annotation to the pending batch (or update if editing)
-  const handleAddToBatch = useCallback(
-    (comment: string, intent?: AnnotationIntent, severity?: AnnotationSeverity) => {
+  // Add change — sends directly to daemon (no local batching)
+  const handleAddChange = useCallback(
+    (comment: string) => {
       if (selectedElements.length === 0 && !textSelection && !activeDrawing) return;
+      const conn = connectionRef.current;
+      if (!conn) return;
 
-      // Convert viewport click position to page-absolute coordinates for the
-      // markers layer (position:absolute). Badges placed at page coords scroll
-      // naturally with the document — no JS scroll tracking needed.
+      // Detect if the element is fixed/sticky — if so, store viewport coords
+      // and render the badge in the fixed layer instead of the absolute (scrolling) layer.
+      const fixed = selectedElements.length > 0 && isElementFixed(selectedElements[0]!.domElement);
+
       const scroll = getScrollOffset();
       let pagePos: { x: number; y: number } | undefined;
       if (clickPosition) {
-        pagePos = { x: clickPosition.x + scroll.x, y: clickPosition.y + scroll.y };
+        // clickPosition is already in page coordinates
+        pagePos = fixed
+          ? { x: clickPosition.x - scroll.x, y: clickPosition.y - scroll.y }
+          : { x: clickPosition.x, y: clickPosition.y };
       } else if (selectedElements.length > 0) {
         const el = selectedElements[0]!;
-        pagePos = {
-          x: el.rect.x + el.rect.width / 2 + scroll.x,
-          y: el.rect.y + el.rect.height / 2 + scroll.y,
-        };
+        // el.rect is already in viewport coords (from getBoundingClientRect)
+        pagePos = fixed
+          ? { x: el.rect.x + el.rect.width / 2, y: el.rect.y + el.rect.height / 2 }
+          : { x: el.rect.x + el.rect.width / 2 + scroll.x, y: el.rect.y + el.rect.height / 2 + scroll.y };
       } else if (activeDrawing) {
         pagePos = {
           x: activeDrawing.bounds.x + activeDrawing.bounds.width / 2 + scroll.x,
@@ -376,252 +395,262 @@ export function IterateOverlay({
         };
       }
 
-      const annotation: PendingAnnotation = {
-        iteration,
-        url: getCurrentPageUrl(iframeRef),
-        elements: selectedElements.map((el) => ({
-          selector: el.selector,
-          elementName: el.elementName,
-          elementPath: el.elementPath,
-          rect: el.rect,
-          computedStyles: el.computedStyles,
-          nearbyText: el.nearbyText,
-          componentName: el.componentName,
-          sourceLocation: el.sourceLocation,
-        })),
-        textSelection: textSelection ?? undefined,
-        drawing: activeDrawing ?? undefined,
-        comment,
-        intent,
-        severity,
-        clickPosition: clickPosition ?? undefined,
-        pagePosition: pagePos,
-      };
-
-      if (editingIndex !== null) {
-        // Replace existing annotation at the editing index
-        setPendingBatch((prev) => prev.map((a, i) => (i === editingIndex ? annotation : a)));
-        setEditingIndex(null);
+      // If editing, delete the old change first
+      if (editingId !== null) {
+        conn.send({ type: "change:delete", payload: { id: editingId } });
+        setEditingId(null);
         setInitialComment(undefined);
-      } else {
-        // Append new annotation
-        setPendingBatch((prev) => [...prev, annotation]);
-        undoStackRef.current.push("annotation");
       }
 
-      // Clear selection after adding to batch
+      // Send new change to daemon — it will broadcast change:created back
+      conn.send({
+        type: "change:create",
+        payload: {
+          iteration,
+          url: getCurrentPageUrl(iframeRef),
+          elements: selectedElements.map((el) => ({
+            selector: el.selector,
+            elementName: el.elementName,
+            elementPath: el.elementPath,
+            rect: el.rect,
+            computedStyles: el.computedStyles,
+            nearbyText: el.nearbyText,
+            componentName: el.componentName,
+            sourceLocation: el.sourceLocation,
+          })),
+          textSelection: textSelection ?? undefined,
+          drawing: activeDrawing ?? undefined,
+          comment,
+          pagePosition: pagePos,
+          isFixedPosition: fixed || undefined,
+          drawingScrollOffset: activeDrawing ? { x: scroll.x, y: scroll.y } : undefined,
+        },
+      });
+
+      // Clear selection immediately
       setSelectedElements([]);
       setTextSelection(null);
       setActiveDrawing(null);
     },
-    [selectedElements, textSelection, activeDrawing, iteration, iframeRef, clickPosition, editingIndex]
+    [selectedElements, textSelection, activeDrawing, iteration, iframeRef, clickPosition, editingId]
   );
 
-  // Delete a single annotation from the pending batch
-  const handleDeleteAnnotation = useCallback(
-    (index: number) => {
-      setPendingBatch((prev) => prev.filter((_, i) => i !== index));
-      // Remove the corresponding "annotation" entry from undo stack
-      let annotationsSeen = 0;
-      const stack = undoStackRef.current;
-      for (let i = 0; i < stack.length; i++) {
-        if (stack[i] === "annotation") {
-          if (annotationsSeen === index) {
-            stack.splice(i, 1);
-            break;
-          }
-          annotationsSeen++;
-        }
-      }
+  // Delete a change from the daemon
+  const handleDeleteChange = useCallback(
+    (id: string) => {
+      connectionRef.current?.send({ type: "change:delete", payload: { id } });
     },
     []
   );
 
-  // Edit an existing annotation — load it into the selection panel
-  const handleEditAnnotation = useCallback(
-    (index: number) => {
-      const annotation = pendingBatch[index];
-      if (!annotation) return;
+  // Edit an existing change — load it into the selection panel
+  const handleEditChange = useCallback(
+    (id: string) => {
+      const change = changes.find((a) => a.id === id);
+      if (!change) return;
 
-      // Load annotation data into selection state
       setSelectedElements(
-        annotation.elements.map((el) => ({
+        change.elements.map((el) => ({
           ...el,
-          domElement: null as unknown as Element, // DOM ref unavailable during edit
+          domElement: null as unknown as Element,
         }))
       );
-      setTextSelection(annotation.textSelection ?? null);
-      setActiveDrawing(annotation.drawing ?? null);
-      setClickPosition(annotation.clickPosition ?? null);
-      setEditingIndex(index);
-      setInitialComment(annotation.comment);
+      setTextSelection(change.textSelection ?? null);
+      setActiveDrawing(change.drawing ?? null);
+      setClickPosition(change.pagePosition ?? null);
+      setEditingId(id);
+      setInitialComment(change.comment);
     },
-    [pendingBatch]
+    [changes]
   );
 
-  // Delete annotation while editing (trash button in toolbar)
-  const handleDeleteEditingAnnotation = useCallback(() => {
-    if (editingIndex !== null) {
-      handleDeleteAnnotation(editingIndex);
+  // Delete change while editing (trash button in toolbar)
+  const handleDeleteEditingChange = useCallback(() => {
+    if (editingId !== null) {
+      handleDeleteChange(editingId);
     }
-    setEditingIndex(null);
+    setEditingId(null);
     setInitialComment(undefined);
     setSelectedElements([]);
     setTextSelection(null);
     setActiveDrawing(null);
-  }, [editingIndex, handleDeleteAnnotation]);
+  }, [editingId, handleDeleteChange]);
 
   // Clear selection
   const handleClearSelection = useCallback(() => {
     setSelectedElements([]);
     setTextSelection(null);
     setActiveDrawing(null);
-    setEditingIndex(null);
+    setEditingId(null);
     setInitialComment(undefined);
   }, []);
 
-  // Handle drag move — add to pending moves list with current iteration
+  // Handle drag move — send directly to daemon
   const handleMove = useCallback(
     (move: PendingMove) => {
-      setPendingMoves((prev) => [...prev, { ...move, iteration, url: getCurrentPageUrl(iframeRef) }]);
-      undoStackRef.current.push("move");
+      const conn = connectionRef.current;
+      if (!conn) return;
+
+      const isReorder = move.reorderIndex !== undefined;
+      conn.send({
+        type: "dom-change:create",
+        payload: {
+          iteration,
+          url: getCurrentPageUrl(iframeRef),
+          selector: move.selector,
+          type: isReorder ? "reorder" : "move",
+          componentName: move.componentName,
+          sourceLocation: move.sourceLocation,
+          before: {
+            rect: move.from,
+            computedStyles: move.computedStyles,
+          },
+          after: {
+            rect: move.to,
+            computedStyles: move.computedStyles,
+            siblingIndex: move.reorderIndex,
+          },
+        },
+      });
     },
     [iteration, iframeRef]
   );
 
-  // Convert pending moves to DomChange format for the wire protocol
-  const pendingMovesToDomChanges = useCallback((): DomChange[] => {
-    return pendingMoves.map((move, idx) => {
-      const isReorder = move.reorderIndex !== undefined;
-      return {
-        id: `pending-move-${idx}-${Date.now()}`,
-        iteration: move.iteration ?? iteration,
-        url: move.url,
-        selector: move.selector,
-        type: isReorder ? ("reorder" as const) : ("move" as const),
-        componentName: move.componentName,
-        sourceLocation: move.sourceLocation,
-        before: {
-          rect: move.from,
-          computedStyles: move.computedStyles,
-        },
-        after: {
-          rect: move.to,
-          computedStyles: move.computedStyles,
-          siblingIndex: move.reorderIndex,
-        },
-        timestamp: Date.now(),
-      };
-    });
-  }, [pendingMoves, iteration]);
+  // Helper: revert a single reorder move in the DOM
+  const revertDomChange = useCallback(
+    (change: DomChange) => {
+      if (change.type !== "reorder" || change.after.siblingIndex === undefined) return;
+      const doc = (() => { try { return iframeRef.current?.contentDocument ?? document; } catch { return document; } })();
+      try {
+        const el = doc.querySelector(change.selector);
+        if (!el || !el.parentElement) return;
+        const parent = el.parentElement;
+        const children = Array.from(parent.children);
+        const refChild = children[change.before.siblingIndex ?? 0] ?? null;
+        if (refChild !== el) parent.insertBefore(el, refChild);
+      } catch { /* cross-origin or invalid selector */ }
+    },
+    [iframeRef]
+  );
 
-  // Expose batch submission to parent (called by Submit button in toolbar)
+  // Delete a DOM change from the daemon
+  const handleDeleteDomChange = useCallback(
+    (id: string) => {
+      const change = domChanges.find((dc) => dc.id === id);
+      if (change) revertDomChange(change);
+      connectionRef.current?.send({ type: "dom-change:delete", payload: { id } });
+    },
+    [domChanges, revertDomChange]
+  );
+
+  // Convert DomChange to PendingMove shape for DragHandler rendering
+  const pendingMoves: PendingMove[] = domChanges.map((dc) => ({
+    iteration: dc.iteration,
+    url: dc.url,
+    selector: dc.selector,
+    from: dc.before.rect,
+    to: dc.after.rect,
+    computedStyles: dc.before.computedStyles,
+    componentName: dc.componentName,
+    sourceLocation: dc.sourceLocation,
+    reorderIndex: dc.after.siblingIndex,
+  }));
+
+  // Handle clearing all pending changes and moves
   useEffect(() => {
     const handler = () => {
-      if ((pendingBatch.length === 0 && pendingMoves.length === 0) || !connectionRef.current) return;
-
-      connectionRef.current.send({
-        type: "batch:submit",
-        payload: {
-          iteration,
-          annotations: pendingBatch.map((a) => ({
-            iteration: a.iteration,
-            url: a.url,
-            elements: a.elements,
-            textSelection: a.textSelection,
-            drawing: a.drawing,
-            comment: a.comment,
-            intent: a.intent,
-            severity: a.severity,
-          })),
-          domChanges: pendingMovesToDomChanges(),
-        },
-      });
-
-      setPendingBatch([]);
-      setPendingMoves([]);
-      undoStackRef.current = [];
-      clearPendingState(iteration);
-    };
-
-    window.addEventListener("iterate:submit-batch", handler);
-    return () => window.removeEventListener("iterate:submit-batch", handler);
-  }, [pendingBatch, pendingMoves, iteration, pendingMovesToDomChanges]);
-
-  // Handle clearing all pending annotations and moves
-  useEffect(() => {
-    const handler = () => {
-      setPendingBatch([]);
-      setPendingMoves([]);
-      clearPendingState(iteration);
+      const conn = connectionRef.current;
+      if (!conn) return;
+      for (const a of changes) {
+        if (a.status === "queued") {
+          conn.send({ type: "change:delete", payload: { id: a.id } });
+        }
+      }
+      for (let i = domChanges.length - 1; i >= 0; i--) {
+        revertDomChange(domChanges[i]!);
+        conn.send({ type: "dom-change:delete", payload: { id: domChanges[i]!.id } });
+      }
       setSelectedElements([]);
       setTextSelection(null);
       setActiveDrawing(null);
-      undoStackRef.current = [];
     };
     window.addEventListener("iterate:clear-batch", handler);
     return () => window.removeEventListener("iterate:clear-batch", handler);
-  }, []);
+  }, [changes, domChanges, revertDomChange]);
 
-  // Handle undoing the last change (annotation or move)
+  // Handle undoing the last item — delete most recent change or dom change
   useEffect(() => {
     const handler = () => {
-      const lastAction = undoStackRef.current.pop();
-      if (!lastAction) return;
-      if (lastAction === "annotation") {
-        setPendingBatch((prev) => (prev.length === 0 ? prev : prev.slice(0, -1)));
-      } else {
-        setPendingMoves((prev) => (prev.length === 0 ? prev : prev.slice(0, -1)));
+      const conn = connectionRef.current;
+      if (!conn) return;
+
+      const lastChange = changes.filter((a) => a.status === "queued").at(-1);
+      const lastDomChange = domChanges.at(-1);
+
+      if (!lastChange && !lastDomChange) return;
+
+      const changeTime = lastChange?.timestamp ?? 0;
+      const domChangeTime = lastDomChange?.timestamp ?? 0;
+
+      if (changeTime >= domChangeTime && lastChange) {
+        conn.send({ type: "change:delete", payload: { id: lastChange.id } });
+      } else if (lastDomChange) {
+        revertDomChange(lastDomChange);
+        conn.send({ type: "dom-change:delete", payload: { id: lastDomChange.id } });
       }
     };
     window.addEventListener("iterate:undo", handler);
     return () => window.removeEventListener("iterate:undo", handler);
-  }, []);
+  }, [changes, domChanges, revertDomChange]);
 
-  // Handle request for batch text (for cross-tab copy) — returns text via custom event
+  // Handle request for batch text (for cross-tab copy)
   useEffect(() => {
     const handler = () => {
-      if (pendingBatch.length === 0 && pendingMoves.length === 0) {
+      const pending = changes.filter((a) => a.status === "queued" || a.status === "in-progress");
+      if (pending.length === 0 && domChanges.length === 0) {
         window.dispatchEvent(new CustomEvent("iterate:batch-text-response", { detail: { text: "" } }));
         return;
       }
 
-      const domChanges = pendingMoves.map((m) => ({
-        type: (m.reorderIndex !== undefined ? "reorder" : "move") as string,
-        selector: m.selector,
-        componentName: m.componentName,
-        sourceLocation: m.sourceLocation,
-        before: { rect: m.from },
-        after: { rect: m.to },
+      const formattedDomChanges = domChanges.map((dc) => ({
+        type: dc.type as string,
+        selector: dc.selector,
+        componentName: dc.componentName,
+        sourceLocation: dc.sourceLocation,
+        before: { rect: dc.before.rect },
+        after: { rect: dc.after.rect },
+        url: dc.url,
       }));
 
-      const text = formatBatchPrompt(pendingBatch, domChanges, iteration);
+      const text = formatBatchPrompt(pending, formattedDomChanges, iteration);
       window.dispatchEvent(new CustomEvent("iterate:batch-text-response", { detail: { text } }));
     };
     window.addEventListener("iterate:request-batch-text", handler);
     return () => window.removeEventListener("iterate:request-batch-text", handler);
-  }, [pendingBatch, pendingMoves, iteration]);
+  }, [changes, domChanges, iteration]);
 
-  // Handle copying annotations to clipboard as a human-readable prompt
+  // Handle copying changes to clipboard
   useEffect(() => {
     const handler = () => {
-      if (pendingBatch.length === 0 && pendingMoves.length === 0) return;
+      const pending = changes.filter((a) => a.status === "queued" || a.status === "in-progress");
+      if (pending.length === 0 && domChanges.length === 0) return;
 
-      const domChanges = pendingMoves.map((m) => ({
-        type: (m.reorderIndex !== undefined ? "reorder" : "move") as string,
-        selector: m.selector,
-        componentName: m.componentName,
-        sourceLocation: m.sourceLocation,
-        before: { rect: m.from },
-        after: { rect: m.to },
+      const formattedDomChanges = domChanges.map((dc) => ({
+        type: dc.type as string,
+        selector: dc.selector,
+        componentName: dc.componentName,
+        sourceLocation: dc.sourceLocation,
+        before: { rect: dc.before.rect },
+        after: { rect: dc.after.rect },
+        url: dc.url,
       }));
 
-      const text = formatBatchPrompt(pendingBatch, domChanges, iteration);
+      const text = formatBatchPrompt(pending, formattedDomChanges, iteration);
       navigator.clipboard.writeText(text);
     };
     window.addEventListener("iterate:copy-batch", handler);
     return () => window.removeEventListener("iterate:copy-batch", handler);
-  }, [pendingBatch, pendingMoves, iteration]);
+  }, [changes, domChanges, iteration]);
 
   return (
     <><div
@@ -635,46 +664,51 @@ export function IterateOverlay({
     >
       {/* Element picker for click/ctrl+click selection (disabled while annotating) */}
       <ElementPicker
-        active={mode === "select" && !isAnnotating}
+        active={effectiveMode === "select" && !isAnnotating}
         iframeRef={iframeRef}
         selectedElements={selectedElements}
         onSelect={handleElementSelect}
         suppressHover={isMarqueeDragging}
+        justFinishedDragRef={justFinishedDragRef}
       />
 
       {/* Marquee / rubber-band selection (disabled while annotating) */}
       <MarqueeSelect
-        active={mode === "select" && !isAnnotating}
+        active={effectiveMode === "select" && !isAnnotating}
         iframeRef={iframeRef}
         onSelect={handleMarqueeSelect}
         onDragStateChange={setIsMarqueeDragging}
+        justFinishedDragRef={justFinishedDragRef}
       />
 
       {/* Text selection capture (disabled while annotating) */}
       <TextSelect
-        active={mode === "select" && !isAnnotating}
+        active={effectiveMode === "select" && !isAnnotating}
         iframeRef={iframeRef}
         onTextSelect={handleTextSelect}
       />
 
       {/* Marker draw tool (disabled while annotating) */}
       <MarkerDraw
-        active={mode === "draw" && !isAnnotating}
+        active={effectiveMode === "draw" && !isAnnotating}
         iframeRef={iframeRef}
         onDrawComplete={handleDrawComplete}
       />
 
       {/* Drag handler for move mode with live preview */}
       <DragHandler
-        active={mode === "move"}
+        active={effectiveMode === "move"}
         iframeRef={iframeRef}
         onMove={handleMove}
         pendingMoves={pendingMoves}
         previewMode={previewMode}
+        onDeleteMove={(idx) => {
+          const dc = domChanges[idx];
+          if (dc) handleDeleteDomChange(dc.id);
+        }}
       />
 
-      {/* Persistent selection frames — shown while annotating so user maintains context.
-           Hidden for marker/draw tool since the drawn path itself provides context. */}
+      {/* Persistent selection frames — shown while annotating so user maintains context. */}
       {isAnnotating && !activeDrawing && selectedElements.map((el, i) => (
         <div
           key={`sel-frame-${i}`}
@@ -716,87 +750,124 @@ export function IterateOverlay({
         </svg>
       )}
 
-      {/* Selection panel (shows when elements are selected) */}
-      <SelectionPanel
-        selectedElements={selectedElements}
-        textSelection={textSelection}
-        onRemoveElement={handleRemoveElement}
-        onAddToBatch={handleAddToBatch}
-        onClearSelection={handleClearSelection}
-        clickPosition={clickPosition}
-        isDrawing={activeDrawing != null}
-        initialComment={initialComment}
-        onDelete={editingIndex !== null ? handleDeleteEditingAnnotation : undefined}
-      />
-
-      {/* Preview badge — shown at click position while annotating (before Add).
-           When editing, show the editing badge's number instead of a new one. */}
-      {isAnnotating && clickPosition && editingIndex === null && (
-        <AnimatedBadge
-          key={`preview-${pendingBatch.length}-${clickPosition.x}-${clickPosition.y}`}
-          number={pendingBatch.length + 1}
-          x={clickPosition.x}
-          y={clickPosition.y}
-          color="#2563eb"
-        />
-      )}
-
-      {/* Drawing strokes for marker annotations (stay in fixed overlay) */}
-      {pendingBatch.map((annotation, batchIdx) =>
-        annotation.drawing ? (
-          <svg
-            key={`drawing-${batchIdx}`}
-            style={{
-              position: "absolute",
-              inset: 0,
-              width: "100%",
-              height: "100%",
-              pointerEvents: "none",
-              overflow: "visible",
-            }}
-          >
-            <path
-              d={annotation.drawing.path}
-              fill="none"
-              stroke={annotation.drawing.strokeColor}
-              strokeWidth={annotation.drawing.strokeWidth}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              opacity={0.5}
-            />
-          </svg>
-        ) : null
-      )}
     </div>
-    {/* Annotation badges rendered in the absolute markers layer — they scroll
-        naturally with the page (no JS scroll tracking). Uses createPortal to
-        render outside the fixed overlay into a position:absolute container. */}
-    {markersLayerRef.current && createPortal(
+    {/* Change badges rendered in two layers:
+        1. Absolute layer (position:absolute) — for normal elements, scrolls with page
+        2. Fixed layer (position:fixed) — for fixed/sticky elements, stays in viewport
+        Hidden when toolbar is closed. */}
+    {visible && markersLayer && createPortal(
       <>
-        {pendingBatch.map((annotation, batchIdx) => {
-          // Hide annotations on a different page
-          const onDifferentPage = annotation.url && currentUrl && !urlsMatchPage(annotation.url, currentUrl);
-          if (onDifferentPage) return null;
-
-          // Use page-absolute coordinates (stored at creation time).
-          // Fall back to clickPosition for old annotations loaded from localStorage.
-          const pos = annotation.pagePosition ?? annotation.clickPosition;
+        {/* Selection panel + preview badge — rendered here so they share the same
+            absolute coordinate system as the saved badges and scroll with the page */}
+        <SelectionPanel
+          selectedElements={selectedElements}
+          textSelection={textSelection}
+          onRemoveElement={handleRemoveElement}
+          onAddToBatch={handleAddChange}
+          onClearSelection={handleClearSelection}
+          clickPosition={clickPosition}
+          isDrawing={activeDrawing != null}
+          initialComment={initialComment}
+          onDelete={editingId !== null ? handleDeleteEditingChange : undefined}
+        />
+        {isAnnotating && clickPosition && editingId === null && (
+          <AnimatedBadge
+            key={`preview-${visibleChanges.length}-${clickPosition.x}-${clickPosition.y}`}
+            number={visibleChanges.length + 1}
+            x={clickPosition.x}
+            y={clickPosition.y}
+            color="#2563eb"
+          />
+        )}
+        {visibleChanges.map((change, idx) => {
+          if (change.isFixedPosition) return null; // rendered in fixed layer
+          const pos = change.pagePosition;
           if (!pos) return null;
 
           return (
-            <InteractiveBadge
-              key={`batch-${batchIdx}`}
-              number={batchIdx + 1}
-              x={pos.x}
-              y={pos.y}
-              color="#2563eb"
-              onEdit={() => handleEditAnnotation(batchIdx)}
-              isEditing={editingIndex === batchIdx}
-            />
+            <React.Fragment key={change.id}>
+              {change.drawing && (
+                <svg
+                  style={{
+                    position: "absolute",
+                    left: change.drawingScrollOffset?.x ?? 0,
+                    top: change.drawingScrollOffset?.y ?? 0,
+                    width: "100vw",
+                    height: "100vh",
+                    pointerEvents: "none",
+                    overflow: "visible",
+                  }}
+                >
+                  <path
+                    d={change.drawing.path}
+                    fill="none"
+                    stroke={change.drawing.strokeColor}
+                    strokeWidth={change.drawing.strokeWidth}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    opacity={0.5}
+                  />
+                </svg>
+              )}
+              <InteractiveBadge
+                number={idx + 1}
+                x={pos.x}
+                y={pos.y}
+                color={change.status === "in-progress" ? "#16a34a" : "#2563eb"}
+                onEdit={() => handleEditChange(change.id)}
+                isEditing={editingId === change.id}
+              />
+            </React.Fragment>
           );
         })}
       </>,
-      markersLayerRef.current,
+      markersLayer,
+    )}
+    {visible && fixedMarkersLayer && createPortal(
+      <>
+        {visibleChanges.map((change, idx) => {
+          if (!change.isFixedPosition) return null; // rendered in absolute layer
+          const pos = change.pagePosition;
+          if (!pos) return null;
+
+          return (
+            <React.Fragment key={change.id}>
+              {change.drawing && (
+                <svg
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    top: 0,
+                    width: "100vw",
+                    height: "100vh",
+                    pointerEvents: "none",
+                    overflow: "visible",
+                  }}
+                >
+                  <path
+                    d={change.drawing.path}
+                    fill="none"
+                    stroke={change.drawing.strokeColor}
+                    strokeWidth={change.drawing.strokeWidth}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    opacity={0.5}
+                  />
+                </svg>
+              )}
+              <InteractiveBadge
+                number={idx + 1}
+                x={pos.x}
+                y={pos.y}
+                color={change.status === "in-progress" ? "#16a34a" : "#2563eb"}
+                onEdit={() => handleEditChange(change.id)}
+                isEditing={editingId === change.id}
+              />
+            </React.Fragment>
+          );
+        })}
+      </>,
+      fixedMarkersLayer,
     )}
     </>
   );
@@ -807,8 +878,6 @@ const BADGE_SPRING = "cubic-bezier(0.34, 1.56, 0.64, 1)";
 
 /**
  * Animated number badge that pops in at a specific position.
- * Uses CSS transitions: starts at scale(0.75) + opacity 0, then
- * springs up to scale(1) + opacity 1 on the next frame.
  */
 function AnimatedBadge({
   number,
@@ -865,9 +934,9 @@ function AnimatedBadge({
 }
 
 /**
- * Interactive annotation badge. Clickable circle that opens the edit form
- * when clicked. Visually highlights with a ring when being edited.
- * Rendered inside the absolute markers layer so it scrolls naturally with the page.
+ * Interactive change badge. Clickable circle that opens the edit form
+ * when clicked. Rendered inside the absolute markers layer so it scrolls
+ * naturally with the page.
  */
 function InteractiveBadge({
   number,

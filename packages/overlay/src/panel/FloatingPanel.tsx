@@ -6,7 +6,6 @@ import {
   CursorIcon,
   MoveIcon,
   MarkerIcon,
-  SendIcon,
   CloseIcon,
   LogoIcon,
   TrashIcon,
@@ -30,8 +29,6 @@ export interface FloatingPanelProps {
   batchCount?: number;
   /** Number of pending moves */
   moveCount?: number;
-  /** Called when user clicks Submit */
-  onSubmitBatch?: () => void;
   /** Called when user clicks Trash (clear all annotations and moves) */
   onClearBatch?: () => void;
   /** Called when user clicks Copy (copy annotations to clipboard) */
@@ -98,7 +95,6 @@ export function FloatingPanel({
   onVisibilityChange,
   batchCount = 0,
   moveCount = 0,
-  onSubmitBatch,
   onClearBatch,
   onCopyBatch,
   onUndoMove,
@@ -121,19 +117,25 @@ export function FloatingPanel({
   const [discardLoading, setDiscardLoading] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [sendSuccess, setSendSuccess] = useState(false);
-  const sendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const iterationNames = iterations
     ? Object.keys(iterations).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
     : [];
   const hasIterations = iterationNames.length > 0;
-  const isCreating = hasIterations && iterationNames.some(
-    (n) => {
-      const s = iterations![n]?.status;
-      return s === "creating" || s === "installing" || s === "starting";
-    }
-  );
+  const allStatuses = hasIterations
+    ? iterationNames.map((n) => iterations![n]?.status)
+    : [];
+  const isCreating = allStatuses.some((s) => s === "creating" || s === "installing" || s === "starting");
+  // High-water-mark: only move forward through phases, never backwards
+  const phaseOrder = ["creating", "installing", "starting"] as const;
+  const currentMaxPhase = allStatuses.includes("starting") ? 2
+    : allStatuses.includes("installing") ? 1
+    : allStatuses.includes("ready") ? 2 // if any are ready, at least "starting" was reached
+    : 0;
+  const highPhaseRef = useRef(-1);
+  if (!isCreating && !forkLoading) { highPhaseRef.current = -1; } // reset when done
+  else if (currentMaxPhase > highPhaseRef.current) { highPhaseRef.current = currentMaxPhase; }
+  const creatingPhase = highPhaseRef.current >= 0 ? phaseOrder[highPhaseRef.current] : null;
   const totalPending = batchCount + moveCount;
   const isLeftSide = corner === "top-left" || corner === "bottom-left";
   const isTopSide = corner === "top-left" || corner === "top-right";
@@ -151,7 +153,6 @@ export function FloatingPanel({
   useEffect(() => {
     return () => {
       if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
-      if (sendTimerRef.current) clearTimeout(sendTimerRef.current);
     };
   }, []);
 
@@ -168,25 +169,101 @@ export function FloatingPanel({
     }
   }, [hasIterations]);
 
-  // Suspense overlay
-  const suspenseActive = forkLoading || isCreating || pickLoading || discardLoading;
+  // Track whether the page has rendered meaningful content (not just the overlay)
+  const [contentReady, setContentReady] = useState(false);
+  const wasCreatingRef = useRef(false);
+  useEffect(() => {
+    if (isCreating || forkLoading) {
+      wasCreatingRef.current = true;
+      setContentReady(false);
+      return;
+    }
+    if (!wasCreatingRef.current || !hasIterations) return;
+    // Poll for actual visible content in the page (beyond just the overlay root)
+    let rafId: number;
+    const check = () => {
+      const children = Array.from(document.body.children);
+      const hasContent = children.some(
+        (el) => el.id !== "__iterate-overlay-root__" && (el as HTMLElement).offsetHeight > 0 && el.children.length > 0
+      );
+      if (hasContent) { setContentReady(true); wasCreatingRef.current = false; }
+      else { rafId = requestAnimationFrame(check); }
+    };
+    rafId = requestAnimationFrame(check);
+    return () => cancelAnimationFrame(rafId);
+  }, [isCreating, forkLoading, hasIterations]);
+
+  // Suspense overlay — also show while page content hasn't rendered after iterations are ready
+  const pageStillLoading = wasCreatingRef.current && hasIterations && !contentReady && !pickLoading && !discardLoading;
+  const suspenseActive = forkLoading || isCreating || pickLoading || discardLoading || pageStillLoading;
   const suspenseMessage = pickLoading
     ? "Merging preferred changes\u2026"
     : discardLoading
       ? "Removing iteration worktrees\u2026"
-      : "Creating iteration branches\u2026";
+      : pageStillLoading && !isCreating && !forkLoading
+        ? "Loading page\u2026"
+        : creatingPhase === "installing"
+          ? "Installing dependencies\u2026"
+          : creatingPhase === "starting"
+            ? "Starting dev server\u2026"
+            : "Creating iteration branches\u2026";
 
-  // Hotkey: Cmd+I (Mac) / Ctrl+I (other) to toggle
+  // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Cmd+I / Ctrl+I — always toggle toolbar visibility
       if ((e.metaKey || e.ctrlKey) && e.key === "i") {
         e.preventDefault();
         onVisibilityChange(!visible);
+        return;
+      }
+
+      // All other shortcuts require toolbar to be open and no focused input
+      if (!visible) return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      switch (e.key) {
+        case "Escape":
+          e.preventDefault();
+          onVisibilityChange(false);
+          break;
+        case "s":
+          e.preventDefault();
+          (document.activeElement as HTMLElement)?.blur?.();
+          onModeChange(mode === "select" ? "browse" : "select");
+          break;
+        case "d":
+          e.preventDefault();
+          (document.activeElement as HTMLElement)?.blur?.();
+          onModeChange(mode === "draw" ? "browse" : "draw");
+          break;
+        case "m":
+          e.preventDefault();
+          (document.activeElement as HTMLElement)?.blur?.();
+          onModeChange(mode === "move" ? "browse" : "move");
+          break;
+        case "u":
+          e.preventDefault();
+          onUndoMove?.();
+          break;
+        case "x":
+          e.preventDefault();
+          onClearBatch?.();
+          break;
+        case "c":
+          e.preventDefault();
+          onCopyBatch?.();
+          setCopySuccess(true);
+          if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+          copyTimerRef.current = setTimeout(() => setCopySuccess(false), 3000);
+          break;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [visible, onVisibilityChange]);
+  }, [visible, onVisibilityChange, mode, onModeChange, onUndoMove, onClearBatch, onCopyBatch]);
 
   // Drag start — only from the panel background, not buttons
   const handleMouseDown = useCallback(
@@ -270,11 +347,15 @@ export function FloatingPanel({
           gap: 0,
           cursor: isDragging ? "grabbing" : "grab",
           userSelect: "none",
-          overflow: "hidden",
+          overflow: "visible",
           padding: 4,
           transition: `${positionTransition}`,
         }}
       >
+        {/* Annotation count badge — always visible, overflows container */}
+        {totalPending > 0 && (
+          <PanelBadge count={totalPending} isLeftSide={isLeftSide} />
+        )}
         {/* Iteration tab layer — recessed lower layer behind the main toolbar */}
         {hasIterations && (
           <div
@@ -446,7 +527,7 @@ export function FloatingPanel({
                     filter: copySuccess ? "blur(0px)" : "blur(4px)",
                     transition: `opacity 0.25s ${SPRING}, transform 0.3s ${SPRING}, filter 0.25s ease`,
                   }}>
-                    <CheckIcon size={ICON_SIZE} color="#22c55e" />
+                    <CheckIcon size={ICON_SIZE} color="#22c55e" animate />
                   </div>
                 </div>
               }
@@ -457,47 +538,6 @@ export function FloatingPanel({
                 setCopySuccess(true);
                 if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
                 copyTimerRef.current = setTimeout(() => setCopySuccess(false), 3000);
-              }}
-            />
-            <IconButton
-              icon={
-                <div style={{ position: "relative", width: ICON_SIZE, height: ICON_SIZE }}>
-                  <div style={{
-                    position: "absolute",
-                    inset: 0,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    opacity: sendSuccess ? 0 : 1,
-                    transform: sendSuccess ? "scale(0.6)" : "scale(1)",
-                    filter: sendSuccess ? "blur(4px)" : "blur(0px)",
-                    transition: `opacity 0.25s ${SPRING}, transform 0.3s ${SPRING}, filter 0.25s ease`,
-                  }}>
-                    <SendIcon size={ICON_SIZE} />
-                  </div>
-                  <div style={{
-                    position: "absolute",
-                    inset: 0,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    opacity: sendSuccess ? 1 : 0,
-                    transform: sendSuccess ? "scale(1)" : "scale(0.6)",
-                    filter: sendSuccess ? "blur(0px)" : "blur(4px)",
-                    transition: `opacity 0.25s ${SPRING}, transform 0.3s ${SPRING}, filter 0.25s ease`,
-                  }}>
-                    <CheckIcon size={ICON_SIZE} color="#22c55e" />
-                  </div>
-                </div>
-              }
-              label={sendSuccess ? "Submitted!" : `Submit ${totalPending} change${totalPending !== 1 ? "s" : ""}`}
-              disabled={totalPending === 0}
-              badge={totalPending > 0 ? totalPending : undefined}
-              onClick={() => {
-                onSubmitBatch?.();
-                setSendSuccess(true);
-                if (sendTimerRef.current) clearTimeout(sendTimerRef.current);
-                sendTimerRef.current = setTimeout(() => setSendSuccess(false), 3000);
               }}
             />
 
@@ -591,12 +631,6 @@ export function FloatingPanel({
  * Uses purely CSS animations for performance.
  */
 function SuspenseOverlay({ active, message }: { active: boolean; message: string }) {
-  const letters = message.split("");
-  const totalLetters = letters.filter((l) => l !== " ").length;
-  // Stagger each letter so the wave takes ~0.6s to traverse the full string
-  const staggerMs = totalLetters > 0 ? Math.round(600 / totalLetters) : 40;
-
-  let charIndex = 0;
   return (
     <div
       style={{
@@ -618,22 +652,11 @@ function SuspenseOverlay({ active, message }: { active: boolean; message: string
         @keyframes iterate-suspense-spin {
           to { transform: rotate(360deg); }
         }
-        @keyframes iterate-suspense-wave {
-          0%, 100% {
-            color: #888;
-            transform: scale(1);
-          }
-          30% {
-            color: #333;
-            transform: scale(1.03);
-          }
-          60% {
-            color: #888;
-            transform: scale(1);
-          }
+        @keyframes iterate-suspense-pulse {
+          0%, 100% { opacity: 0.4; }
+          50% { opacity: 1; }
         }
       `}</style>
-      {/* Loading spinner — SVG circle with rounded stroke caps */}
       <svg
         width="40"
         height="40"
@@ -648,35 +671,16 @@ function SuspenseOverlay({ active, message }: { active: boolean; message: string
           strokeDasharray={`${Math.PI * 34 * 0.25} ${Math.PI * 34 * 0.75}`}
         />
       </svg>
-      {/* Status text with per-letter wave animation */}
       <div
         style={{
           fontSize: 14,
           fontWeight: 500,
           fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-          color: "#888",
-          display: "flex",
+          color: "#555",
+          animation: active ? "iterate-suspense-pulse 2s ease-in-out infinite" : "none",
         }}
       >
-        {letters.map((letter, i) => {
-          const isSpace = letter === " ";
-          const delay = isSpace ? 0 : charIndex * staggerMs;
-          if (!isSpace) charIndex++;
-          return (
-            <span
-              key={i}
-              style={{
-                display: "inline-block",
-                whiteSpace: "pre",
-                animation: active && !isSpace
-                  ? `iterate-suspense-wave 1.6s ease-in-out ${delay}ms infinite`
-                  : "none",
-              }}
-            >
-              {letter}
-            </span>
-          );
-        })}
+        {message}
       </div>
     </div>
   );
@@ -964,6 +968,7 @@ function IconButton({
         padding: 4,
         borderRadius: 8,
         border: "none",
+        outline: "none",
         background: active ? "#e0e0e0" : hovered ? "#f0f0f0" : "transparent",
         color: (active || hovered) ? "#141414" : "#666",
         cursor: disabled ? "not-allowed" : "pointer",
@@ -1091,6 +1096,56 @@ function TabBadge({ count }: { count: number }) {
         fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
         lineHeight: 1,
         pointerEvents: "none",
+        transform: appeared ? "scale(1)" : "scale(0)",
+        transition: `transform 0.3s ${SPRING}`,
+      }}
+    >
+      {count}
+    </span>
+  );
+}
+
+/** Annotation count badge positioned at the corner of the panel container.
+ *  Overflows the panel bounds. Always visible (open or closed). */
+function PanelBadge({ count, isLeftSide }: { count: number; isLeftSide: boolean }) {
+  const isDouble = count >= 10;
+  const [appeared, setAppeared] = useState(false);
+
+  useEffect(() => {
+    setAppeared(false);
+    let frame2 = 0;
+    const frame1 = requestAnimationFrame(() => {
+      frame2 = requestAnimationFrame(() => {
+        setAppeared(true);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(frame1);
+      cancelAnimationFrame(frame2);
+    };
+  }, [count]);
+
+  return (
+    <span
+      style={{
+        position: "absolute",
+        top: -6,
+        ...(isLeftSide ? { left: -6 } : { right: -6 }),
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        ...(isDouble
+          ? { minWidth: 18, height: 18, borderRadius: 9, padding: "0 4px" }
+          : { width: 18, height: 18, borderRadius: "50%" }),
+        background: "#2563eb",
+        color: "#fff",
+        fontSize: 10,
+        fontWeight: 700,
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        lineHeight: 1,
+        pointerEvents: "none",
+        zIndex: 1,
+        boxShadow: "0 1px 4px rgba(0,0,0,0.15)",
         transform: appeared ? "scale(1)" : "scale(0)",
         transition: `transform 0.3s ${SPRING}`,
       }}

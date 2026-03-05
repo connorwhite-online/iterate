@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   generateSelector,
-  getElementPath,
-  identifyElement,
-  getNearbyText,
+  buildAncestorPath,
+  describeElement,
+  captureContextText,
   getComponentInfo,
 } from "../selector.js";
 
@@ -49,7 +49,7 @@ describe("generateSelector", () => {
   });
 });
 
-describe("getElementPath", () => {
+describe("buildAncestorPath", () => {
   it("returns path with ancestor chain", () => {
     const main = document.createElement("main");
     const section = document.createElement("section");
@@ -58,7 +58,7 @@ describe("getElementPath", () => {
     section.appendChild(div);
     document.body.appendChild(main);
 
-    const path = getElementPath(div);
+    const path = buildAncestorPath(div);
     expect(path).toContain("main");
     expect(path).toContain("section");
     expect(path).toContain("div");
@@ -73,7 +73,7 @@ describe("getElementPath", () => {
     wrapper.appendChild(inner);
     document.body.appendChild(wrapper);
 
-    const path = getElementPath(inner);
+    const path = buildAncestorPath(inner);
     expect(path).toContain("div.container");
 
     wrapper.remove();
@@ -82,19 +82,19 @@ describe("getElementPath", () => {
   it("handles single-level element", () => {
     const el = document.createElement("div");
     document.body.appendChild(el);
-    const path = getElementPath(el);
+    const path = buildAncestorPath(el);
     expect(path).toContain("div");
     el.remove();
   });
 });
 
-describe("identifyElement", () => {
+describe("describeElement", () => {
   it("identifies button with aria-label", () => {
     const btn = document.createElement("button");
     btn.setAttribute("aria-label", "Close");
     btn.textContent = "X";
     document.body.appendChild(btn);
-    const name = identifyElement(btn);
+    const name = describeElement(btn);
     expect(name).toContain("Close");
     btn.remove();
   });
@@ -103,7 +103,7 @@ describe("identifyElement", () => {
     const btn = document.createElement("button");
     btn.textContent = "Submit";
     document.body.appendChild(btn);
-    const name = identifyElement(btn);
+    const name = describeElement(btn);
     expect(name).toContain("Submit");
     btn.remove();
   });
@@ -113,7 +113,7 @@ describe("identifyElement", () => {
     a.href = "#";
     a.textContent = "Learn more";
     document.body.appendChild(a);
-    const name = identifyElement(a);
+    const name = describeElement(a);
     expect(name).toContain("Learn more");
     a.remove();
   });
@@ -123,7 +123,7 @@ describe("identifyElement", () => {
     input.type = "email";
     input.name = "userEmail";
     document.body.appendChild(input);
-    const name = identifyElement(input);
+    const name = describeElement(input);
     expect(name).toContain("email");
     input.remove();
   });
@@ -132,7 +132,7 @@ describe("identifyElement", () => {
     const img = document.createElement("img");
     img.alt = "Profile photo";
     document.body.appendChild(img);
-    const name = identifyElement(img);
+    const name = describeElement(img);
     expect(name).toContain("Profile photo");
     img.remove();
   });
@@ -141,7 +141,7 @@ describe("identifyElement", () => {
     const h2 = document.createElement("h2");
     h2.textContent = "Features";
     document.body.appendChild(h2);
-    const name = identifyElement(h2);
+    const name = describeElement(h2);
     expect(name).toContain("Features");
     h2.remove();
   });
@@ -149,13 +149,13 @@ describe("identifyElement", () => {
   it("falls back to tag name for generic element", () => {
     const el = document.createElement("section");
     document.body.appendChild(el);
-    const name = identifyElement(el);
+    const name = describeElement(el);
     expect(name).toContain("section");
     el.remove();
   });
 });
 
-describe("getNearbyText", () => {
+describe("captureContextText", () => {
   it("captures own text and sibling text", () => {
     const parent = document.createElement("div");
     const prev = document.createElement("p");
@@ -169,7 +169,7 @@ describe("getNearbyText", () => {
     parent.appendChild(next);
     document.body.appendChild(parent);
 
-    const text = getNearbyText(current);
+    const text = captureContextText(current);
     expect(text).toContain("Current");
 
     parent.remove();
@@ -178,7 +178,7 @@ describe("getNearbyText", () => {
   it("handles element with no text", () => {
     const el = document.createElement("div");
     document.body.appendChild(el);
-    const text = getNearbyText(el);
+    const text = captureContextText(el);
     expect(text).toBeDefined();
     el.remove();
   });

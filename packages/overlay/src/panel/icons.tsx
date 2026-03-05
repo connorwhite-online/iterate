@@ -163,15 +163,25 @@ export function MarkerIcon({ size = 24, color = "currentColor" }: IconProps) {
 }
 
 /** Checkmark */
-export function CheckIcon({ size = 24, color = "currentColor" }: IconProps) {
+export function CheckIcon({ size = 24, color = "currentColor", animate = false }: IconProps & { animate?: boolean }) {
+  // Path total length ≈ 14.87 — use 20 for safety margin
+  const len = 20;
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <path d="M7 13L10 16L17 8" 
-        stroke={color} 
-        strokeWidth={2} 
-        strokeLinecap="round" 
+      <path d="M7 13L10 16L17 8"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
         strokeLinejoin="round"
+        {...(animate ? {
+          strokeDasharray: len,
+          strokeDashoffset: len,
+          style: { animation: "iterate-check-draw 0.35s ease-out 0.1s forwards" },
+        } : {})}
       />
+      {animate && (
+        <style>{`@keyframes iterate-check-draw { to { stroke-dashoffset: 0; } }`}</style>
+      )}
     </svg>
   );
 }

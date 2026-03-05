@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { AnnotationIntent, AnnotationSeverity, TextSelection } from "iterate-ui-core";
+import type { TextSelection } from "iterate-ui-core";
 import type { PickedElement } from "../inspector/ElementPicker.js";
 import { TrashIcon } from "../panel/icons.js";
 
@@ -7,18 +7,14 @@ interface SelectionPanelProps {
   selectedElements: PickedElement[];
   textSelection: TextSelection | null;
   onRemoveElement: (index: number) => void;
-  onAddToBatch: (
-    comment: string,
-    intent?: AnnotationIntent,
-    severity?: AnnotationSeverity
-  ) => void;
+  onAddToBatch: (comment: string) => void;
   onClearSelection: () => void;
   clickPosition?: { x: number; y: number } | null;
   /** When true, the header shows "Path" with no dropdown (marker/draw tool) */
   isDrawing?: boolean;
-  /** Pre-fill comment when editing an existing annotation */
+  /** Pre-fill comment when editing an existing change */
   initialComment?: string;
-  /** Shown as a left-aligned trash button in the toolbar (for editing existing annotations) */
+  /** Shown as a left-aligned trash button in the toolbar (for editing existing changes) */
   onDelete?: () => void;
 }
 
@@ -34,7 +30,7 @@ const CHEVRON_SVG = (
 type AnimState = "hidden" | "entering" | "visible" | "exiting";
 
 /**
- * Flat, greyscale annotation popup with a layered card effect.
+ * Flat, greyscale popup with a layered card effect.
  *
  * The header (component name + CSS drawer) sits on a recessed lower layer.
  * The main card (textarea + buttons) floats on top with rounded top corners,
@@ -199,22 +195,24 @@ export function SelectionPanel({
   const margin = 16;
   const maxPanelHeight = window.innerHeight * 0.8; // matches maxHeight: "80vh"
   const effectiveHeight = panelHeight > 0 ? Math.min(panelHeight, maxPanelHeight) : maxPanelHeight;
-  const pos = clickPosition ?? { x: window.innerWidth - margin - panelWidth, y: window.innerHeight / 2 };
+  // clickPosition is already in page coordinates; fallback to center-right of current viewport
+  const pos = clickPosition ?? { x: window.scrollX + window.innerWidth - margin - panelWidth, y: window.scrollY + window.innerHeight / 2 };
   // Place to the right of the click by default; flip left if it would overflow
+  const viewportX = pos.x - window.scrollX;
   let left = pos.x + margin;
-  if (left + panelWidth + margin > window.innerWidth) {
+  if (viewportX + margin + panelWidth + margin > window.innerWidth) {
     left = pos.x - panelWidth - margin;
   }
-  left = Math.max(margin, Math.min(left, window.innerWidth - panelWidth - margin));
+  left = Math.max(window.scrollX + margin, Math.min(left, window.scrollX + window.innerWidth - panelWidth - margin));
   // Vertically center on the click point, then clamp so the full panel stays in viewport
   let top = pos.y - effectiveHeight / 2;
-  top = Math.max(margin, Math.min(top, window.innerHeight - effectiveHeight - margin));
+  top = Math.max(window.scrollY + margin, Math.min(top, window.scrollY + window.innerHeight - effectiveHeight - margin));
 
   return (
     <div
       ref={panelRef}
       style={{
-        position: "fixed",
+        position: "absolute",
         left,
         top,
         zIndex: 10002,

@@ -51,10 +51,10 @@ export function generateSelector(element: Element): string {
 }
 
 /**
- * Generate a human-readable element path (up to maxDepth ancestors).
+ * Build a human-readable ancestor path (up to maxDepth ancestors).
  * Example: "main > section > div.card"
  */
-export function getElementPath(element: Element, maxDepth = 4): string {
+export function buildAncestorPath(element: Element, maxDepth = 4): string {
   const parts: string[] = [];
   let current: Element | null = element;
   let depth = 0;
@@ -74,10 +74,9 @@ export function getElementPath(element: Element, maxDepth = 4): string {
 }
 
 /**
- * Generate a human-readable name for an element.
- * Inspired by agentation's element identification.
+ * Generate a human-readable label for an element.
  */
-export function identifyElement(element: Element): string {
+export function describeElement(element: Element): string {
   const tag = element.tagName.toLowerCase();
 
   // data-element attribute (user-provided label)
@@ -137,7 +136,7 @@ export function identifyElement(element: Element): string {
 }
 
 /** Capture text content near the element (own + sibling text) */
-export function getNearbyText(element: Element): string {
+export function captureContextText(element: Element): string {
   const parts: string[] = [];
 
   const prev = element.previousElementSibling;
@@ -256,7 +255,7 @@ export function getComponentInfo(element: Element): {
   return { component: null, source: null, isComponentRoot: false };
 }
 
-// --- Type-specific style capture (inspired by agentation) ---
+// --- Type-specific style capture ---
 
 const TEXT_ELEMENTS = new Set(["p", "span", "h1", "h2", "h3", "h4", "h5", "h6", "label", "a", "li"]);
 const CONTAINER_ELEMENTS = new Set(["div", "section", "main", "article", "aside", "nav", "header", "footer"]);
