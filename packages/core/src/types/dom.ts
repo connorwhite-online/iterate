@@ -7,6 +7,8 @@ export interface DomChange {
   /** Page URL where the DOM change was made */
   url?: string;
   selector: string;
+  /** CSS selector for the parent element (used to find reordered children) */
+  parentSelector?: string;
   type: "move" | "reorder" | "resize" | "style";
   /** React component name from babel plugin */
   componentName: string | null;

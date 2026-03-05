@@ -260,14 +260,31 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   app.patch("/api/changes/:id/implement", async (request, reply) => {
     const { id } = request.params as { id: string };
     const { summary } = (request.body as { summary?: string }) ?? {};
-    const updated = store.updateChange(id, {
-      status: "implemented",
-      implementedBy: "agent",
+    const change = store.getChange(id);
+    if (!change) return reply.status(404).send({ message: "Change not found" });
+
+    // Build the response before removing
+    Object.assign(change, {
+      status: "implemented" as const,
+      implementedBy: "agent" as const,
       agentSummary: summary,
     });
-    if (!updated) return reply.status(404).send({ message: "Change not found" });
-    wsHub.broadcast({ type: "change:updated", payload: updated });
-    return updated;
+    const result = { ...change };
+
+    // Remove the implemented change from the store
+    store.removeChange(id);
+    wsHub.broadcast({ type: "change:deleted", payload: { id } });
+
+    // If no more changes remain, clear all DOM changes too
+    if (store.getChanges().length === 0) {
+      const domChanges = store.getDomChanges();
+      store.clearDomChanges();
+      for (const dc of domChanges) {
+        wsHub.broadcast({ type: "dom:deleted", payload: { id: dc.id } });
+      }
+    }
+
+    return result;
   });
 
   app.get("/api/dom-changes", async () => {
