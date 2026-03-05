@@ -295,9 +295,13 @@ export function IterateOverlay({
   // Handle element selection from ElementPicker (click / ctrl+click)
   const handleElementSelect = useCallback(
     (elements: PickedElement[], clickPos?: { x: number; y: number }) => {
-      setSelectedElements(elements);
+      const scroll = getScrollOffset();
+      // Convert viewport rects to page coordinates so highlights scroll with the page
+      setSelectedElements(elements.map((el) => ({
+        ...el,
+        rect: { ...el.rect, x: el.rect.x + scroll.x, y: el.rect.y + scroll.y },
+      })));
       if (clickPos) {
-        const scroll = getScrollOffset();
         setClickPosition({ x: clickPos.x + scroll.x, y: clickPos.y + scroll.y });
       }
     },
@@ -307,9 +311,13 @@ export function IterateOverlay({
   // Handle marquee selection (replaces the current selection)
   const handleMarqueeSelect = useCallback(
     (elements: PickedElement[]) => {
-      setSelectedElements(elements);
+      const scroll = getScrollOffset();
+      // Convert viewport rects to page coordinates
+      setSelectedElements(elements.map((el) => ({
+        ...el,
+        rect: { ...el.rect, x: el.rect.x + scroll.x, y: el.rect.y + scroll.y },
+      })));
       if (elements.length > 0) {
-        const scroll = getScrollOffset();
         let maxRight = -Infinity, sumY = 0;
         for (const el of elements) {
           const r = el.rect;
@@ -333,9 +341,13 @@ export function IterateOverlay({
   // Handle marker drawing completion
   const handleDrawComplete = useCallback(
     (elements: PickedElement[], drawing: DrawingData) => {
-      setSelectedElements(elements);
-      setActiveDrawing(drawing);
       const scroll = getScrollOffset();
+      // Convert viewport rects to page coordinates
+      setSelectedElements(elements.map((el) => ({
+        ...el,
+        rect: { ...el.rect, x: el.rect.x + scroll.x, y: el.rect.y + scroll.y },
+      })));
+      setActiveDrawing(drawing);
       const startMatch = drawing.path.match(/^M\s+([\d.]+)\s+([\d.]+)/);
       if (startMatch) {
         setClickPosition({
@@ -384,10 +396,10 @@ export function IterateOverlay({
           : { x: clickPosition.x, y: clickPosition.y };
       } else if (selectedElements.length > 0) {
         const el = selectedElements[0]!;
-        // el.rect is already in viewport coords (from getBoundingClientRect)
+        // el.rect is already in page coordinates
         pagePos = fixed
-          ? { x: el.rect.x + el.rect.width / 2, y: el.rect.y + el.rect.height / 2 }
-          : { x: el.rect.x + el.rect.width / 2 + scroll.x, y: el.rect.y + el.rect.height / 2 + scroll.y };
+          ? { x: el.rect.x - scroll.x + el.rect.width / 2, y: el.rect.y - scroll.y + el.rect.height / 2 }
+          : { x: el.rect.x + el.rect.width / 2, y: el.rect.y + el.rect.height / 2 };
       } else if (activeDrawing) {
         pagePos = {
           x: activeDrawing.bounds.x + activeDrawing.bounds.width / 2 + scroll.x,
@@ -708,23 +720,6 @@ export function IterateOverlay({
         }}
       />
 
-      {/* Persistent selection frames — shown while annotating so user maintains context. */}
-      {isAnnotating && !activeDrawing && selectedElements.map((el, i) => (
-        <div
-          key={`sel-frame-${i}`}
-          style={{
-            position: "absolute",
-            left: el.rect.x,
-            top: el.rect.y,
-            width: el.rect.width,
-            height: el.rect.height,
-            border: "1.5px solid #6b9eff",
-            borderRadius: 4,
-            pointerEvents: "none",
-            boxSizing: "border-box",
-          }}
-        />
-      ))}
 
       {/* Persistent drawing stroke while annotating */}
       {isAnnotating && activeDrawing && (
@@ -757,6 +752,59 @@ export function IterateOverlay({
         Hidden when toolbar is closed. */}
     {visible && markersLayer && createPortal(
       <>
+        {/* Selected element highlights — page coordinates so they scroll with the page */}
+        {selectedElements.map((el, i) => {
+          const px = el.rect.x;
+          const py = el.rect.y;
+          return (
+            <React.Fragment key={el.selector + i}>
+              <div
+                style={{
+                  position: "absolute",
+                  left: px,
+                  top: py,
+                  width: el.rect.width,
+                  height: el.rect.height,
+                  border: "1.5px solid #6b9eff",
+                  backgroundColor: "rgba(107, 158, 255, 0.06)",
+                  borderRadius: 4,
+                  pointerEvents: "none",
+                  boxSizing: "border-box",
+                }}
+              />
+              <div
+                style={{
+                  position: "absolute",
+                  left: px,
+                  top: py - 26,
+                  background: "#6b9eff",
+                  color: "#fff",
+                  padding: "2px 8px",
+                  borderRadius: 4,
+                  fontSize: 10,
+                  fontFamily: "monospace",
+                  whiteSpace: "nowrap",
+                  pointerEvents: "none",
+                  display: "flex",
+                  gap: 6,
+                  alignItems: "center",
+                  maxWidth: 400,
+                  overflow: "hidden",
+                }}
+              >
+                <span style={{ fontWeight: 700 }}>
+                  {el.elementName}
+                </span>
+                {el.sourceLocation && (
+                  <span style={{ opacity: 0.7, fontSize: 9 }}>
+                    {el.sourceLocation}
+                  </span>
+                )}
+              </div>
+            </React.Fragment>
+          );
+        })}
+
         {/* Selection panel + preview badge — rendered here so they share the same
             absolute coordinate system as the saved badges and scroll with the page */}
         <SelectionPanel
