@@ -10,7 +10,7 @@ export default function AcknowledgementsPage() {
     <>
       <h1>Acknowledgements</h1>
 
-      <h2>Agentation</h2>
+      <h2><a href="https://agentation.dev" target="_blank" rel="noopener noreferrer">Agentation</a></h2>
       <p>
         <strong>iterate</strong> builds on the foundational agent-interface that the{" "}
         <a href="https://agentation.dev" target="_blank" rel="noopener noreferrer">

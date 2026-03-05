@@ -20,6 +20,15 @@
   --color-border-nav: #dddcda;
   --color-accent: #1a1a1a;
   --color-primary: #1a1a1a;
+
+  /* Toolbar mockup — matches overlay theme.ts light palette */
+  --toolbar-panel-bg: #f7f7f7;
+  --toolbar-bg: #fff;
+  --toolbar-active-bg: #e8e8e8;
+  --toolbar-border: #e0e0e0;
+  --toolbar-icon-default: #666;
+  --toolbar-icon-hover: #141414;
+  --toolbar-text-tertiary: #999;
 }
 
 /* Dark theme */
@@ -35,6 +44,15 @@
   --color-border-nav: #3a3a3a;
   --color-accent: #e8e8e8;
   --color-primary: #e8e8e8;
+
+  /* Toolbar mockup — matches overlay theme.ts dark palette */
+  --toolbar-panel-bg: #1e1e1e;
+  --toolbar-bg: #2a2a2a;
+  --toolbar-active-bg: #3a3a3a;
+  --toolbar-border: #3a3a3a;
+  --toolbar-icon-default: #999;
+  --toolbar-icon-hover: #e0e0e0;
+  --toolbar-text-tertiary: #666;
 }
 
 *,
@@ -65,6 +83,11 @@ a {
 }
 
 a:hover {
+  text-decoration: underline;
+}
+
+article p a,
+article li a {
   text-decoration: underline;
 }
 

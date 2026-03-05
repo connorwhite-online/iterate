@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { CodeBlock } from "@/components/CodeBlock";
 import { Callout } from "@/components/Callout";
-import { ForkIcon, SendIcon, PickIcon, DiscardIcon } from "@/lib/icons";
+import { MermaidDiagram } from "@/components/MermaidDiagram";
+import { ForkIcon, PickIcon, DiscardIcon } from "@/lib/icons";
 
 export const metadata: Metadata = {
   title: "Worktrees as iterations",
@@ -17,6 +18,45 @@ export default function WorktreeWorkflowPage() {
         allowing you to ideate in parallel easily.
       </p>
 
+      <h2>How it works</h2>
+      <MermaidDiagram
+        code={`
+graph TD
+  subgraph repo ["Your Repository"]
+    base["Base Branch"]
+    base -->|git worktree add| wt1[".iterate/worktrees/v1"]
+    base -->|git worktree add| wt2[".iterate/worktrees/v2"]
+    base -->|git worktree add| wt3[".iterate/worktrees/v3"]
+  end
+
+  subgraph servers ["Dev Servers"]
+    wt1 -->|npm run dev| s1[":3100"]
+    wt2 -->|npm run dev| s2[":3101"]
+    wt3 -->|npm run dev| s3[":3102"]
+  end
+
+  subgraph toolbar ["Iterate Toolbar (browser)"]
+    s1 -->|iframe| tab1["Tab 1"]
+    s2 -->|iframe| tab2["Tab 2"]
+    s3 -->|iframe| tab3["Tab 3"]
+    tab1 --- overlay["Icon Toolbar"]
+    tab2 --- overlay
+    tab3 --- overlay
+  end
+
+  overlay -->|submit changes| agent["Claude Code"]
+  agent -->|edit files| wt1
+  agent -->|edit files| wt2
+  agent -->|edit files| wt3
+`}
+      />
+      <p>
+        Each iteration is a full git worktree with its own branch, dev server, and port.
+        The toolbar loads each server in an iframe and layers an interactive overlay on top
+        for selecting elements, adding annotations, and dragging components. When you submit
+        feedback, Claude Code edits the source files directly and the dev server hot-reloads.
+      </p>
+
       <h2>From the toolbar:</h2>
       <p>
         The fastest way to create and manage iterations is through the toolbar overlay.
@@ -24,16 +64,14 @@ export default function WorktreeWorkflowPage() {
 
       <h3>1. Create iterations</h3>
       <p>
-        Click <strong><ForkIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Fork</strong> in the toolbar to create 3 iteration worktrees from a prompt.
-        Each gets its own git branch, installs dependencies, and starts a dev server on a unique port
-        (3100, 3101, 3102, ...). Tabs appear at the top of the toolbar so you can switch between them.
+        Click <strong><ForkIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Fork</strong> in the toolbar to create 3 iteration worktrees.
+        Each gets its own branch, dev server, and port. Tabs appear so you can switch between them.
       </p>
 
       <h3>2. Review and refine</h3>
       <p>
         Switch between iteration tabs to compare. Select elements, describe what you want changed, drag things around.
-        Each change is scoped to the active iteration tab. When you&apos;re ready, click <strong><SendIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Send</strong> to
-        submit your feedback:
+        Each change is scoped to the active iteration tab. When you&apos;re ready, run the slash command:
       </p>
       <CodeBlock
         code={`/iterate:go`}
@@ -41,7 +79,7 @@ export default function WorktreeWorkflowPage() {
       />
       <p>
         The agent reads all pending changes, modifies the code, and the dev server hot-reloads.
-        You see results immediately. Repeat as many times as needed.
+        You see results immediately. Rinse and repeat endlessly.
       </p>
 
       <h3>3. Pick a direction</h3>
@@ -57,7 +95,7 @@ export default function WorktreeWorkflowPage() {
       <p>
         The <strong><DiscardIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Discard</strong> button does the opposite — it keeps the original and removes
         all iteration worktrees. Both <strong><PickIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Pick</strong> and <strong><DiscardIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Discard</strong> clean up
-        worktrees regardless of where they live (see auto-discovery below).
+        worktrees regardless of where they live (see <a href="#auto-discovery">auto-discovery</a> below).
       </p>
 
       <hr />
@@ -68,7 +106,7 @@ export default function WorktreeWorkflowPage() {
       </p>
       <ul>
         <li>
-          <code>/iterate:prompt</code> — create multiple iteration worktrees from a design prompt, each with its own dev server
+          <code>/iterate:prompt</code> — create multiple iteration worktrees from a verbal prompt, if you have an initial concept you want to riff on
         </li>
         <li>
           <code>/iterate:go</code> — implement all pending changes from the toolbar overlay
@@ -80,7 +118,45 @@ export default function WorktreeWorkflowPage() {
 
       <hr />
 
-      <h2>Auto-discovery</h2>
+      <h1>Improving on worktree management</h1>
+      <p>
+        Claude Code already supports git worktrees, but they only contain committed files.
+        If you have uncommitted edits, untracked components, or gitignored config like <code>.env.local</code>,
+        a vanilla worktree starts from a blank slate. <strong>iterate</strong> fixes this by
+        automatically copying your full working state into every new worktree — so each
+        iteration begins exactly where you left off.
+      </p>
+
+      <MermaidDiagram
+        code={`
+graph LR
+  root["Project Root"] --> committed["Committed Files"]
+  root --> uncommitted["Uncommitted Edits"]
+  root --> untracked["Untracked Files"]
+  root --> envfiles["Gitignored Configs"]
+
+  committed --> wt["New Worktree"]
+  uncommitted --> wt
+  untracked --> wt
+  envfiles --> wt
+
+  style committed fill:#e8e8e8,stroke:#999,color:#555
+  style uncommitted fill:#d4edda,stroke:#28a745,color:#155724
+  style untracked fill:#d4edda,stroke:#28a745,color:#155724
+  style envfiles fill:#d4edda,stroke:#28a745,color:#155724
+`}
+      />
+
+      <p>
+        This is a fundamental step-change: without it, every worktree needs manual setup —
+        re-applying patches, recreating config files, re-installing dependencies with the right
+        environment. With <strong>iterate</strong>, you fork your exact working state and start
+        jamming immediately.
+      </p>
+
+      <hr />
+
+      <h2 id="auto-discovery">Auto-discovery</h2>
       <p>
         <strong>iterate</strong> automatically discovers worktrees in two locations:
       </p>
@@ -154,8 +230,7 @@ export default function WorktreeWorkflowPage() {
         <li>Run <code>/iterate:prompt &quot;Create 3 distinct hero sections&quot;</code> or press the <strong><ForkIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Fork</strong> button on the toolbar.</li>
         <li>Switch between tabs in the toolbar to compare.</li>
         <li>Select elements, annotate what you&apos;d change, drag things around.</li>
-        <li>Click <strong><SendIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Send</strong> to submit your feedback.</li>
-        <li>Run <code>/iterate:go</code> in your Claude session and the agent implements all submitted changes, and the dev server hot-reloads.</li>
+        <li>Run <code>/iterate:go</code> in your Claude session — the agent reads all pending changes, implements them, and the dev server hot-reloads.</li>
         <li>Satisfied with an iteration? Press <strong><PickIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Pick</strong> in the toolbar or enter <code>/iterate:keep &lt;tab-name&gt;</code> in your chat session.</li>
         <li>The preferred branch is merged to base and other worktrees are removed. Or use <strong><DiscardIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Discard</strong> in the Original tab to delete all worktrees and keep the base changes.</li>
       </ol>

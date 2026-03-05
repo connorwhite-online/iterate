@@ -29,8 +29,8 @@ export default function ToolbarPage() {
 
       {/* Dummy toolbar matching the real overlay */}
       <div style={{ display: "flex", justifyContent: "center", margin: "1.5rem 0" }}>
-      <div style={{
-        background: "var(--color-bg-nav)",
+      <div className="toolbar-mockup" style={{
+        background: "var(--toolbar-panel-bg)",
         border: "none",
         borderRadius: 12,
         boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
@@ -56,8 +56,8 @@ export default function ToolbarPage() {
               display: "flex", alignItems: "center", gap: 4,
               maxWidth: 80, padding: "1px 8px", borderRadius: 6,
               border: "1px solid transparent",
-              background: tab.active ? "var(--color-bg-code)" : "transparent",
-              color: tab.active ? "var(--color-text)" : "var(--color-text-secondary)",
+              background: tab.active ? "var(--toolbar-active-bg)" : "transparent",
+              color: tab.active ? "var(--toolbar-icon-hover)" : "var(--toolbar-icon-default)",
               cursor: "pointer", fontSize: 11, fontWeight: 500,
               whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flexShrink: 0,
             }}>
@@ -69,63 +69,63 @@ export default function ToolbarPage() {
         {/* Main toolbar row */}
         <div style={{
           display: "flex", alignItems: "center",
-          background: "var(--color-bg)", border: "1px solid var(--color-border)", borderRadius: 10, padding: 4,
+          background: "var(--toolbar-bg)", border: "1px solid var(--toolbar-border)", borderRadius: 10, padding: 4,
         }}>
           {/* Annotation tools: Select, Draw, Move */}
           <span title="Select" style={{
             display: "flex", alignItems: "center", justifyContent: "center",
             padding: 4, borderRadius: 8, border: "none",
-            background: "var(--color-bg-code)", color: "var(--color-text)", cursor: "pointer",
+            background: "var(--toolbar-active-bg)", color: "var(--toolbar-icon-hover)", cursor: "pointer",
           }}><CursorIcon size={24} /></span>
           <span title="Draw" style={{
             display: "flex", alignItems: "center", justifyContent: "center",
             padding: 4, borderRadius: 8, border: "none",
-            background: "transparent", color: "var(--color-text-secondary)", cursor: "pointer",
+            background: "transparent", color: "var(--toolbar-icon-default)", cursor: "pointer",
           }}><MarkerIcon size={24} /></span>
           <span title="Move" style={{
             display: "flex", alignItems: "center", justifyContent: "center",
             padding: 4, borderRadius: 8, border: "none",
-            background: "transparent", color: "var(--color-text-secondary)", cursor: "pointer",
+            background: "transparent", color: "var(--toolbar-icon-default)", cursor: "pointer",
           }}><MoveIcon size={24} /></span>
 
           {/* Divider */}
-          <span style={{ width: 1, height: 20, background: "var(--color-border)", margin: "0 2px", flexShrink: 0 }} />
+          <span style={{ width: 1, height: 20, background: "var(--toolbar-border)", margin: "0 2px", flexShrink: 0 }} />
 
-          {/* Change tools: Undo, Clear, Copy, Send(+badge) */}
+          {/* Change tools: Undo, Clear, Copy */}
           <span title="Undo" style={{
             display: "flex", alignItems: "center", justifyContent: "center",
             padding: 4, borderRadius: 8, border: "none",
-            background: "transparent", color: "var(--color-text-secondary)", cursor: "pointer",
+            background: "transparent", color: "var(--toolbar-icon-default)", cursor: "pointer",
           }}><UndoIcon size={24} /></span>
           <span title="Clear" style={{
             display: "flex", alignItems: "center", justifyContent: "center",
             padding: 4, borderRadius: 8, border: "none",
-            background: "transparent", color: "var(--color-text-secondary)", cursor: "pointer",
+            background: "transparent", color: "var(--toolbar-icon-default)", cursor: "pointer",
           }}><TrashIcon size={24} /></span>
           <span title="Copy" style={{
             display: "flex", alignItems: "center", justifyContent: "center",
             padding: 4, borderRadius: 8, border: "none",
-            background: "transparent", color: "var(--color-text-secondary)", cursor: "pointer",
+            background: "transparent", color: "var(--toolbar-icon-default)", cursor: "pointer",
           }}><CopyIcon size={24} /></span>
 
           {/* Divider */}
-          <span style={{ width: 1, height: 20, background: "var(--color-border)", margin: "0 2px", flexShrink: 0 }} />
+          <span style={{ width: 1, height: 20, background: "var(--toolbar-border)", margin: "0 2px", flexShrink: 0 }} />
 
           {/* Branching: Pick (shown when viewing iteration) */}
           <span title="Pick" style={{
             display: "flex", alignItems: "center", justifyContent: "center",
             padding: 4, borderRadius: 8, border: "none",
-            background: "transparent", color: "var(--color-text-secondary)", cursor: "pointer",
+            background: "transparent", color: "var(--toolbar-icon-default)", cursor: "pointer",
           }}><PickIcon size={24} /></span>
 
           {/* Divider */}
-          <span style={{ width: 1, height: 20, background: "var(--color-border)", margin: "0 2px", flexShrink: 0 }} />
+          <span style={{ width: 1, height: 20, background: "var(--toolbar-border)", margin: "0 2px", flexShrink: 0 }} />
 
           {/* Close */}
           <span title="Close toolbar" style={{
             display: "flex", alignItems: "center", justifyContent: "center",
             padding: 4, borderRadius: 8, border: "none",
-            background: "transparent", color: "var(--color-text-tertiary)", cursor: "pointer",
+            background: "transparent", color: "var(--toolbar-text-tertiary)", cursor: "pointer",
           }}><CloseIcon size={24} /></span>
         </div>
       </div>
@@ -199,9 +199,9 @@ export default function ToolbarPage() {
         When multiple iterations, or worktrees, exist, tabs appear at the top of the toolbar. Each tab
         shows the iteration name and a colored status dot:
       </p>
-      <div style={{
+      <div className="toolbar-mockup" style={{
         display: "inline-flex", alignItems: "center", gap: 2,
-        background: "var(--color-bg-nav)", borderRadius: 8, padding: 4,
+        background: "var(--toolbar-panel-bg)", borderRadius: 8, padding: 4,
         marginBottom: "1.5rem",
         fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
       }}>
@@ -213,10 +213,10 @@ export default function ToolbarPage() {
         ].map((tab) => (
           <span key={tab.name} style={{
             display: "flex", alignItems: "center", gap: 4,
-            padding: "3px 8px", borderRadius: 6,
+            padding: "1px 8px", borderRadius: 6,
             border: "1px solid transparent",
-            background: tab.active ? "var(--color-bg-code)" : "transparent",
-            color: tab.active ? "var(--color-text)" : "var(--color-text-secondary)",
+            background: tab.active ? "var(--toolbar-active-bg)" : "transparent",
+            color: tab.active ? "var(--toolbar-icon-hover)" : "var(--toolbar-icon-default)",
             cursor: "pointer", fontSize: 11, fontWeight: 500,
           }}>
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: tab.color, flexShrink: 0 }} />

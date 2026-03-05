@@ -24,10 +24,8 @@ export async function MermaidDiagram({ code, style }: MermaidDiagramProps) {
     .replace(/\bwidth="[^"]*"/, "")
     .replace(/\bheight="[^"]*"/, "")
     .replace(/style="/, 'style="width:100%;height:auto;display:block;')
-    .replace(
-      /(<g class="subgraph"[^>]*>[\s\S]*?<rect[^>]*?)rx="0" ry="0"([^>]*>[\s\S]*?<rect[^>]*?)rx="0" ry="0"/g,
-      "$1rx=\"8\" ry=\"8\"$2rx=\"8\" ry=\"8\"",
-    );
+    .replace(/(<rect[^>]*?)rx="0"([^>]*?)ry="0"/g, '$1rx="8"$2ry="8"')
+    .replace(/(<rect(?![^>]*rx=")[^>]*)(\/?>)/g, '$1 rx="8" ry="8" $2');
 
   return (
     <div

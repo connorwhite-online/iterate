@@ -12,10 +12,31 @@
   max-width: var(--content-max-width);
   margin: 0 auto;
   padding: 1.5rem 1.5rem;
-  border-top: 1px solid var(--color-border);
-  text-align: center;
+  background: var(--color-bg-nav);
+  border-radius: 12px 12px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   font-size: 0.85rem;
   color: var(--color-text-tertiary);
+}
+
+.footerLinks {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.footerLinks a {
+  display: flex;
+  align-items: center;
+  color: var(--color-text-tertiary);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.footerLinks a:hover {
+  color: var(--color-text);
 }
 
 .footer a {

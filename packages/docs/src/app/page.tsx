@@ -36,7 +36,7 @@ export default function IntroductionPage() {
       }}>
         The toolbar also includes context tools for selecting elements, annotating intent, repositioning, and drawing — built on ideas from the{" "}
         <a href="https://agentation.dev" target="_blank" rel="noopener noreferrer">Agentation</a> team.
-        See <Link href="/toolbar">Tools</Link> for details.
+        See <Link href="/toolbar">Toolbar</Link> for details.
       </p>
 
       <h2>Quick start</h2>

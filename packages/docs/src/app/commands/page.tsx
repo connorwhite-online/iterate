@@ -51,8 +51,7 @@ export default function CommandsPage() {
       <CodeBlock
         lang="text"
         code={`1. Browse your app, use the overlay to annotate feedback
-2. Click Send to submit the batch
-3. /iterate:go — agent reads annotations, makes code changes
+2. /iterate:go — agent reads pending changes, makes code changes
 4. Dev server hot-reloads, you see results immediately
 5. Repeat until satisfied
 6. /iterate:keep v2 — merge the winner`}
