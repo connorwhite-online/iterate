@@ -13,27 +13,26 @@ export default function WorktreeWorkflowPage() {
     <>
       <h1>Worktrees as iterations</h1>
       <p>
-        <strong>iterate</strong> uses git worktrees to let you explore multiple design directions simultaneously.
-        Each variation lives in its own branch with its own dev server, and you can switch between
-        them in the toolbar to compare results side by side.
+        <strong>iterate</strong> packages git worktrees into an easily navigable toolbar system,
+        allowing you to ideate in parallel easily.
       </p>
 
-      <h2>Toolbar workflow</h2>
+      <h2>From the toolbar:</h2>
       <p>
         The fastest way to create and manage iterations is through the toolbar overlay.
       </p>
 
-      <h3>1. Fork iterations</h3>
+      <h3>1. Create iterations</h3>
       <p>
-        Click <strong style={{ display: "inline-flex", alignItems: "center", gap: "0.2rem", verticalAlign: "middle" }}><ForkIcon size={14} /> Fork</strong> in the toolbar to create 3 iteration worktrees from a prompt.
+        Click <strong><ForkIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Fork</strong> in the toolbar to create 3 iteration worktrees from a prompt.
         Each gets its own git branch, installs dependencies, and starts a dev server on a unique port
         (3100, 3101, 3102, ...). Tabs appear at the top of the toolbar so you can switch between them.
       </p>
 
-      <h3>2. Annotate and refine</h3>
+      <h3>2. Review and refine</h3>
       <p>
-        Switch between iteration tabs to compare. Select elements, add annotations, drag things around.
-        Each annotation is scoped to the active iteration tab. When you&apos;re ready, click <strong style={{ display: "inline-flex", alignItems: "center", gap: "0.2rem", verticalAlign: "middle" }}><SendIcon size={14} /> Send</strong> to
+        Switch between iteration tabs to compare. Select elements, describe what you want changed, drag things around.
+        Each change is scoped to the active iteration tab. When you&apos;re ready, click <strong><SendIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Send</strong> to
         submit your feedback:
       </p>
       <CodeBlock
@@ -41,13 +40,13 @@ export default function WorktreeWorkflowPage() {
         noCopy
       />
       <p>
-        The agent reads your annotations, modifies the code, and the dev server hot-reloads.
+        The agent reads all pending changes, modifies the code, and the dev server hot-reloads.
         You see results immediately. Repeat as many times as needed.
       </p>
 
       <h3>3. Pick a direction</h3>
       <p>
-        Once you favor a direction, click <strong style={{ display: "inline-flex", alignItems: "center", gap: "0.2rem", verticalAlign: "middle" }}><PickIcon size={14} /> Pick</strong> in the toolbar or run the command.
+        Once you favor a direction, click <strong><PickIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Pick</strong> in the toolbar or run the <code>/iterate:keep &lt;tab/worktree-name&gt;</code> command.
         The desired branch merges back to the base branch and all other worktrees and branches are
         removed. You&apos;re left with a single codebase.
       </p>
@@ -56,26 +55,28 @@ export default function WorktreeWorkflowPage() {
         noCopy
       />
       <p>
-        The <strong style={{ display: "inline-flex", alignItems: "center", gap: "0.2rem", verticalAlign: "middle" }}><DiscardIcon size={14} /> Discard</strong> button does the opposite — it keeps the original and removes
-        all iteration worktrees. Both <strong style={{ display: "inline-flex", alignItems: "center", gap: "0.2rem", verticalAlign: "middle" }}><PickIcon size={14} /> Pick</strong> and <strong style={{ display: "inline-flex", alignItems: "center", gap: "0.2rem", verticalAlign: "middle" }}><DiscardIcon size={14} /> Discard</strong> clean up
+        The <strong><DiscardIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Discard</strong> button does the opposite — it keeps the original and removes
+        all iteration worktrees. Both <strong><PickIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Pick</strong> and <strong><DiscardIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Discard</strong> clean up
         worktrees regardless of where they live (see auto-discovery below).
       </p>
 
       <hr />
 
-      <h2>CLI workflow</h2>
+      <h2>From the command line:</h2>
       <p>
-        You can also manage worktrees directly from the terminal:
+        You can also manage iterations through slash commands in your Claude Code session:
       </p>
-      <CodeBlock
-        lang="bash"
-        noCopy
-        code={`iterate branch feature-a   # create worktree + install + start dev server
-iterate branch feature-b   # another worktree on the next port
-iterate list               # show all active iterations with status
-iterate pick feature-a     # merge feature-a to base, remove all others
-iterate stop               # shut down daemon + all dev servers`}
-      />
+      <ul>
+        <li>
+          <code>/iterate:prompt</code> — create multiple iteration worktrees from a design prompt, each with its own dev server
+        </li>
+        <li>
+          <code>/iterate:go</code> — implement all pending changes from the toolbar overlay
+        </li>
+        <li>
+          <code>/iterate:keep</code> — choose a preferred iteration to merge back to the base branch and clean up the rest
+        </li>
+      </ul>
 
       <hr />
 
@@ -95,7 +96,7 @@ iterate stop               # shut down daemon + all dev servers`}
         </li>
       </ul>
       <p>
-        The <strong style={{ display: "inline-flex", alignItems: "center", gap: "0.2rem", verticalAlign: "middle" }}><PickIcon size={14} /> Pick</strong> and <strong style={{ display: "inline-flex", alignItems: "center", gap: "0.2rem", verticalAlign: "middle" }}><DiscardIcon size={14} /> Discard</strong> toolbar buttons work across both
+        The <strong><PickIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Pick</strong> and <strong><DiscardIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Discard</strong> toolbar buttons work across both
         locations — merging or removing all discovered iteration worktrees regardless of where
         they were created.
       </p>
@@ -108,27 +109,56 @@ iterate stop               # shut down daemon + all dev servers`}
         </p>
       </Callout>
 
-      <h2>Example session</h2>
+      <h2>Copying uncommitted files into worktrees</h2>
+      <p>
+        Git worktrees only contain committed files from the current branch. To ensure each iteration
+        starts with the same working state as your current checkout, <strong>iterate</strong> automatically
+        copies two categories of files from the project root into every new worktree:
+      </p>
+
+      <h3>1. Uncommitted changes</h3>
+      <p>
+        All modified, staged, and untracked files detected by <code>git status</code> are copied into
+        each new worktree automatically. This means your in-progress work (edited source files,
+        new components, updated configs) is available in every iteration from the start. Deleted files
+        are also reflected in the worktree.
+      </p>
+
+      <h3>2. Config files (<code>copyFiles</code>)</h3>
+      <p>
+        Some files like <code>.env.local</code> are gitignored and won&apos;t appear in <code>git status</code>,
+        but dev servers still depend on them. The <code>copyFiles</code> config option handles these by
+        copying matching files from your project root into each new worktree. By default it copies
+        all <code>.env*</code> files:
+      </p>
       <CodeBlock
-        lang="text"
-        noCopy
-        code={`# Fork 3 variations of the hero section from the toolbar
-# → hero-minimal on :3101
-# → hero-bold on :3102
-# → hero-illustrated on :3103
-
-# Switch between tabs in the toolbar to compare
-# Select elements, annotate what you'd change, drag things around
-
-# Submit feedback on hero-bold
-# Click Send → /iterate:go
-# Agent reads annotations, modifies code, dev server hot-reloads
-
-# Satisfied with hero-bold — pick it
-/iterate:keep hero-bold
-
-# hero-bold merges to base, other worktrees are removed`}
+        lang="json"
+        filename=".iterate/config.json"
+        code={`{
+  "copyFiles": [".env*"]
+}`}
       />
+      <p>
+        You can add additional glob patterns for other untracked files your dev server needs:
+      </p>
+      <CodeBlock
+        lang="json"
+        filename=".iterate/config.json"
+        code={`{
+  "copyFiles": [".env*", "credentials/**", "*.local"]
+}`}
+      />
+
+      <h2>Example session</h2>
+      <ol>
+        <li>Run <code>/iterate:prompt &quot;Create 3 distinct hero sections&quot;</code> or press the <strong><ForkIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Fork</strong> button on the toolbar.</li>
+        <li>Switch between tabs in the toolbar to compare.</li>
+        <li>Select elements, annotate what you&apos;d change, drag things around.</li>
+        <li>Click <strong><SendIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Send</strong> to submit your feedback.</li>
+        <li>Run <code>/iterate:go</code> in your Claude session and the agent implements all submitted changes, and the dev server hot-reloads.</li>
+        <li>Satisfied with an iteration? Press <strong><PickIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Pick</strong> in the toolbar or enter <code>/iterate:keep &lt;tab-name&gt;</code> in your chat session.</li>
+        <li>The preferred branch is merged to base and other worktrees are removed. Or use <strong><DiscardIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Discard</strong> in the Original tab to delete all worktrees and keep the base changes.</li>
+      </ol>
     </>
   );
 }

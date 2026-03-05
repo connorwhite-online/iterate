@@ -59,6 +59,11 @@ export default function InstallationPage() {
         If you prefer to configure things yourself:
       </p>
 
+      <h3>Install</h3>
+      <CodeBlock
+        code={`npm i iterate-ui`}
+      />
+
       <h3>Initialize</h3>
       <CodeBlock
         code={`npx iterate init`}
@@ -144,6 +149,26 @@ export default defineConfig({
       <p>
         If you&apos;re using a different MCP-compatible agent, point it at the <code>iterate-mcp</code> binary.
       </p>
+
+      <h2>Packages</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Package</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>iterate-ui-core</code></td><td>Shared types, WebSocket protocol, batch formatter</td></tr>
+          <tr><td><code>iterate-ui-cli</code></td><td>CLI commands: init, branch, list, pick, serve, stop</td></tr>
+          <tr><td><code>iterate-ui-daemon</code></td><td>Fastify server: worktree manager, reverse proxy, WebSocket hub</td></tr>
+          <tr><td><code>iterate-ui-overlay</code></td><td>React overlay: toolbar, selection panel, annotation badges, move tool</td></tr>
+          <tr><td><code>iterate-ui-mcp</code></td><td>MCP server for AI agent integration</td></tr>
+          <tr><td><code>iterate-ui-vite</code></td><td>Vite plugin — auto-injects overlay in dev mode</td></tr>
+          <tr><td><code>iterate-ui-next</code></td><td>Next.js plugin — auto-injects overlay in dev mode</td></tr>
+          <tr><td><code>iterate-ui-babel-plugin</code></td><td>Babel plugin — injects component names + source locations</td></tr>
+        </tbody>
+      </table>
     </>
   );
 }

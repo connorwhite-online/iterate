@@ -18,7 +18,7 @@
 
 /* Header: logo + npm/github row */
 .header {
-  padding: 12px;
+  padding: 8px 12px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -26,6 +26,9 @@
 
 .logoLink {
   text-decoration: none;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--color-text);
 }
 
 .logoLink:hover {
@@ -34,7 +37,7 @@
 
 .externalLinks {
   display: flex;
-  gap: 8px;
+  gap: 4px;
 }
 
 .externalLink {
@@ -75,14 +78,42 @@
 }
 
 .link:hover {
-  color: var(--color-text);
+  color: var(--color-primary);
   text-decoration: none;
 }
 
 .linkActive {
   color: var(--color-text);
-  font-weight: 600;
   background: var(--color-bg-nav);
+}
+
+/* Theme toggle */
+.themeToggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin: 0 auto 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: color 0.15s, transform 0.2s ease, opacity 0.2s ease, filter 0.2s ease;
+  transform: scale(1);
+  opacity: 1;
+  filter: blur(0);
+}
+
+.themeToggle:hover {
+  color: var(--color-text);
+}
+
+.themeToggleOut {
+  transform: scale(0.8);
+  opacity: 0;
+  filter: blur(4px);
 }
 
 /* Hide on narrow screens where nav would overlap content */

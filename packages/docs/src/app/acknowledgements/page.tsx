@@ -12,18 +12,13 @@ export default function AcknowledgementsPage() {
 
       <h2>Agentation</h2>
       <p>
-        <strong>iterate</strong> builds on foundational agent-interface ideas from the{" "}
+        <strong>iterate</strong> builds on the foundational agent-interface that the{" "}
         <a href="https://agentation.dev" target="_blank" rel="noopener noreferrer">
           Agentation
         </a>{" "}
-        team. Their work on the annotation framework — the concept of selecting UI elements,
-        attaching structured feedback, and handing that context to AI agents — helped shape
-        the core interaction loop that makes <strong>iterate</strong> so efficient to interface with.
-      </p>
-      <p>
-        The idea that a visual overlay can bridge the gap between what a human sees and what
-        an agent needs to know is central to both projects. We&apos;re grateful for their
-        pioneering work in this space.
+        team pioneered. Their work on the Annotation Format Schema (AFS), as well as many of the
+        UI patterns that <strong>iterate</strong> uses as core components of the worktree iteration loop,
+        would not have been possible without their meticulous efforts and ideation.
       </p>
 
       <h2>Open source</h2>
@@ -33,7 +28,7 @@ export default function AcknowledgementsPage() {
       <ul>
         <li><a href="https://react.dev" target="_blank" rel="noopener noreferrer">React</a> — powers the overlay UI</li>
         <li><a href="https://fastify.dev" target="_blank" rel="noopener noreferrer">Fastify</a> — the daemon server</li>
-        <li><a href="https://modelcontextprotocol.io" target="_blank" rel="noopener noreferrer">Model Context Protocol</a> — the bridge between <strong>iterate</strong> and AI agents</li>
+        <li><a href="https://modelcontextprotocol.io" target="_blank" rel="noopener noreferrer">Model Context Protocol (MCP)</a> — the bridge between <strong>iterate</strong> and AI agents</li>
         <li><a href="https://nextjs.org" target="_blank" rel="noopener noreferrer">Next.js</a> and <a href="https://vite.dev" target="_blank" rel="noopener noreferrer">Vite</a> — supported frameworks via adapter plugins</li>
       </ul>
     </>

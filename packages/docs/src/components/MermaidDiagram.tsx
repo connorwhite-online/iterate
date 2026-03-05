@@ -31,6 +31,7 @@ export async function MermaidDiagram({ code, style }: MermaidDiagramProps) {
 
   return (
     <div
+      className="mermaid-diagram"
       style={{
         margin: "1.5rem 0",
         borderRadius: 8,

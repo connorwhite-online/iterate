@@ -4,6 +4,7 @@ import React from "react";
 interface IconProps {
   size?: number;
   color?: string;
+  style?: React.CSSProperties;
 }
 
 export function LogoIcon({ size = 24, color = "currentColor" }: IconProps) {
@@ -30,9 +31,9 @@ export function MoveIcon({ size = 24, color = "currentColor" }: IconProps) {
   );
 }
 
-export function SendIcon({ size = 24, color = "currentColor" }: IconProps) {
+export function SendIcon({ size = 24, color = "currentColor", style }: IconProps) {
   return (
-    <svg width={size} height={size} viewBox="0 -2 24 24" fill="none">
+    <svg width={size} height={size} viewBox="0 -2 24 24" fill="none" style={style}>
       <path d="M9.61946 10.8613L20.9997 4.55422M9.04735 10.9043L4.10061 5.68812C3.49632 5.05091 3.94803 4 4.82621 4H20.2513C21.0247 4 21.5054 4.84039 21.1132 5.50702L13.1902 18.9762C12.7433 19.7358 11.6035 19.5879 11.3654 18.7393L9.28458 11.3223C9.24066 11.1658 9.15923 11.0223 9.04735 10.9043Z" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/>
     </svg>
   );
@@ -54,17 +55,17 @@ export function UndoIcon({ size = 24, color = "currentColor" }: IconProps) {
   );
 }
 
-export function ForkIcon({ size = 24, color = "currentColor" }: IconProps) {
+export function ForkIcon({ size = 24, color = "currentColor", style }: IconProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={style}>
       <path d="M6.5 8C7.88071 8 9 6.88071 9 5.5C9 4.11929 7.88071 3 6.5 3C5.11929 3 4 4.11929 4 5.5C4 6.88071 5.11929 8 6.5 8ZM6.5 8V11C6.5 11.5523 6.94772 12 7.5 12H11C11.5523 12 12 12.4477 12 13M17.5 8C18.8807 8 20 6.88071 20 5.5C20 4.11929 18.8807 3 17.5 3C16.1193 3 15 4.11929 15 5.5C15 6.88071 16.1193 8 17.5 8ZM17.5 8V11C17.5 11.5523 17.0523 12 16.5 12H13C12.4477 12 12 12.4477 12 13M12 16C10.6193 16 9.5 17.1193 9.5 18.5C9.5 19.8807 10.6193 21 12 21C13.3807 21 14.5 19.8807 14.5 18.5C14.5 17.1193 13.3807 16 12 16ZM12 16V13" stroke={color} strokeWidth={2}/>
     </svg>
   );
 }
 
-export function PickIcon({ size = 24, color = "currentColor" }: IconProps) {
+export function PickIcon({ size = 24, color = "currentColor", style }: IconProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={style}>
       <path d="M6.5 8C7.88071 8 9 6.88071 9 5.5C9 4.11929 7.88071 3 6.5 3C5.11929 3 4 4.11929 4 5.5C4 6.88071 5.11929 8 6.5 8ZM6.5 8V16M6.5 16C5.11929 16 4 17.1193 4 18.5C4 19.8807 5.11929 21 6.5 21C7.88071 21 9 19.8807 9 18.5C9 17.1193 7.88071 16 6.5 16ZM17.5 16C16.1193 16 15 17.1193 15 18.5C15 19.8807 16.1193 21 17.5 21C18.8807 21 20 19.8807 20 18.5C20 17.1193 18.8807 16 17.5 16ZM17.5 16V6.5C17.5 5.94772 17.0523 5.5 16.5 5.5H12M12 5.5L14.5 3M12 5.5L14.5 8" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/>
     </svg>
   );
@@ -78,9 +79,9 @@ export function CopyIcon({ size = 24, color = "currentColor" }: IconProps) {
   );
 }
 
-export function DiscardIcon({ size = 24, color = "currentColor" }: IconProps) {
+export function DiscardIcon({ size = 24, color = "currentColor", style }: IconProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={style}>
       <path d="M11.2479 10L15.2496 14.0017M15.2513 10L11.2496 14.0017M3.41478 11.4188L7.7005 5.41876C7.88821 5.15597 8.19128 5 8.51423 5H19.9996C20.5519 5 20.9996 5.44772 20.9996 6V18C20.9996 18.5523 20.5519 19 19.9996 19H8.51423C8.19128 19 7.88821 18.844 7.7005 18.5812L3.41478 12.5812C3.16643 12.2335 3.16643 11.7665 3.41478 11.4188Z" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/>
     </svg>
   );

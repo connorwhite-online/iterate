@@ -13,7 +13,7 @@ export const navigation: NavSection[] = [
     links: [
       { title: "Introduction", href: "/" },
       { title: "Installation", href: "/installation" },
-      { title: "Tools", href: "/toolbar" },
+      { title: "Toolbar", href: "/toolbar" },
       { title: "Worktrees", href: "/worktree-workflow" },
       { title: "Providing Context", href: "/providing-context" },
       { title: "Commands & CLI", href: "/commands" },

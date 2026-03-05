@@ -1,4 +1,14 @@
 :root {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: "SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, monospace;
+
+  --content-max-width: 600px;
+  --nav-gap: 48px;
+}
+
+/* Light theme (default) */
+:root,
+[data-theme="light"] {
   --color-bg: #faf9f7;
   --color-bg-code: #f0efed;
   --color-bg-nav: #f0efed;
@@ -9,12 +19,22 @@
   --color-border: #e5e4e2;
   --color-border-nav: #dddcda;
   --color-accent: #1a1a1a;
+  --color-primary: #1a1a1a;
+}
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --font-mono: "SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, monospace;
-
-  --content-max-width: 600px;
-  --nav-gap: 48px;
+/* Dark theme */
+[data-theme="dark"] {
+  --color-bg: #1a1a1a;
+  --color-bg-code: #2a2a2a;
+  --color-bg-nav: #242424;
+  --color-bg-nav-inner: var(--color-bg);
+  --color-text: #e8e8e8;
+  --color-text-secondary: #999999;
+  --color-text-tertiary: #6b6b6b;
+  --color-border: #333333;
+  --color-border-nav: #3a3a3a;
+  --color-accent: #e8e8e8;
+  --color-primary: #e8e8e8;
 }
 
 *,
@@ -138,4 +158,33 @@ hr {
 
 strong {
   font-weight: 600;
+}
+
+/* Shiki dual-theme: show light colors by default, dark when [data-theme="dark"] */
+:root,
+[data-theme="light"] {
+  --shiki-foreground: var(--shiki-light);
+  --shiki-background: var(--shiki-light-bg);
+}
+
+[data-theme="dark"] {
+  --shiki-foreground: var(--shiki-dark);
+  --shiki-background: var(--shiki-dark-bg);
+}
+
+.shiki,
+.shiki span {
+  color: var(--shiki-light) !important;
+  background-color: var(--shiki-light-bg) !important;
+}
+
+[data-theme="dark"] .shiki,
+[data-theme="dark"] .shiki span {
+  color: var(--shiki-dark) !important;
+  background-color: var(--shiki-dark-bg) !important;
+}
+
+/* Mermaid diagrams: invert in dark mode */
+[data-theme="dark"] .mermaid-diagram {
+  filter: invert(0.88) hue-rotate(180deg);
 }

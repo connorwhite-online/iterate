@@ -13,7 +13,11 @@ export async function CodeBlock({ code, lang = "bash", filename, noCopy }: CodeB
   const trimmed = code.trim();
   const html = await codeToHtml(trimmed, {
     lang,
-    theme: "github-light",
+    themes: {
+      light: "github-light",
+      dark: "github-dark",
+    },
+    defaultColor: false,
   });
 
   return (

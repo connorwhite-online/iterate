@@ -1,10 +1,8 @@
 import type { Metadata } from "next";
-import { IconGrid } from "@/components/IconGrid";
 import {
   CursorIcon,
   MoveIcon,
   MarkerIcon,
-  SendIcon,
   CopyIcon,
   TrashIcon,
   UndoIcon,
@@ -15,24 +13,24 @@ import {
 } from "@/lib/icons";
 
 export const metadata: Metadata = {
-  title: "Toolbar Tools",
+  title: "Toolbar",
   description: "The iterate overlay toolbar — tool modes, batch actions, and iteration management.",
 };
 
 export default function ToolbarPage() {
   return (
     <>
-      <h1>Toolbar Tools</h1>
+      <h1 style={{ display: "flex", alignItems: "center" }}>Toolbar <kbd style={{ fontSize: "0.6em", padding: "2px 8px", borderRadius: 4, border: "1px solid var(--color-border)", background: "var(--color-bg-code)", fontWeight: 500, marginLeft: "auto" }}>⌘I</kbd></h1>
       <p>
         The overlay injects a floating panel in the bottom-right corner of your app during
         development only — it has zero production impact. It&apos;s draggable
-        to any corner and toggled with <strong>Cmd+I</strong>.
+        to any corner.
       </p>
 
       {/* Dummy toolbar matching the real overlay */}
       <div style={{ display: "flex", justifyContent: "center", margin: "1.5rem 0" }}>
       <div style={{
-        background: "#f7f7f7",
+        background: "var(--color-bg-nav)",
         border: "none",
         borderRadius: 12,
         boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
@@ -46,7 +44,7 @@ export default function ToolbarPage() {
       }}>
         {/* Iteration tabs */}
         <div style={{
-          display: "flex", alignItems: "center", gap: 2, padding: "0 2px", marginBottom: 2,
+          display: "flex", alignItems: "center", gap: 2, padding: "2px 2px", marginBottom: 2,
         }}>
           {[
             { name: "Original", active: false },
@@ -56,10 +54,10 @@ export default function ToolbarPage() {
           ].map((tab) => (
             <span key={tab.name} title={tab.name} style={{
               display: "flex", alignItems: "center", gap: 4,
-              maxWidth: 80, padding: "3px 8px", borderRadius: 6,
+              maxWidth: 80, padding: "1px 8px", borderRadius: 6,
               border: "1px solid transparent",
-              background: tab.active ? "#e8e8e8" : "transparent",
-              color: tab.active ? "#141414" : "#666",
+              background: tab.active ? "var(--color-bg-code)" : "transparent",
+              color: tab.active ? "var(--color-text)" : "var(--color-text-secondary)",
               cursor: "pointer", fontSize: 11, fontWeight: 500,
               whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flexShrink: 0,
             }}>
@@ -71,121 +69,81 @@ export default function ToolbarPage() {
         {/* Main toolbar row */}
         <div style={{
           display: "flex", alignItems: "center",
-          background: "#fff", border: "1px solid #e0e0e0", borderRadius: 10, padding: 4,
+          background: "var(--color-bg)", border: "1px solid var(--color-border)", borderRadius: 10, padding: 4,
         }}>
           {/* Annotation tools: Select, Draw, Move */}
           <span title="Select" style={{
             display: "flex", alignItems: "center", justifyContent: "center",
             padding: 4, borderRadius: 8, border: "none",
-            background: "#e0e0e0", color: "#141414", cursor: "pointer",
+            background: "var(--color-bg-code)", color: "var(--color-text)", cursor: "pointer",
           }}><CursorIcon size={24} /></span>
           <span title="Draw" style={{
             display: "flex", alignItems: "center", justifyContent: "center",
             padding: 4, borderRadius: 8, border: "none",
-            background: "transparent", color: "#666", cursor: "pointer",
+            background: "transparent", color: "var(--color-text-secondary)", cursor: "pointer",
           }}><MarkerIcon size={24} /></span>
           <span title="Move" style={{
             display: "flex", alignItems: "center", justifyContent: "center",
             padding: 4, borderRadius: 8, border: "none",
-            background: "transparent", color: "#666", cursor: "pointer",
+            background: "transparent", color: "var(--color-text-secondary)", cursor: "pointer",
           }}><MoveIcon size={24} /></span>
 
           {/* Divider */}
-          <span style={{ width: 1, height: 20, background: "#e0e0e0", margin: "0 2px", flexShrink: 0 }} />
+          <span style={{ width: 1, height: 20, background: "var(--color-border)", margin: "0 2px", flexShrink: 0 }} />
 
           {/* Change tools: Undo, Clear, Copy, Send(+badge) */}
           <span title="Undo" style={{
             display: "flex", alignItems: "center", justifyContent: "center",
             padding: 4, borderRadius: 8, border: "none",
-            background: "transparent", color: "#666", cursor: "pointer",
+            background: "transparent", color: "var(--color-text-secondary)", cursor: "pointer",
           }}><UndoIcon size={24} /></span>
           <span title="Clear" style={{
             display: "flex", alignItems: "center", justifyContent: "center",
             padding: 4, borderRadius: 8, border: "none",
-            background: "transparent", color: "#666", cursor: "pointer",
+            background: "transparent", color: "var(--color-text-secondary)", cursor: "pointer",
           }}><TrashIcon size={24} /></span>
           <span title="Copy" style={{
             display: "flex", alignItems: "center", justifyContent: "center",
             padding: 4, borderRadius: 8, border: "none",
-            background: "transparent", color: "#666", cursor: "pointer",
+            background: "transparent", color: "var(--color-text-secondary)", cursor: "pointer",
           }}><CopyIcon size={24} /></span>
-          <span title="Send" style={{
-            position: "relative",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            padding: 4, borderRadius: 8, border: "none",
-            background: "transparent", color: "#666", cursor: "pointer",
-          }}>
-            <SendIcon size={24} />
-            <span style={{
-              position: "absolute", top: -4, left: -4,
-              display: "flex", alignItems: "center", justifyContent: "center",
-              width: 16, height: 16, borderRadius: "50%",
-              background: "#2563eb", color: "#fff",
-              fontSize: 9, fontWeight: 700, lineHeight: 1,
-              fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-            }}>3</span>
-          </span>
 
           {/* Divider */}
-          <span style={{ width: 1, height: 20, background: "#e0e0e0", margin: "0 2px", flexShrink: 0 }} />
+          <span style={{ width: 1, height: 20, background: "var(--color-border)", margin: "0 2px", flexShrink: 0 }} />
 
           {/* Branching: Pick (shown when viewing iteration) */}
           <span title="Pick" style={{
             display: "flex", alignItems: "center", justifyContent: "center",
             padding: 4, borderRadius: 8, border: "none",
-            background: "transparent", color: "#666", cursor: "pointer",
+            background: "transparent", color: "var(--color-text-secondary)", cursor: "pointer",
           }}><PickIcon size={24} /></span>
 
           {/* Divider */}
-          <span style={{ width: 1, height: 20, background: "#e0e0e0", margin: "0 2px", flexShrink: 0 }} />
+          <span style={{ width: 1, height: 20, background: "var(--color-border)", margin: "0 2px", flexShrink: 0 }} />
 
           {/* Close */}
           <span title="Close toolbar" style={{
             display: "flex", alignItems: "center", justifyContent: "center",
             padding: 4, borderRadius: 8, border: "none",
-            background: "transparent", color: "#999", cursor: "pointer",
+            background: "transparent", color: "var(--color-text-tertiary)", cursor: "pointer",
           }}><CloseIcon size={24} /></span>
         </div>
       </div>
       </div>
 
-      <h2>Tool modes</h2>
+      <h2>Context tools</h2>
       <p>
         These three modes let you give context to the agent directly from the page.
       </p>
-      <IconGrid
-        items={[
-          {
-            icon: <CursorIcon size={20} />,
-            name: "Select",
-            description: "Click or marquee-select elements for annotation",
-          },
-          {
-            icon: <MarkerIcon size={20} />,
-            name: "Draw",
-            description: "Annotate freeform lines and shapes",
-          },
-          {
-            icon: <MoveIcon size={20} />,
-            name: "Move",
-            description: "Drag elements to new positions on the page",
-          },
-        ]}
-      />
 
-      <h3>Select mode</h3>
+      <h3 style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}><CursorIcon size={16} /> Select <kbd style={{ fontSize: "0.75em", padding: "1px 5px", borderRadius: 4, border: "1px solid var(--color-border)", background: "var(--color-bg-code)", fontWeight: 500, marginLeft: "auto" }}>S</kbd></h3>
       <p>
-        Click any element to select it. Hold and drag to marquee-select multiple elements.
-        Selected elements appear in the SelectionPanel that slides in from the right, showing
-        each element&apos;s React component name and source file location.
-      </p>
-      <p>
-        From the SelectionPanel, write a comment describing what you want changed and
-        click &quot;Add&quot; (or <strong>Cmd+Enter</strong>).
-        Blue numbered badges appear on annotated elements, showing the annotation count.
+        Click any element to select it, or hold and drag to marquee-select multiple elements.
+        Provide written feedback on what you want to change and click &quot;Add&quot; (or <strong>Cmd+Enter</strong>).
+        Blue numbered badges appear on annotated elements.
       </p>
 
-      <h3>Draw mode</h3>
+      <h3 style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}><MarkerIcon size={16} /> Draw <kbd style={{ fontSize: "0.75em", padding: "1px 5px", borderRadius: 4, border: "1px solid var(--color-border)", background: "var(--color-bg-code)", fontWeight: 500, marginLeft: "auto" }}>D</kbd></h3>
       <p>
         Draw freeform lines and shapes directly on the page. This mode is designed for
         looser, more free-form direction that doesn&apos;t target specific components —
@@ -193,85 +151,57 @@ export default function ToolbarPage() {
         to describe by selecting individual elements.
       </p>
 
-      <h3>Move mode</h3>
+      <h3 style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}><MoveIcon size={16} /> Move <kbd style={{ fontSize: "0.75em", padding: "1px 5px", borderRadius: 4, border: "1px solid var(--color-border)", background: "var(--color-bg-code)", fontWeight: 500, marginLeft: "auto" }}>M</kbd></h3>
       <p>
         Drag any element to a new position. Each move is recorded in the pending batch with
-        before/after coordinates. Use the Preview toggle to see the repositioned layout,
-        and Undo to revert the last move.
+        before/after coordinates.
       </p>
 
-      <h2>Undo & Clear</h2>
-      <IconGrid
-        items={[
-          {
-            icon: <UndoIcon size={20} />,
-            name: "Undo",
-            description: "Revert the last change (annotation, move, or deletion)",
-          },
-          {
-            icon: <TrashIcon size={20} />,
-            name: "Clear",
-            description: "Discard all pending annotations and moves",
-          },
-        ]}
-      />
+      <h3 style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}><UndoIcon size={16} /> Undo <kbd style={{ fontSize: "0.75em", padding: "1px 5px", borderRadius: 4, border: "1px solid var(--color-border)", background: "var(--color-bg-code)", fontWeight: 500, marginLeft: "auto" }}>U</kbd></h3>
       <p>
-        The Undo button reverts your most recent action — whether it was an annotation,
-        a drag move, or a deletion. Clear discards all pending items at once.
-        A badge shows the count of pending changes.
+        Reverts your most recent action — whether it was an annotation,
+        a drag move, or a deletion.
       </p>
 
-      <h2>Batch actions</h2>
+      <h3 style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}><TrashIcon size={16} /> Clear <kbd style={{ fontSize: "0.75em", padding: "1px 5px", borderRadius: 4, border: "1px solid var(--color-border)", background: "var(--color-bg-code)", fontWeight: 500, marginLeft: "auto" }}>X</kbd></h3>
       <p>
-        These appear when you have pending annotations or moves:
+        Discards all queued changes at once.
       </p>
-      <IconGrid
-        items={[
-          {
-            icon: <SendIcon size={20} />,
-            name: "Send",
-            description: "Submit the batch to the daemon via WebSocket",
-          },
-          {
-            icon: <CopyIcon size={20} />,
-            name: "Copy",
-            description: "Format the batch as markdown and copy to clipboard",
-          },
-        ]}
-      />
+
+      <h3 style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}><CopyIcon size={16} /> Copy <kbd style={{ fontSize: "0.75em", padding: "1px 5px", borderRadius: 4, border: "1px solid var(--color-border)", background: "var(--color-bg-code)", fontWeight: 500, marginLeft: "auto" }}>C</kbd></h3>
+      <p>
+        Copies structured markdown to your clipboard. Paste into Cursor, Codex, or any AI coding tool —
+        useful as a workaround when you&apos;re not using the MCP integration.
+      </p>
 
       <h2>Iteration management</h2>
       <p>
         These tools manage the worktree lifecycle:
       </p>
-      <IconGrid
-        items={[
-          {
-            icon: <ForkIcon size={20} />,
-            name: "Fork",
-            description: "Create 3 iteration worktrees from a prompt",
-          },
-          {
-            icon: <PickIcon size={20} />,
-            name: "Pick",
-            description: "Merge the desired iteration back to base and remove the rest",
-          },
-          {
-            icon: <DiscardIcon size={20} />,
-            name: "Discard",
-            description: "Keep original, remove all iteration worktrees",
-          },
-        ]}
-      />
+
+      <h3 style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}><ForkIcon size={16} /> Fork</h3>
+      <p>
+        Create 3 iteration worktrees, each with its own branch, dependencies, and dev server on a unique port.
+      </p>
+
+      <h3 style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}><PickIcon size={16} /> Pick</h3>
+      <p>
+        Merge the desired iteration back to your base branch and remove the rest.
+      </p>
+
+      <h3 style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}><DiscardIcon size={16} /> Discard</h3>
+      <p>
+        Keep original, remove all iteration worktrees.
+      </p>
 
       <h2>Iteration tabs</h2>
       <p>
-        When multiple iterations exist, tabs appear at the top of the toolbar. Each tab
+        When multiple iterations, or worktrees, exist, tabs appear at the top of the toolbar. Each tab
         shows the iteration name and a colored status dot:
       </p>
       <div style={{
         display: "inline-flex", alignItems: "center", gap: 2,
-        background: "#f7f7f7", borderRadius: 8, padding: 4,
+        background: "var(--color-bg-nav)", borderRadius: 8, padding: 4,
         marginBottom: "1.5rem",
         fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
       }}>
@@ -285,8 +215,8 @@ export default function ToolbarPage() {
             display: "flex", alignItems: "center", gap: 4,
             padding: "3px 8px", borderRadius: 6,
             border: "1px solid transparent",
-            background: tab.active ? "#e8e8e8" : "transparent",
-            color: tab.active ? "#141414" : "#666",
+            background: tab.active ? "var(--color-bg-code)" : "transparent",
+            color: tab.active ? "var(--color-text)" : "var(--color-text-secondary)",
             cursor: "pointer", fontSize: 11, fontWeight: 500,
           }}>
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: tab.color, flexShrink: 0 }} />
@@ -303,10 +233,46 @@ export default function ToolbarPage() {
         Click a tab to switch which iteration iframe is displayed. Annotations are scoped to the active iteration.
       </p>
 
-      <h2>Keyboard shortcut</h2>
+      <h2>Keyboard shortcuts</h2>
       <p>
-        Toggle the overlay visibility with <strong>Cmd+I</strong>.
+        All single-key shortcuts are active when the toolbar is open and no text input is focused.
       </p>
+      <table style={{ width: "100%", borderCollapse: "collapse", margin: "1rem 0" }}>
+        <thead>
+          <tr style={{ textAlign: "left", borderBottom: "2px solid var(--color-border)" }}>
+            <th style={{ padding: "8px 12px" }}>Key</th>
+            <th style={{ padding: "8px 12px" }}>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {[
+            ["⌘I", "Toggle toolbar open / closed"],
+            ["Esc", "Close toolbar"],
+            ["S", "Toggle Select mode"],
+            ["D", "Toggle Draw mode"],
+            ["M", "Toggle Move mode"],
+            ["U", "Undo last change"],
+            ["X", "Clear all changes"],
+            ["C", "Copy changes to clipboard"],
+          ].map(([key, action]) => (
+            <tr key={key} style={{ borderBottom: "1px solid var(--color-border)" }}>
+              <td style={{ padding: "6px 12px" }}>
+                <kbd style={{
+                  display: "inline-block",
+                  padding: "2px 6px",
+                  borderRadius: 4,
+                  border: "1px solid var(--color-border)",
+                  background: "var(--color-bg-code)",
+                  fontSize: 12,
+                  fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                  fontWeight: 500,
+                }}>{key}</kbd>
+              </td>
+              <td style={{ padding: "6px 12px" }}>{action}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </>
   );
 }

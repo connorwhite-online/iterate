@@ -10,7 +10,7 @@
 .label {
   position: absolute;
   top: 0.5rem;
-  right: 0.75rem;
+  right: 2.5rem;
   font-size: 0.7rem;
   font-family: var(--font-mono);
   color: var(--color-text-tertiary);
