@@ -1,15 +1,13 @@
-import type { SelectedElement, TextSelection, DrawingData, AnnotationIntent, AnnotationSeverity, Rect } from "./types/annotations.js";
+import type { SelectedElement, TextSelection, DrawingData, Rect } from "./types/annotations.js";
 
 /**
- * A single annotation item to format (works for both pending and persisted annotations).
+ * A single change item to format (works for both pending and persisted changes).
  */
-export interface FormatAnnotation {
+export interface FormatChange {
   comment: string;
   elements: SelectedElement[];
   textSelection?: TextSelection;
   drawing?: DrawingData;
-  intent?: AnnotationIntent;
-  severity?: AnnotationSeverity;
   iteration?: string;
   url?: string;
 }
@@ -28,23 +26,23 @@ export interface FormatDomChange {
 }
 
 /**
- * Format a batch of annotations and DOM changes as a human-readable prompt
+ * Format a batch of changes and DOM changes as a human-readable prompt
  * suitable for pasting into any AI agent chat.
  */
 export function formatBatchPrompt(
-  annotations: FormatAnnotation[],
+  changes: FormatChange[],
   domChanges: FormatDomChange[],
   iteration?: string,
 ): string {
-  if (annotations.length === 0 && domChanges.length === 0) {
+  if (changes.length === 0 && domChanges.length === 0) {
     return "No pending feedback.";
   }
 
   let text = `# UI Feedback from iterate\n\n`;
 
-  // Show a single iteration header if all annotations share the same one,
-  // otherwise show per-annotation iteration labels.
-  const uniqueIterations = new Set(annotations.map((a) => a.iteration ?? iteration).filter(Boolean));
+  // Show a single iteration header if all changes share the same one,
+  // otherwise show per-change iteration labels.
+  const uniqueIterations = new Set(changes.map((a) => a.iteration ?? iteration).filter(Boolean));
   const singleIteration = uniqueIterations.size === 1 ? [...uniqueIterations][0] : null;
 
   if (singleIteration) {
@@ -53,8 +51,8 @@ export function formatBatchPrompt(
 
   text += `I've reviewed the UI and have the following feedback:\n\n`;
 
-  for (let i = 0; i < annotations.length; i++) {
-    const a = annotations[i];
+  for (let i = 0; i < changes.length; i++) {
+    const a = changes[i];
     text += `## ${i + 1}. "${a.comment}"\n`;
 
     if (!singleIteration && a.iteration) {
@@ -63,11 +61,6 @@ export function formatBatchPrompt(
     if (a.url) {
       text += `- **Page**: ${a.url}\n`;
     }
-
-    const tags: string[] = [];
-    if (a.intent) tags.push(`Intent: ${a.intent}`);
-    if (a.severity) tags.push(`Severity: ${a.severity}`);
-    if (tags.length > 0) text += `- ${tags.join(" | ")}\n`;
 
     if (a.elements.length > 0) {
       text += `- **Elements** (${a.elements.length}):\n`;

@@ -1,4 +1,4 @@
-import type { AnnotationData, Rect } from "../types/annotations.js";
+import type { Change, Rect } from "../types/annotations.js";
 import type { IterationInfo, IterationStatus } from "../types/iterations.js";
 import type { DomChange } from "../types/dom.js";
 import type { IterateConfig } from "../types/config.js";
@@ -6,11 +6,13 @@ import type { IterateConfig } from "../types/config.js";
 // --- Client → Server messages (browser overlay → daemon) ---
 
 export type ClientMessage =
-  | { type: "annotation:create"; payload: Omit<AnnotationData, "id" | "timestamp" | "status"> }
-  | { type: "annotation:delete"; payload: { id: string } }
+  | { type: "change:create"; payload: Omit<Change, "id" | "timestamp" | "status"> }
+  | { type: "change:delete"; payload: { id: string } }
+  | { type: "dom-change:create"; payload: Omit<DomChange, "id" | "timestamp"> }
+  | { type: "dom-change:delete"; payload: { id: string } }
   | { type: "batch:submit"; payload: {
       iteration: string;
-      annotations: Omit<AnnotationData, "id" | "timestamp" | "status">[];
+      changes: Omit<Change, "id" | "timestamp" | "status">[];
       domChanges: DomChange[];
     }}
   | { type: "dom:select"; payload: { iteration: string; selector: string } }
@@ -28,11 +30,12 @@ export type ServerMessage =
   | { type: "iteration:created"; payload: IterationInfo }
   | { type: "iteration:removed"; payload: { name: string } }
   | { type: "iteration:status"; payload: { name: string; status: IterationStatus } }
-  | { type: "annotation:created"; payload: AnnotationData }
-  | { type: "annotation:updated"; payload: AnnotationData }
-  | { type: "annotation:deleted"; payload: { id: string } }
-  | { type: "batch:submitted"; payload: { batchId: string; annotationCount: number; domChangeCount: number } }
+  | { type: "change:created"; payload: Change }
+  | { type: "change:updated"; payload: Change }
+  | { type: "change:deleted"; payload: { id: string } }
+  | { type: "batch:submitted"; payload: { batchId: string; changeCount: number; domChangeCount: number } }
   | { type: "dom:changed"; payload: DomChange }
+  | { type: "dom:deleted"; payload: { id: string } }
   | { type: "command:started"; payload: { commandId: string; prompt: string; iterations: string[] } }
   | { type: "tool:mode-changed"; payload: { mode: string } }
   | { type: "error"; payload: { message: string } };
@@ -41,6 +44,6 @@ export type ServerMessage =
 export interface IterateState {
   config: IterateConfig;
   iterations: Record<string, IterationInfo>;
-  annotations: AnnotationData[];
+  changes: Change[];
   domChanges: DomChange[];
 }

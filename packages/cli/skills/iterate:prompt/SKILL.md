@@ -25,4 +25,4 @@ The user wants to create multiple UI variations from a prompt. Their prompt is:
    - Changes should be substantial enough that the user can see real differences
    - Focus on the visual/functional differences implied by the prompt
 
-5. **Summarize.** After implementing all variations, give the user a brief summary of what makes each variation unique. Remind them they can compare the variations in the iterate browser UI (localhost:4000) and submit feedback annotations on whichever one they'd like to refine.
+5. **Summarize.** After implementing all variations, give the user a brief summary of what makes each variation unique. Remind them they can compare the variations in the iterate browser UI (localhost:4000) and submit feedback on whichever one they'd like to refine.

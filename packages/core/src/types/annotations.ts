@@ -6,16 +6,10 @@ export interface Rect {
   height: number;
 }
 
-/** What does the user want done? (inspired by agentation) */
-export type AnnotationIntent = "fix" | "change" | "question" | "approve";
-
-/** How important is this? */
-export type AnnotationSeverity = "blocking" | "important" | "suggestion";
-
 /** Agent workflow status */
-export type AnnotationStatus = "pending" | "acknowledged" | "resolved" | "dismissed";
+export type ChangeStatus = "queued" | "in-progress" | "implemented";
 
-/** A single selected element within an annotation */
+/** A single selected element within a change */
 export interface SelectedElement {
   selector: string;
   elementName: string;
@@ -29,7 +23,7 @@ export interface SelectedElement {
   sourceLocation: string | null;
 }
 
-/** A text selection within an annotation */
+/** A text selection within a change */
 export interface TextSelection {
   text: string;
   containingElement: SelectedElement;
@@ -37,7 +31,7 @@ export interface TextSelection {
   endOffset: number;
 }
 
-/** A freehand drawing annotation (marker tool) */
+/** A freehand drawing (marker tool) */
 export interface DrawingData {
   /** SVG path data string (d attribute) */
   path: string;
@@ -49,13 +43,13 @@ export interface DrawingData {
   strokeWidth: number;
 }
 
-/** An annotation targeting one or more elements in an iteration */
-export interface AnnotationData {
+/** A change targeting one or more elements in an iteration */
+export interface Change {
   id: string;
   iteration: string;
-  /** Page URL where the annotation was created */
+  /** Page URL where the change was created */
   url?: string;
-  /** Selected elements this annotation targets */
+  /** Selected elements this change targets */
   elements: SelectedElement[];
   /** Optional highlighted text selection */
   textSelection?: TextSelection;
@@ -63,13 +57,16 @@ export interface AnnotationData {
   drawing?: DrawingData;
   comment: string;
   timestamp: number;
-
-  // Classification (can be set by UI or inferred by agent)
-  intent?: AnnotationIntent;
-  severity?: AnnotationSeverity;
+  /** Page-absolute coordinates for badge placement (scrolls naturally with the document) */
+  pagePosition?: { x: number; y: number };
+  /** True if the annotated element is position:fixed or position:sticky — badge renders
+   *  in a fixed layer (viewport coords) instead of the absolute layer (page coords). */
+  isFixedPosition?: boolean;
+  /** Scroll offset when drawing was created (to convert viewport drawing coords to page coords) */
+  drawingScrollOffset?: { x: number; y: number };
 
   // Agent workflow
-  status: AnnotationStatus;
-  resolvedBy?: "human" | "agent";
-  agentReply?: string;
+  status: ChangeStatus;
+  implementedBy?: "human" | "agent";
+  agentSummary?: string;
 }

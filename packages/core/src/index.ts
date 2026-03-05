@@ -1,13 +1,11 @@
 // Types
 export type {
-  AnnotationData,
+  Change,
   SelectedElement,
   TextSelection,
   DrawingData,
   Rect,
-  AnnotationIntent,
-  AnnotationSeverity,
-  AnnotationStatus,
+  ChangeStatus,
 } from "./types/annotations.js";
 export type { IterationInfo, IterationStatus, IterationSource } from "./types/iterations.js";
 export type { DomChange, DomSnapshot } from "./types/dom.js";
@@ -23,4 +21,4 @@ export type {
 
 // Formatting
 export { formatBatchPrompt } from "./format.js";
-export type { FormatAnnotation, FormatDomChange } from "./format.js";
+export type { FormatChange, FormatDomChange } from "./format.js";
