@@ -1,6 +1,6 @@
 import type {
   IterateState,
-  AnnotationData,
+  Change,
   IterationInfo,
   DomChange,
   ServerMessage,
@@ -10,7 +10,7 @@ import { WebSocket } from "ws";
 /** Callback fired whenever a batch:submitted notification arrives */
 export type BatchSubmittedHandler = (payload: {
   batchId: string;
-  annotationCount: number;
+  changeCount: number;
   domChangeCount: number;
 }) => void;
 
@@ -19,7 +19,7 @@ export type BatchSubmittedHandler = (payload: {
  * and maintains a synchronized copy of the state.
  *
  * Features:
- * - Tracks all state: iterations, annotations, AND dom changes
+ * - Tracks all state: iterations, changes, AND dom changes
  * - Automatic reconnection with exponential backoff
  * - Batch-submitted event listeners for proactive MCP notifications
  */
@@ -118,8 +118,8 @@ export class DaemonClient {
     return this.state;
   }
 
-  getAnnotations(): AnnotationData[] {
-    return this.state?.annotations ?? [];
+  getChanges(): Change[] {
+    return this.state?.changes ?? [];
   }
 
   getIterations(): Record<string, IterationInfo> {
@@ -178,23 +178,23 @@ export class DaemonClient {
         this.state = msg.payload;
         break;
 
-      // --- Annotations ---
-      case "annotation:created":
-        this.state?.annotations.push(msg.payload);
+      // --- Changes ---
+      case "change:created":
+        this.state?.changes.push(msg.payload);
         break;
-      case "annotation:updated":
+      case "change:updated":
         if (this.state) {
-          const idx = this.state.annotations.findIndex(
+          const idx = this.state.changes.findIndex(
             (a) => a.id === msg.payload.id
           );
           if (idx !== -1) {
-            this.state.annotations[idx] = msg.payload;
+            this.state.changes[idx] = msg.payload;
           }
         }
         break;
-      case "annotation:deleted":
+      case "change:deleted":
         if (this.state) {
-          this.state.annotations = this.state.annotations.filter(
+          this.state.changes = this.state.changes.filter(
             (a) => a.id !== msg.payload.id
           );
         }
@@ -226,7 +226,7 @@ export class DaemonClient {
 
       // --- Batch submitted ---
       case "batch:submitted":
-        // Annotations and dom changes already arrived via their own events.
+        // Changes and dom changes already arrived via their own events.
         // Notify listeners that a batch was finalized.
         for (const handler of this.batchListeners) {
           handler(msg.payload);

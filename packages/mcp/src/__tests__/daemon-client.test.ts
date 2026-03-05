@@ -1,32 +1,100 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DaemonClient } from "../connection/daemon-client.js";
-import type { ServerMessage, IterateState, AnnotationData, IterationInfo } from "iterate-ui-core";
+import type {
+  IterateState,
+  Change,
+  IterationInfo,
+  DomChange,
+  ServerMessage,
+} from "iterate-ui-core";
 import { DEFAULT_CONFIG } from "iterate-ui-core";
 
-function createClient(): DaemonClient {
-  return new DaemonClient(4000);
+import { DaemonClient } from "../connection/daemon-client.js";
+
+// Mock the 'ws' module so DaemonClient doesn't need a real server
+vi.mock("ws", () => {
+  class MockWebSocket {
+    static OPEN = 1;
+    readyState = 1;
+    handlers: Record<string, Function[]> = {};
+
+    constructor() {
+      // Auto-fire "open" on next microtask so connect() resolves
+      queueMicrotask(() => {
+        for (const handler of this.handlers["open"] ?? []) handler();
+      });
+    }
+
+    on(event: string, handler: Function) {
+      if (!this.handlers[event]) this.handlers[event] = [];
+      this.handlers[event]!.push(handler);
+    }
+
+    close() {
+      this.readyState = 3;
+    }
+
+    send(_data: string) {}
+
+    // Test helper: simulate receiving a message
+    _receive(msg: ServerMessage) {
+      const data = JSON.stringify(msg);
+      for (const handler of this.handlers["message"] ?? []) {
+        handler(Buffer.from(data));
+      }
+    }
+  }
+
+  return { WebSocket: MockWebSocket };
+});
+
+// Helper to get the mock WebSocket instance after connect()
+function getWs(client: DaemonClient): any {
+  return (client as any).ws;
 }
 
-function sendMessage(client: DaemonClient, msg: ServerMessage) {
-  (client as any).handleMessage(msg);
-}
-
-function mockAnnotation(overrides?: Partial<AnnotationData>): AnnotationData {
+function mockState(): IterateState {
   return {
-    id: "ann-1",
+    config: DEFAULT_CONFIG,
+    iterations: {},
+    changes: [],
+    domChanges: [],
+  };
+}
+
+function mockChange(overrides?: Partial<Change>): Change {
+  return {
+    id: "chg-1",
     iteration: "iter-a",
-    elements: [{
-      selector: "div.card",
-      elementName: "div.card",
-      elementPath: "main > div.card",
-      rect: { x: 0, y: 0, width: 100, height: 50 },
-      computedStyles: {},
-      componentName: "Card",
-      sourceLocation: "src/Card.tsx:10",
-    }],
-    comment: "Fix this",
-    timestamp: 1000,
-    status: "pending",
+    elements: [
+      {
+        selector: "div.hero",
+        elementName: "div.hero",
+        elementPath: "main > div.hero",
+        rect: { x: 100, y: 200, width: 300, height: 150 },
+        computedStyles: { color: "rgb(0,0,0)" },
+        componentName: "HeroSection",
+        sourceLocation: "src/Hero.tsx:42",
+        nearbyText: "Welcome",
+      },
+    ],
+    comment: "Fix the hero layout",
+    timestamp: 1700000000000,
+    status: "queued",
+    ...overrides,
+  };
+}
+
+function mockDomChange(overrides?: Partial<DomChange>): DomChange {
+  return {
+    id: "dc-1",
+    iteration: "iter-a",
+    selector: "div.card",
+    type: "move",
+    componentName: "Card",
+    sourceLocation: "src/Card.tsx:5",
+    before: { rect: { x: 0, y: 0, width: 200, height: 100 }, computedStyles: {} },
+    after: { rect: { x: 50, y: 50, width: 200, height: 100 }, computedStyles: {} },
+    timestamp: 1700000000001,
     ...overrides,
   };
 }
@@ -44,174 +112,207 @@ function mockIteration(overrides?: Partial<IterationInfo>): IterationInfo {
   };
 }
 
-function freshState(): IterateState {
-  return {
-    config: { ...DEFAULT_CONFIG },
-    iterations: {},
-    annotations: [],
-    domChanges: [],
-  };
-}
+describe("DaemonClient message handling", () => {
+  let client: DaemonClient;
 
-describe("DaemonClient", () => {
-  describe("before state:sync", () => {
-    it("getAnnotations returns empty array", () => {
-      const client = createClient();
-      expect(client.getAnnotations()).toEqual([]);
+  beforeEach(async () => {
+    client = new DaemonClient(4000);
+    await client.connect();
+    // Inject initial state:sync
+    const ws = getWs(client);
+    ws._receive({ type: "state:sync", payload: mockState() });
+  });
+
+  it("tracks state after state:sync", () => {
+    const state = client.getState();
+    expect(state).not.toBeNull();
+    expect(state!.changes).toEqual([]);
+    expect(state!.domChanges).toEqual([]);
+  });
+
+  it("tracks change:created", () => {
+    const ws = getWs(client);
+    const chg = mockChange();
+    ws._receive({ type: "change:created", payload: chg });
+    expect(client.getChanges()).toHaveLength(1);
+    expect(client.getChanges()[0]!.id).toBe("chg-1");
+  });
+
+  it("tracks change:updated", () => {
+    const ws = getWs(client);
+    const chg = mockChange();
+    ws._receive({ type: "change:created", payload: chg });
+    ws._receive({
+      type: "change:updated",
+      payload: { ...chg, status: "implemented" as const },
+    });
+    expect(client.getChanges()[0]!.status).toBe("implemented");
+  });
+
+  it("tracks change:deleted", () => {
+    const ws = getWs(client);
+    ws._receive({ type: "change:created", payload: mockChange() });
+    expect(client.getChanges()).toHaveLength(1);
+    ws._receive({ type: "change:deleted", payload: { id: "chg-1" } });
+    expect(client.getChanges()).toHaveLength(0);
+  });
+
+  it("tracks dom:changed messages", () => {
+    const ws = getWs(client);
+    const dc = mockDomChange();
+    ws._receive({ type: "dom:changed", payload: dc });
+    expect(client.getDomChanges()).toHaveLength(1);
+    expect(client.getDomChanges()[0]!.id).toBe("dc-1");
+    expect(client.getDomChanges()[0]!.type).toBe("move");
+  });
+
+  it("tracks multiple dom:changed messages", () => {
+    const ws = getWs(client);
+    ws._receive({ type: "dom:changed", payload: mockDomChange({ id: "dc-1" }) });
+    ws._receive({ type: "dom:changed", payload: mockDomChange({ id: "dc-2", type: "reorder" }) });
+    expect(client.getDomChanges()).toHaveLength(2);
+  });
+
+  it("tracks iteration:created", () => {
+    const ws = getWs(client);
+    const iter = mockIteration();
+    ws._receive({ type: "iteration:created", payload: iter });
+    expect(Object.keys(client.getIterations())).toHaveLength(1);
+    expect(client.getIterations()["iter-a"]!.status).toBe("ready");
+  });
+
+  it("tracks iteration:status", () => {
+    const ws = getWs(client);
+    ws._receive({ type: "iteration:created", payload: mockIteration() });
+    ws._receive({ type: "iteration:status", payload: { name: "iter-a", status: "error" } });
+    expect(client.getIterations()["iter-a"]!.status).toBe("error");
+  });
+
+  it("tracks iteration:removed", () => {
+    const ws = getWs(client);
+    ws._receive({ type: "iteration:created", payload: mockIteration() });
+    expect(Object.keys(client.getIterations())).toHaveLength(1);
+    ws._receive({ type: "iteration:removed", payload: { name: "iter-a" } });
+    expect(Object.keys(client.getIterations())).toHaveLength(0);
+  });
+
+  it("fires batch:submitted listeners", () => {
+    const ws = getWs(client);
+    const handler = vi.fn();
+    client.onBatchSubmitted(handler);
+
+    ws._receive({
+      type: "batch:submitted",
+      payload: { batchId: "batch-1", changeCount: 2, domChangeCount: 1 },
     });
 
-    it("getIterations returns empty object", () => {
-      const client = createClient();
-      expect(client.getIterations()).toEqual({});
-    });
-
-    it("getState returns null", () => {
-      const client = createClient();
-      expect(client.getState()).toBeNull();
+    expect(handler).toHaveBeenCalledWith({
+      batchId: "batch-1",
+      changeCount: 2,
+      domChangeCount: 1,
     });
   });
 
-  describe("state:sync", () => {
-    it("sets the full state", () => {
-      const client = createClient();
-      const state = { ...freshState(), annotations: [mockAnnotation()] };
-      sendMessage(client, { type: "state:sync", payload: state });
-      expect(client.getState()).toEqual(state);
-      expect(client.getAnnotations()).toHaveLength(1);
+  it("unsubscribes batch:submitted listener", () => {
+    const ws = getWs(client);
+    const handler = vi.fn();
+    const unsub = client.onBatchSubmitted(handler);
+    unsub();
+
+    ws._receive({
+      type: "batch:submitted",
+      payload: { batchId: "batch-1", changeCount: 0, domChangeCount: 0 },
     });
+
+    expect(handler).not.toHaveBeenCalled();
   });
 
-  describe("annotation messages", () => {
-    let client: DaemonClient;
-
-    beforeEach(() => {
-      client = createClient();
-      sendMessage(client, { type: "state:sync", payload: freshState() });
+  it("tracks command:started context on iterations", () => {
+    const ws = getWs(client);
+    ws._receive({ type: "iteration:created", payload: mockIteration({ name: "alpha" }) });
+    ws._receive({
+      type: "command:started",
+      payload: { commandId: "cmd-1", prompt: "make it blue", iterations: ["alpha"] },
     });
-
-    it("annotation:created appends to annotations", () => {
-      const ann = mockAnnotation({ id: "new-1" });
-      sendMessage(client, { type: "annotation:created", payload: ann });
-      expect(client.getAnnotations()).toHaveLength(1);
-      expect(client.getAnnotations()[0]!.id).toBe("new-1");
-    });
-
-    it("annotation:updated replaces annotation by id", () => {
-      const ann = mockAnnotation({ id: "x1", comment: "old" });
-      sendMessage(client, { type: "annotation:created", payload: ann });
-      sendMessage(client, {
-        type: "annotation:updated",
-        payload: mockAnnotation({ id: "x1", comment: "new" }),
-      });
-      expect(client.getAnnotations()[0]!.comment).toBe("new");
-    });
-
-    it("annotation:updated ignores unknown id", () => {
-      sendMessage(client, {
-        type: "annotation:updated",
-        payload: mockAnnotation({ id: "nonexistent" }),
-      });
-      expect(client.getAnnotations()).toHaveLength(0);
-    });
-
-    it("annotation:deleted removes by id", () => {
-      const ann = mockAnnotation({ id: "x1" });
-      sendMessage(client, { type: "annotation:created", payload: ann });
-      sendMessage(client, { type: "annotation:deleted", payload: { id: "x1" } });
-      expect(client.getAnnotations()).toHaveLength(0);
-    });
+    expect(client.getIterations()["alpha"]!.commandPrompt).toBe("make it blue");
+    expect(client.getIterations()["alpha"]!.commandId).toBe("cmd-1");
   });
 
-  describe("iteration messages", () => {
-    let client: DaemonClient;
+  it("reports connected status", () => {
+    expect(client.connected).toBe(true);
+  });
+});
 
-    beforeEach(() => {
-      client = createClient();
-      sendMessage(client, { type: "state:sync", payload: freshState() });
-    });
+describe("DaemonClient waitForState", () => {
+  it("resolves immediately if state is already loaded", async () => {
+    const client = new DaemonClient(4000);
+    await client.connect();
+    const ws = getWs(client);
+    ws._receive({ type: "state:sync", payload: mockState() });
 
-    it("iteration:created adds to state", () => {
-      const iter = mockIteration({ name: "test" });
-      sendMessage(client, { type: "iteration:created", payload: iter });
-      expect(client.getIterations()["test"]).toBeDefined();
-    });
-
-    it("iteration:removed deletes from state", () => {
-      const iter = mockIteration({ name: "test" });
-      sendMessage(client, { type: "iteration:created", payload: iter });
-      sendMessage(client, { type: "iteration:removed", payload: { name: "test" } });
-      expect(client.getIterations()["test"]).toBeUndefined();
-    });
-
-    it("iteration:status updates status field", () => {
-      const iter = mockIteration({ name: "test", status: "creating" });
-      sendMessage(client, { type: "iteration:created", payload: iter });
-      sendMessage(client, {
-        type: "iteration:status",
-        payload: { name: "test", status: "ready" },
-      });
-      expect(client.getIterations()["test"]!.status).toBe("ready");
-    });
-
-    it("iteration:status ignores unknown name", () => {
-      expect(() =>
-        sendMessage(client, {
-          type: "iteration:status",
-          payload: { name: "nope", status: "ready" },
-        })
-      ).not.toThrow();
-    });
+    const state = await client.waitForState();
+    expect(state).not.toBeNull();
   });
 
-  describe("batch:submitted", () => {
-    it("does not change state (notification only)", () => {
-      const client = createClient();
-      sendMessage(client, { type: "state:sync", payload: freshState() });
-      sendMessage(client, {
-        type: "batch:submitted",
-        payload: { batchId: "b1", annotationCount: 2, domChangeCount: 1 },
-      });
-      expect(client.getAnnotations()).toHaveLength(0);
-    });
+  it("resolves when state arrives later", async () => {
+    const client = new DaemonClient(4000);
+    await client.connect();
+    const ws = getWs(client);
+
+    // Start waiting before state arrives
+    const statePromise = client.waitForState(5000);
+
+    // State arrives after a tick
+    setTimeout(() => {
+      ws._receive({ type: "state:sync", payload: mockState() });
+    }, 10);
+
+    const state = await statePromise;
+    expect(state).not.toBeNull();
   });
+});
 
-  describe("command:started", () => {
-    it("sets commandPrompt and commandId on matching iterations", () => {
-      const client = createClient();
-      const state = {
-        ...freshState(),
-        iterations: { "iter-1": mockIteration({ name: "iter-1" }) },
-      };
-      sendMessage(client, { type: "state:sync", payload: state });
-      sendMessage(client, {
-        type: "command:started",
-        payload: { commandId: "cmd-1", prompt: "hero variations", iterations: ["iter-1"] },
-      });
+describe("DaemonClient full batch flow", () => {
+  it("accumulates changes and dom changes from a batch", async () => {
+    const client = new DaemonClient(4000);
+    await client.connect();
+    const ws = getWs(client);
+    ws._receive({ type: "state:sync", payload: mockState() });
 
-      expect(client.getIterations()["iter-1"]!.commandPrompt).toBe("hero variations");
-      expect(client.getIterations()["iter-1"]!.commandId).toBe("cmd-1");
+    // Simulate what the hub does when batch:submit arrives:
+    // 1. change:created for each change
+    // 2. dom:changed for each dom change
+    // 3. batch:submitted notification
+
+    ws._receive({
+      type: "change:created",
+      payload: mockChange({ id: "batch-chg-1", comment: "Move this card left" }),
+    });
+    ws._receive({
+      type: "change:created",
+      payload: mockChange({ id: "batch-chg-2", comment: "Make header bigger" }),
+    });
+    ws._receive({
+      type: "dom:changed",
+      payload: mockDomChange({ id: "batch-dc-1" }),
     });
 
-    it("ignores iterations not in state", () => {
-      const client = createClient();
-      sendMessage(client, { type: "state:sync", payload: freshState() });
-      expect(() =>
-        sendMessage(client, {
-          type: "command:started",
-          payload: { commandId: "cmd-1", prompt: "test", iterations: ["nonexistent"] },
-        })
-      ).not.toThrow();
-    });
-  });
+    const batchHandler = vi.fn();
+    client.onBatchSubmitted(batchHandler);
 
-  describe("state listeners", () => {
-    it("notifies listeners on message", () => {
-      const client = createClient();
-      const spy = vi.fn();
-      (client as any).stateListeners.add(spy);
-
-      sendMessage(client, { type: "state:sync", payload: freshState() });
-      expect(spy).toHaveBeenCalled();
+    ws._receive({
+      type: "batch:submitted",
+      payload: { batchId: "batch-1", changeCount: 2, domChangeCount: 1 },
     });
+
+    // Verify all data is in state
+    expect(client.getChanges()).toHaveLength(2);
+    expect(client.getDomChanges()).toHaveLength(1);
+    expect(batchHandler).toHaveBeenCalledTimes(1);
+
+    // Verify the data is accessible for MCP tools
+    const queued = client.getChanges().filter((c) => c.status === "queued");
+    expect(queued).toHaveLength(2);
+    expect(client.getDomChanges()[0]!.type).toBe("move");
   });
 });

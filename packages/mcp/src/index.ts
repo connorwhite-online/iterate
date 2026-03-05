@@ -156,37 +156,37 @@ async function main() {
     }
   );
 
-  // --- Annotation tools ---
+  // --- Change tools ---
 
   server.tool(
-    "iterate_list_annotations",
-    "List all user annotations with selected elements, React component names, source file paths, intent, severity, and status. Each annotation may target multiple elements. Use status filter to find pending annotations that need attention.",
+    "iterate_list_changes",
+    "List all user-submitted changes with selected elements, React component names, source file paths, and status. Each change may target multiple elements. Use status filter to find queued changes that need attention.",
     {
       iteration: z
         .string()
         .optional()
         .describe("Filter by iteration name"),
       status: z
-        .enum(["pending", "acknowledged", "resolved", "dismissed"])
+        .enum(["queued", "in-progress", "implemented"])
         .optional()
         .describe("Filter by status (default: all)"),
     },
     async ({ iteration, status }) => {
-      let annotations = client.getAnnotations();
+      let changes = client.getChanges();
       if (iteration) {
-        annotations = annotations.filter((a) => a.iteration === iteration);
+        changes = changes.filter((a) => a.iteration === iteration);
       }
       if (status) {
-        annotations = annotations.filter((a) => a.status === status);
+        changes = changes.filter((a) => a.status === status);
       }
 
-      if (annotations.length === 0) {
+      if (changes.length === 0) {
         return {
-          content: [{ type: "text", text: "No annotations found." }],
+          content: [{ type: "text", text: "No changes found." }],
         };
       }
 
-      const text = annotations
+      const text = changes
         .map((a) => {
           const headline = a.elements[0]
             ? (a.elements[0].componentName || a.elements[0].elementName || a.elements[0].selector)
@@ -194,7 +194,7 @@ async function main() {
           let out =
             `## ${headline}: "${a.comment}"\n` +
             `- **ID**: ${a.id}\n` +
-            `- **Status**: ${a.status}${a.intent ? ` | Intent: ${a.intent}` : ""}${a.severity ? ` | Severity: ${a.severity}` : ""}\n` +
+            `- **Status**: ${a.status}\n` +
             `- **Iteration**: ${a.iteration}\n` +
             `- **Elements** (${a.elements.length}):\n`;
 
@@ -215,8 +215,8 @@ async function main() {
             out += `- **Text selection**: "${a.textSelection.text.slice(0, 100)}${a.textSelection.text.length > 100 ? "…" : ""}"\n`;
           }
 
-          if (a.agentReply) {
-            out += `- **Agent reply**: ${a.agentReply}\n`;
+          if (a.agentSummary) {
+            out += `- **Agent summary**: ${a.agentSummary}\n`;
           }
 
           return out;
@@ -229,33 +229,33 @@ async function main() {
 
   server.tool(
     "iterate_get_dom_context",
-    "Get full DOM context for a specific annotation, including all selected elements with React component names, source file paths, CSS selectors, computed styles, and layout information.",
+    "Get full DOM context for a specific change, including all selected elements with React component names, source file paths, CSS selectors, computed styles, and layout information.",
     {
-      annotationId: z.string().describe("Annotation ID"),
+      annotationId: z.string().describe("Change ID"),
     },
     async ({ annotationId }) => {
-      const annotation = client
-        .getAnnotations()
+      const change = client
+        .getChanges()
         .find((a) => a.id === annotationId);
 
-      if (!annotation) {
+      if (!change) {
         return {
           content: [
             {
               type: "text",
-              text: `Annotation "${annotationId}" not found.`,
+              text: `Change "${annotationId}" not found.`,
             },
           ],
         };
       }
 
       let text =
-        `# Annotation: ${annotation.comment}\n\n` +
-        `**Iteration**: ${annotation.iteration}\n` +
-        `**Status**: ${annotation.status}${annotation.intent ? ` | Intent: ${annotation.intent}` : ""}${annotation.severity ? ` | Severity: ${annotation.severity}` : ""}\n\n`;
+        `# Change: ${change.comment}\n\n` +
+        `**Iteration**: ${change.iteration}\n` +
+        `**Status**: ${change.status}\n\n`;
 
-      text += `## Selected Elements (${annotation.elements.length})\n\n`;
-      for (const el of annotation.elements) {
+      text += `## Selected Elements (${change.elements.length})\n\n`;
+      for (const el of change.elements) {
         const name = el.componentName ? `<${el.componentName}>` : el.elementName;
         const source = el.sourceLocation ? ` — \`${el.sourceLocation}\`` : "";
         text += `### ${name || el.selector}${source}\n`;
@@ -266,17 +266,17 @@ async function main() {
         text += `- **Computed styles**:\n\`\`\`json\n${JSON.stringify(el.computedStyles, null, 2)}\n\`\`\`\n\n`;
       }
 
-      if (annotation.textSelection) {
+      if (change.textSelection) {
         text += `## Text Selection\n`;
-        text += `- **Selected text**: "${annotation.textSelection.text}"\n`;
-        text += `- **Containing element**: \`${annotation.textSelection.containingElement.selector}\`\n`;
-        text += `- **Offsets**: ${annotation.textSelection.startOffset}–${annotation.textSelection.endOffset}\n\n`;
+        text += `- **Selected text**: "${change.textSelection.text}"\n`;
+        text += `- **Containing element**: \`${change.textSelection.containingElement.selector}\`\n`;
+        text += `- **Offsets**: ${change.textSelection.startOffset}–${change.textSelection.endOffset}\n\n`;
       }
 
       // Include related DOM changes for this iteration
       const domChanges = client
         .getDomChanges()
-        .filter((dc) => dc.iteration === annotation.iteration);
+        .filter((dc) => dc.iteration === change.iteration);
       if (domChanges.length > 0) {
         text += `## Related DOM Changes (${domChanges.length})\n\n`;
         for (const dc of domChanges) {
@@ -293,32 +293,32 @@ async function main() {
     }
   );
 
-  // --- Annotation workflow tools ---
+  // --- Change workflow tools ---
 
   server.tool(
-    "iterate_acknowledge_annotation",
-    "Acknowledge a pending annotation — tells the user you've seen it and are working on it",
+    "iterate_start_change",
+    "Mark a change as in-progress — tells the user you've seen it and are working on it",
     {
-      annotationId: z.string().describe("Annotation ID to acknowledge"),
+      annotationId: z.string().describe("Change ID to start"),
     },
     async ({ annotationId }) => {
       await client.callApi(
         "PATCH",
-        `/api/annotations/${annotationId}/acknowledge`
+        `/api/changes/${annotationId}/start`
       );
       return {
         content: [
-          { type: "text", text: `Acknowledged annotation "${annotationId}".` },
+          { type: "text", text: `Started change "${annotationId}".` },
         ],
       };
     }
   );
 
   server.tool(
-    "iterate_resolve_annotation",
-    "Mark an annotation as resolved — the requested change has been made",
+    "iterate_implement_change",
+    "Mark a change as implemented — the requested change has been made",
     {
-      annotationId: z.string().describe("Annotation ID to resolve"),
+      annotationId: z.string().describe("Change ID to implement"),
       reply: z
         .string()
         .optional()
@@ -327,14 +327,14 @@ async function main() {
     async ({ annotationId, reply }) => {
       await client.callApi(
         "PATCH",
-        `/api/annotations/${annotationId}/resolve`,
+        `/api/changes/${annotationId}/implement`,
         reply ? { summary: reply } : undefined
       );
       return {
         content: [
           {
             type: "text",
-            text: `Resolved annotation "${annotationId}".${reply ? ` Reply: ${reply}` : ""}`,
+            text: `Implemented change "${annotationId}".${reply ? ` Summary: ${reply}` : ""}`,
           },
         ],
       };
@@ -342,48 +342,21 @@ async function main() {
   );
 
   server.tool(
-    "iterate_dismiss_annotation",
-    "Dismiss an annotation — the feedback was noted but won't be acted on",
-    {
-      annotationId: z.string().describe("Annotation ID to dismiss"),
-      reply: z
-        .string()
-        .optional()
-        .describe("Brief reason for dismissal"),
-    },
-    async ({ annotationId, reply }) => {
-      await client.callApi(
-        "PATCH",
-        `/api/annotations/${annotationId}/dismiss`,
-        reply ? { reason: reply } : undefined
-      );
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Dismissed annotation "${annotationId}".${reply ? ` Reason: ${reply}` : ""}`,
-          },
-        ],
-      };
-    }
-  );
-
-  server.tool(
-    "iterate_get_pending_annotations",
-    "Get all pending annotations that need attention. Use this to check for new user feedback. Shows element names, React component names, and source file paths.",
+    "iterate_get_pending_changes",
+    "Get all queued changes that need attention. Use this to check for new user feedback. Shows element names, React component names, and source file paths.",
     {},
     async () => {
-      const annotations = client
-        .getAnnotations()
-        .filter((a) => a.status === "pending");
+      const changes = client
+        .getChanges()
+        .filter((a) => a.status === "queued");
 
-      if (annotations.length === 0) {
+      if (changes.length === 0) {
         return {
-          content: [{ type: "text", text: "No pending annotations." }],
+          content: [{ type: "text", text: "No queued changes." }],
         };
       }
 
-      const text = annotations
+      const text = changes
         .map((a) => {
           const primary = a.elements[0];
           const name = primary
@@ -393,8 +366,6 @@ async function main() {
           const extraCount = a.elements.length > 1 ? ` +${a.elements.length - 1} more` : "";
           return (
             `- **${name}**${source}${extraCount}: "${a.comment}"` +
-            (a.intent ? ` [${a.intent}]` : "") +
-            (a.severity ? ` (${a.severity})` : "") +
             (a.textSelection ? ` — text: "${a.textSelection.text.slice(0, 40)}…"` : "") +
             ` — ID: ${a.id}`
           );
@@ -405,7 +376,7 @@ async function main() {
         content: [
           {
             type: "text",
-            text: `${annotations.length} pending annotation(s):\n\n${text}`,
+            text: `${changes.length} queued change(s):\n\n${text}`,
           },
         ],
       };
@@ -416,7 +387,7 @@ async function main() {
 
   server.tool(
     "iterate_get_pending_batch",
-    "Get all pending annotations and DOM changes from the latest submitted batch. This is the primary tool for reading user-submitted feedback after a batch:submitted notification. Returns annotations with full element context including React component names and source file paths, as well as DOM move/reorder changes with before/after positions.",
+    "Get all queued changes and DOM changes from the latest submitted batch. This is the primary tool for reading user-submitted feedback after a batch:submitted notification. Returns changes with full element context including React component names and source file paths, as well as DOM move/reorder changes with before/after positions.",
     {
       iteration: z
         .string()
@@ -430,15 +401,15 @@ async function main() {
         };
       }
 
-      let annotations = client.getAnnotations().filter((a) => a.status === "pending");
+      let changes = client.getChanges().filter((a) => a.status === "queued");
       let domChanges = client.getDomChanges();
 
       if (iteration) {
-        annotations = annotations.filter((a) => a.iteration === iteration);
+        changes = changes.filter((a) => a.iteration === iteration);
         domChanges = domChanges.filter((dc) => dc.iteration === iteration);
       }
 
-      if (annotations.length === 0 && domChanges.length === 0) {
+      if (changes.length === 0 && domChanges.length === 0) {
         return {
           content: [{ type: "text", text: "No pending batch items." }],
         };
@@ -446,14 +417,12 @@ async function main() {
 
       let text = `# Pending Batch\n\n`;
 
-      if (annotations.length > 0) {
-        text += `## Annotations (${annotations.length})\n\n`;
-        for (const a of annotations) {
+      if (changes.length > 0) {
+        text += `## Changes (${changes.length})\n\n`;
+        for (const a of changes) {
           text += `### "${a.comment}"\n`;
           text += `- **ID**: ${a.id}\n`;
           text += `- **Iteration**: ${a.iteration}\n`;
-          if (a.intent) text += `- **Intent**: ${a.intent}\n`;
-          if (a.severity) text += `- **Severity**: ${a.severity}\n`;
           text += `- **Elements** (${a.elements.length}):\n`;
 
           for (const el of a.elements) {
@@ -560,7 +529,7 @@ async function main() {
     async () => {
       const connected = client.connected;
       const state = client.getState();
-      const annotations = client.getAnnotations();
+      const changes = client.getChanges();
       const domChanges = client.getDomChanges();
       const iterations = Object.keys(client.getIterations());
 
@@ -572,7 +541,7 @@ async function main() {
               `**Connected**: ${connected ? "yes" : "no (reconnecting...)"}\n` +
               `**State loaded**: ${state ? "yes" : "no"}\n` +
               `**Iterations**: ${iterations.length} (${iterations.join(", ") || "none"})\n` +
-              `**Annotations**: ${annotations.length} (${annotations.filter((a) => a.status === "pending").length} pending)\n` +
+              `**Changes**: ${changes.length} (${changes.filter((a) => a.status === "queued").length} queued)\n` +
               `**DOM Changes**: ${domChanges.length}`,
           },
         ],
@@ -584,7 +553,7 @@ async function main() {
 
   server.prompt(
     "iterate_process_feedback",
-    "Get all pending UI feedback (annotations and DOM changes) formatted as an actionable prompt. Use this after the user submits a batch of feedback from the iterate overlay.",
+    "Get all pending UI feedback (changes and DOM changes) formatted as an actionable prompt. Use this after the user submits a batch of feedback from the iterate overlay.",
     {
       iteration: z
         .string()
@@ -592,15 +561,15 @@ async function main() {
         .describe("Filter by iteration name (optional, returns all if omitted)"),
     },
     async ({ iteration }) => {
-      let annotations = client.getAnnotations().filter((a) => a.status === "pending");
+      let changes = client.getChanges().filter((a) => a.status === "queued");
       let domChanges = client.getDomChanges();
 
       if (iteration) {
-        annotations = annotations.filter((a) => a.iteration === iteration);
+        changes = changes.filter((a) => a.iteration === iteration);
         domChanges = domChanges.filter((dc) => dc.iteration === iteration);
       }
 
-      const text = formatBatchPrompt(annotations, domChanges, iteration);
+      const text = formatBatchPrompt(changes, domChanges, iteration);
 
       return {
         messages: [
