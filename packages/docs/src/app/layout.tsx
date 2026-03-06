@@ -11,6 +11,7 @@ export const metadata: Metadata = {
     template: "%s | iterate",
   },
   description,
+  icons: { icon: "/favicon.ico" },
   metadataBase: new URL("https://iterate-ui.com"),
   keywords: ["iterate", "AI", "visual feedback", "UI development", "Claude Code", "git worktrees", "design iteration", "MCP"],
   authors: [{ name: "iterate" }],
