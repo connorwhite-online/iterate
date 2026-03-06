@@ -95,6 +95,8 @@ export function formatBatchPrompt(
     if (a.drawing) {
       text += `- **Drawing annotation** (marker tool)\n`;
       text += `  Region: ${a.drawing.bounds.width.toFixed(0)}×${a.drawing.bounds.height.toFixed(0)} at (${a.drawing.bounds.x.toFixed(0)}, ${a.drawing.bounds.y.toFixed(0)})\n`;
+      text += `  SVG path: \`${a.drawing.path}\`\n`;
+      text += `  Stroke: ${a.drawing.strokeColor}, width ${a.drawing.strokeWidth}\n`;
     }
 
     text += `\n`;

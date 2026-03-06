@@ -216,6 +216,12 @@ async function main() {
             out += `- **Text selection**: "${a.textSelection.text.slice(0, 100)}${a.textSelection.text.length > 100 ? "…" : ""}"\n`;
           }
 
+          if (a.drawing) {
+            out += `- **Drawing annotation** (marker tool)\n`;
+            out += `  Region: ${a.drawing.bounds.width.toFixed(0)}×${a.drawing.bounds.height.toFixed(0)} at (${a.drawing.bounds.x.toFixed(0)}, ${a.drawing.bounds.y.toFixed(0)})\n`;
+            out += `  SVG path: \`${a.drawing.path}\`\n`;
+          }
+
           if (a.agentSummary) {
             out += `- **Agent summary**: ${a.agentSummary}\n`;
           }
@@ -274,6 +280,13 @@ async function main() {
         text += `- **Selected text**: "${change.textSelection.text}"\n`;
         text += `- **Containing element**: \`${change.textSelection.containingElement.selector}\`\n`;
         text += `- **Offsets**: ${change.textSelection.startOffset}–${change.textSelection.endOffset}\n\n`;
+      }
+
+      if (change.drawing) {
+        text += `## Drawing Annotation\n`;
+        text += `- **Region**: ${change.drawing.bounds.width.toFixed(0)}×${change.drawing.bounds.height.toFixed(0)} at (${change.drawing.bounds.x.toFixed(0)}, ${change.drawing.bounds.y.toFixed(0)})\n`;
+        text += `- **SVG path**: \`${change.drawing.path}\`\n`;
+        text += `- **Stroke**: ${change.drawing.strokeColor}, width ${change.drawing.strokeWidth}\n\n`;
       }
 
       // Include related DOM changes for this iteration
@@ -375,6 +388,7 @@ async function main() {
               `- **${name}**${source}${extraCount}: "${a.comment}"` +
               (a.url ? ` — page: ${a.url}` : "") +
               (a.textSelection ? ` — text: "${a.textSelection.text.slice(0, 40)}…"` : "") +
+              (a.drawing ? ` — drawing: ${a.drawing.bounds.width.toFixed(0)}×${a.drawing.bounds.height.toFixed(0)} at (${a.drawing.bounds.x.toFixed(0)}, ${a.drawing.bounds.y.toFixed(0)})` : "") +
               ` — ID: ${a.id}`
             );
           })
@@ -479,6 +493,13 @@ async function main() {
           if (a.textSelection) {
             text += `- **Text selection**: "${a.textSelection.text}"\n`;
             text += `  Container: \`${a.textSelection.containingElement.selector}\`\n`;
+          }
+
+          if (a.drawing) {
+            text += `- **Drawing annotation** (marker tool)\n`;
+            text += `  Region: ${a.drawing.bounds.width.toFixed(0)}×${a.drawing.bounds.height.toFixed(0)} at (${a.drawing.bounds.x.toFixed(0)}, ${a.drawing.bounds.y.toFixed(0)})\n`;
+            text += `  SVG path: \`${a.drawing.path}\`\n`;
+            text += `  Stroke: ${a.drawing.strokeColor}, width ${a.drawing.strokeWidth}\n`;
           }
           text += `\n`;
         }
