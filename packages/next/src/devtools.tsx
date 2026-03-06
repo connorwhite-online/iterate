@@ -1,6 +1,6 @@
 "use client";
 
-import Script from "next/script";
+import { useEffect } from "react";
 
 /**
  * Drop-in overlay loader for Turbopack or any environment where the
@@ -21,26 +21,26 @@ import Script from "next/script";
  * ```
  */
 export function IterateDevTools({ port = 4000 }: { port?: number }) {
-  if (process.env.NODE_ENV === "production") return null;
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
 
-  const iterationName = process.env.ITERATE_ITERATION_NAME ?? "__original__";
-  const initScript = `
-    if(!window.__iterate_shell__){
-      window.__iterate_shell__={activeTool:"browse",activeIteration:${JSON.stringify(iterationName)},daemonPort:${port}};
+    if (!(window as any).__iterate_shell__) {
+      (window as any).__iterate_shell__ = {
+        activeTool: "browse",
+        activeIteration: "__original__",
+        daemonPort: port,
+      };
     }
-  `;
 
-  return (
-    <>
-      <Script id="iterate-init" strategy="beforeInteractive">
-        {initScript}
-      </Script>
-      <Script
-        src="/__iterate__/overlay.js"
-        strategy="afterInteractive"
-      />
-    </>
-  );
+    if (!document.getElementById("iterate-overlay-script")) {
+      const script = document.createElement("script");
+      script.id = "iterate-overlay-script";
+      script.src = "/__iterate__/overlay.js";
+      document.body.appendChild(script);
+    }
+  }, [port]);
+
+  return null;
 }
 
 export default IterateDevTools;
