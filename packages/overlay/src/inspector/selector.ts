@@ -243,13 +243,15 @@ export function getComponentInfo(element: Element): {
 
   // Strategy 2: Fall back to data attributes from babel plugin
   let el: Element | null = element;
+  let isComponentRoot = true;
   while (el && el !== document.documentElement) {
     const component = el.getAttribute("data-iterate-component");
     const source = el.getAttribute("data-iterate-source");
     if (component) {
-      return { component, source, isComponentRoot: false };
+      return { component, source, isComponentRoot };
     }
     el = el.parentElement;
+    isComponentRoot = false;
   }
 
   return { component: null, source: null, isComponentRoot: false };

@@ -950,10 +950,10 @@ function MovePopup({
           }}
         >
           {(() => {
-            if (move.isComponentRoot && move.componentName) return `<${move.componentName}>`;
+            if (move.componentName) return `<${move.componentName}>`;
             const lastPart = move.selector.split(" ").pop() || "";
             const tag = lastPart.replace(/[:.#\[].*$/, "").toLowerCase();
-            return tag ? `<${tag}>` : move.componentName || "Element";
+            return tag ? `<${tag}>` : "Element";
           })()}
         </div>
 
