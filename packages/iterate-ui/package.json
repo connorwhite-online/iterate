@@ -1,0 +1,17 @@
+{
+  "name": "iterate-ui",
+  "version": "0.1.0",
+  "description": "Explore multiple versions of your app simultaneously with agents from a minimal toolbar overlay in your browser",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/connorwhite-online/iterate"
+  },
+  "homepage": "https://iterate-ui.com",
+  "keywords": ["iterate", "ui", "nextjs", "vite", "react", "ai", "worktree", "claude", "mcp"],
+  "dependencies": {
+    "iterate-ui-cli": "workspace:*",
+    "iterate-ui-next": "workspace:*",
+    "iterate-ui-vite": "workspace:*"
+  }
+}
