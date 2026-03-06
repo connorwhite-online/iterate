@@ -53,7 +53,7 @@ export const initCommand = new Command("init")
         mcpServers: {
           iterate: {
             command: "npx",
-            args: ["iterate-mcp"],
+            args: ["iterate-ui-mcp"],
             env: {
               ITERATE_DAEMON_PORT: String(config.daemonPort),
             },

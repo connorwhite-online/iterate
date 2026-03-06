@@ -70,7 +70,7 @@ Set up iterate in the user's project. This skill detects the framework, installs
      "mcpServers": {
        "iterate": {
          "command": "npx",
-         "args": ["iterate-mcp"],
+         "args": ["iterate-ui-mcp"],
          "env": {
            "ITERATE_DAEMON_PORT": "4000"
          }
