@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, existsSync, unlinkSync, globSync, statSync } from "node:fs";
+import { copyFileSync, cpSync, mkdirSync, existsSync, unlinkSync, globSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { execSync } from "node:child_process";
 
@@ -58,12 +58,17 @@ export function copyUncommittedFiles(
       continue;
     }
 
-    // Copy the file if it exists in the working directory (skip directories)
     const src = join(cwd, filePath);
-    if (!existsSync(src) || statSync(src).isDirectory()) continue;
+    if (!existsSync(src)) continue;
 
     const dest = join(worktreePath, filePath);
-    mkdirSync(dirname(dest), { recursive: true });
-    copyFileSync(src, dest);
+    if (statSync(src).isDirectory()) {
+      // Untracked directories show as a single entry in git status (e.g. "?? components/")
+      // Recursively copy the entire directory
+      cpSync(src, dest, { recursive: true });
+    } else {
+      mkdirSync(dirname(dest), { recursive: true });
+      copyFileSync(src, dest);
+    }
   }
 }
