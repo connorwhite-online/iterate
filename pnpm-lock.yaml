@@ -25,7 +25,7 @@ importers:
     dependencies:
       next:
         specifier: ^15.0.0
-        version: 15.5.12(@babel/core@7.29.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+        version: 15.5.12(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       react:
         specifier: ^19.0.0
         version: 19.2.4
@@ -151,11 +151,11 @@ importers:
         specifier: ^1.1.3
         version: 1.1.3
       iterate-ui-next:
-        specifier: ^0.1.0
-        version: 0.1.0(@babel/core@7.29.0)(next@15.5.12(@babel/core@7.29.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+        specifier: workspace:*
+        version: link:../next
       next:
         specifier: ^15.3.3
-        version: 15.5.12(@babel/core@7.29.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+        version: 15.5.12(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       react:
         specifier: ^19.1.0
         version: 19.2.4
@@ -238,7 +238,7 @@ importers:
         version: link:../overlay
       next:
         specifier: ^14.0.0 || ^15.0.0 || ^16.0.0
-        version: 15.5.12(@babel/core@7.29.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+        version: 15.5.12(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       react:
         specifier: ^18.0.0 || ^19.0.0
         version: 19.2.4
@@ -1798,28 +1798,6 @@ packages:
   istanbul-reports@3.2.0:
     resolution: {integrity: sha512-HGYWWS/ehqTV3xN10i23tkPkpH46MLCIMFNCaaKNavAXTF1RkqxawEPtnjnGZ6XKSInBKkiOA5BKS+aZiY3AvA==}
     engines: {node: '>=8'}
-
-  iterate-ui-babel-plugin@0.1.0:
-    resolution: {integrity: sha512-y9j73Tj4ZYgGYZ9UCibx+/6EuucSBQa4Y2fg6BtV/ZLl0mJGmMdDN8PfzrB7NGz7YSeeSh1WHyDDmXYivT3UjQ==}
-    peerDependencies:
-      '@babel/core': ^7.0.0
-
-  iterate-ui-core@0.1.0:
-    resolution: {integrity: sha512-ERkv1zNYmwJUMaaBf1D2zE2KtdtU7wZO8jdU5RxgJdnHeuxBJwbV+GwEd0d7g0p+1lIlje5J2Ljv52qbXNXvRg==}
-
-  iterate-ui-daemon@0.1.0:
-    resolution: {integrity: sha512-J3+V1PCXorzAvfrL8zB4ziA80uy465Od8D4pjzbA2Q9ZrZ8ABICOF0of/tcPvrUVIxD78ywtDzx8hdQWcLUIEA==}
-
-  iterate-ui-next@0.1.0:
-    resolution: {integrity: sha512-blDIN9QIJQmI0NlrrH4Fp1zjxfsXu/mPCaLMgm8wm6n7/RrLkKtm+aYj0JOMCodXLq0T4nIpWFAr/eYwqi11EQ==}
-    peerDependencies:
-      next: ^14.0.0 || ^15.0.0
-
-  iterate-ui-overlay@0.1.0:
-    resolution: {integrity: sha512-AQXMAh4xIpuQUAgIYS5zs3J3JLo6QqvwEwVmDe26N+L1IjzvthJ5eAPqrtft3lFV40pa7LkESFgB7X4zwwXBCQ==}
-    peerDependencies:
-      react: ^18.0.0 || ^19.0.0
-      react-dom: ^18.0.0 || ^19.0.0
 
   jackspeak@4.2.3:
     resolution: {integrity: sha512-ykkVRwrYvFm1nb2AJfKKYPr0emF6IiXDYUaFx4Zn9ZuIH7MrzEZ3sD5RlqGXNRpHtvUHJyOnCEFxOlNDtGo7wg==}
@@ -4024,49 +4002,6 @@ snapshots:
       html-escaper: 2.0.2
       istanbul-lib-report: 3.0.1
 
-  iterate-ui-babel-plugin@0.1.0(@babel/core@7.29.0):
-    dependencies:
-      '@babel/core': 7.29.0
-
-  iterate-ui-core@0.1.0: {}
-
-  iterate-ui-daemon@0.1.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4):
-    dependencies:
-      '@fastify/reply-from': 12.6.0
-      '@fastify/static': 8.3.0
-      '@fastify/websocket': 11.2.0
-      execa: 9.6.1
-      fastify: 5.7.4
-      iterate-ui-core: 0.1.0
-      iterate-ui-overlay: 0.1.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
-      simple-git: 3.32.2
-    transitivePeerDependencies:
-      - bufferutil
-      - react
-      - react-dom
-      - supports-color
-      - utf-8-validate
-
-  iterate-ui-next@0.1.0(@babel/core@7.29.0)(next@15.5.12(@babel/core@7.29.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(react-dom@19.2.4(react@19.2.4))(react@19.2.4):
-    dependencies:
-      iterate-ui-babel-plugin: 0.1.0(@babel/core@7.29.0)
-      iterate-ui-daemon: 0.1.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
-      iterate-ui-overlay: 0.1.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
-      next: 15.5.12(@babel/core@7.29.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
-    transitivePeerDependencies:
-      - '@babel/core'
-      - bufferutil
-      - react
-      - react-dom
-      - supports-color
-      - utf-8-validate
-
-  iterate-ui-overlay@0.1.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4):
-    dependencies:
-      iterate-ui-core: 0.1.0
-      react: 19.2.4
-      react-dom: 19.2.4(react@19.2.4)
-
   jackspeak@4.2.3:
     dependencies:
       '@isaacs/cliui': 9.0.0
@@ -4193,7 +4128,7 @@ snapshots:
 
   negotiator@1.0.0: {}
 
-  next@15.5.12(@babel/core@7.29.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4):
+  next@15.5.12(react-dom@19.2.4(react@19.2.4))(react@19.2.4):
     dependencies:
       '@next/env': 15.5.12
       '@swc/helpers': 0.5.15
@@ -4201,7 +4136,7 @@ snapshots:
       postcss: 8.4.31
       react: 19.2.4
       react-dom: 19.2.4(react@19.2.4)
-      styled-jsx: 5.1.6(@babel/core@7.29.0)(react@19.2.4)
+      styled-jsx: 5.1.6(react@19.2.4)
     optionalDependencies:
       '@next/swc-darwin-arm64': 15.5.12
       '@next/swc-darwin-x64': 15.5.12
@@ -4603,12 +4538,10 @@ snapshots:
 
   strip-final-newline@4.0.0: {}
 
-  styled-jsx@5.1.6(@babel/core@7.29.0)(react@19.2.4):
+  styled-jsx@5.1.6(react@19.2.4):
     dependencies:
       client-only: 0.0.1
       react: 19.2.4
-    optionalDependencies:
-      '@babel/core': 7.29.0
 
   sucrase@3.35.1:
     dependencies:
