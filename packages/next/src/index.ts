@@ -175,35 +175,66 @@ export function withIterate(
     },
   };
 
+  // Resolve babel-loader for the component name injection pre-loader
+  let babelLoaderPath: string | undefined;
+  if (babelPluginPath) {
+    try {
+      babelLoaderPath = _require.resolve("babel-loader");
+    } catch {
+      console.warn("[iterate] Could not resolve babel-loader — component names will not be injected");
+    }
+  }
+
   // Only inject via webpack when NOT using Turbopack (avoids the
   // "webpack config present but no turbopack config" warning in Next 16+)
   if (!turbopack) {
     result.webpack = function webpack(config: any, context: any) {
-      if (context.isServer || !context.dev) {
+      if (!context.dev) {
         return nextConfig.webpack?.(config, context) ?? config;
       }
 
-      // Add a virtual entry that injects the overlay script at runtime
-      const originalEntry = config.entry;
-      config.entry = async () => {
-        const entries = await (typeof originalEntry === "function"
-          ? originalEntry()
-          : originalEntry);
+      // Inject babel plugin as a pre-loader on both server and client builds
+      // so that server components get data-iterate-component attributes
+      if (babelLoaderPath && babelPluginPath) {
+        config.module.rules.push({
+          test: /\.(tsx?|jsx?)$/,
+          exclude: /node_modules/,
+          enforce: "pre",
+          use: [{
+            loader: babelLoaderPath,
+            options: {
+              plugins: [babelPluginPath],
+              parserOpts: { plugins: ["jsx", "typescript"] },
+              configFile: false,
+              babelrc: false,
+            },
+          }],
+        });
+      }
 
-        // Add our injector to the main client entry
-        const injectorPath = createIterateInjector(overlayBundlePath, daemonPort);
-        if (injectorPath && entries["main-app"]) {
-          if (Array.isArray(entries["main-app"])) {
-            entries["main-app"].push(injectorPath);
-          }
-        } else if (injectorPath && entries["main"]) {
-          if (Array.isArray(entries["main"])) {
-            entries["main"].push(injectorPath);
-          }
-        }
+      // Overlay injection is client-side only
+      if (!context.isServer) {
+        const originalEntry = config.entry;
+        config.entry = async () => {
+          const entries = await (typeof originalEntry === "function"
+            ? originalEntry()
+            : originalEntry);
 
-        return entries;
-      };
+          // Add our injector to the main client entry
+          const injectorPath = createIterateInjector(overlayBundlePath, daemonPort);
+          if (injectorPath && entries["main-app"]) {
+            if (Array.isArray(entries["main-app"])) {
+              entries["main-app"].push(injectorPath);
+            }
+          } else if (injectorPath && entries["main"]) {
+            if (Array.isArray(entries["main"])) {
+              entries["main"].push(injectorPath);
+            }
+          }
+
+          return entries;
+        };
+      }
 
       return nextConfig.webpack?.(config, context) ?? config;
     };
