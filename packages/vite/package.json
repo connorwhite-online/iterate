@@ -1,6 +1,6 @@
 {
   "name": "iterate-ui-vite",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "iterate Vite plugin — auto-starts daemon and injects overlay",
   "license": "MIT",
   "repository": {
