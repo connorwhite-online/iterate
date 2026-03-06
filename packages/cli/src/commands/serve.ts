@@ -20,7 +20,7 @@ export const serveCommand = new Command("serve")
     // Spawn the daemon process
     // In development, we run the daemon directly via tsx
     // In production, this would run the built daemon binary
-    const daemonBin = join(cwd, "node_modules", "@iterate", "daemon", "dist", "index.js");
+    const daemonBin = join(cwd, "node_modules", "iterate-ui-daemon", "dist", "index.js");
 
     if (existsSync(daemonBin)) {
       const child = spawn("node", [daemonBin], {
@@ -40,6 +40,7 @@ export const serveCommand = new Command("serve")
     } else {
       // Fallback: try to import and run daemon directly
       try {
+        // @ts-expect-error — optional peer; only resolved when installed alongside daemon
         const { startDaemon } = await import("iterate-ui-daemon");
         await startDaemon({ port, cwd });
       } catch {

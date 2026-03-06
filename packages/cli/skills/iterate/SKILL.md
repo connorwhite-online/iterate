@@ -35,7 +35,7 @@ Set up iterate in the user's project. This skill detects the framework, installs
      export default withIterate(nextConfig);
      ```
    - If the config already uses `withIterate`, skip this step
-   - **Next.js 16+ / Turbopack**: Check the installed Next.js version. If it's 16+, the overlay
+   - **Next.js 16+ / Turbopack**: Read the `version` field from `node_modules/next/package.json` to determine the major version. If it's 16+, the overlay
      must also be loaded via a React component (webpack injection is ignored by Turbopack).
      Find the root layout file (`app/layout.tsx` or `app/layout.jsx`) and add:
      ```tsx
@@ -70,7 +70,7 @@ Set up iterate in the user's project. This skill detects the framework, installs
      "mcpServers": {
        "iterate": {
          "command": "npx",
-         "args": ["iterate-ui-mcp"],
+         "args": ["iterate-mcp"],
          "env": {
            "ITERATE_DAEMON_PORT": "4000"
          }
