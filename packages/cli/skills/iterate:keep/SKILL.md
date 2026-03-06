@@ -8,6 +8,15 @@ The user wants to keep one iteration and merge it into the base branch. They sai
 
 > $ARGUMENTS
 
+## Tools
+
+Use the MCP tools below. If MCP tools are not available (e.g. the server isn't connected), fall back to the daemon's REST API at `http://localhost:4000`:
+
+| MCP tool                    | REST equivalent                                                            |
+|-----------------------------|----------------------------------------------------------------------------|
+| `iterate_list_iterations`   | `GET /api/iterations`                                                      |
+| `iterate_pick_iteration`    | `POST /api/iterations/pick` — body: `{ "name": "...", "strategy": "merge" }` |
+
 ## Steps
 
 1. **List iterations.** Call `iterate_list_iterations` to see all active iterations with their names, branches, and any command prompts.

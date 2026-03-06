@@ -8,6 +8,16 @@ The user wants to create multiple UI variations from a prompt. Their prompt is:
 
 > $ARGUMENTS
 
+## Tools
+
+Use the MCP tools below. If MCP tools are not available (e.g. the server isn't connected), fall back to the daemon's REST API at `http://localhost:4000`:
+
+| MCP tool                      | REST equivalent                                              |
+|-------------------------------|--------------------------------------------------------------|
+| `iterate_list_iterations`     | `GET /api/iterations`                                        |
+| `iterate_create_iteration`    | `POST /api/iterations` — body: `{ "name": "...", "baseBranch": "..." }` |
+| `iterate_remove_iteration`    | `DELETE /api/iterations/{name}`                              |
+
 ## Steps
 
 1. **Check current state.** Call `iterate_list_iterations` to see what iterations already exist. If iterations already exist, ask the user whether to create new ones alongside them or remove the existing ones first.
@@ -25,4 +35,4 @@ The user wants to create multiple UI variations from a prompt. Their prompt is:
    - Changes should be substantial enough that the user can see real differences
    - Focus on the visual/functional differences implied by the prompt
 
-5. **Summarize.** After implementing all variations, give the user a brief summary of what makes each variation unique. Remind them they can compare the variations in the iterate browser UI (localhost:4000) and submit feedback on whichever one they'd like to refine.
+5. **Summarize.** After implementing all variations, give the user a brief summary of what makes each variation unique. Remind them they can compare the variations in the iterate overlay on their running dev server and submit feedback on whichever one they'd like to refine.

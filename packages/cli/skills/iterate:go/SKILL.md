@@ -5,6 +5,20 @@ description: Implement all pending UI feedback changes from the iterate overlay.
 
 The user has submitted UI feedback changes via the iterate overlay. Your job is to fetch, understand, and implement every pending change.
 
+## Tools
+
+Use the MCP tools below. If MCP tools are not available (e.g. the server isn't connected), fall back to the daemon's REST API at `http://localhost:4000`:
+
+| MCP tool                     | REST equivalent                                  |
+|------------------------------|--------------------------------------------------|
+| `iterate_get_pending_batch`  | `GET /api/changes/pending`                       |
+| `iterate_start_change`       | `PATCH /api/changes/{id}/start`                  |
+| `iterate_implement_change`   | `PATCH /api/changes/{id}/implement`              |
+| `iterate_list_iterations`    | `GET /api/iterations`                            |
+
+- **Start**: `PATCH /api/changes/{id}/start` — no body needed
+- **Implement**: `PATCH /api/changes/{id}/implement` — body: `{ "summary": "what you changed" }`
+
 ## Steps
 
 1. **Fetch the pending batch.** Call `iterate_get_pending_batch` to retrieve all pending changes and DOM changes. If there are no pending items, tell the user there's nothing to implement and stop.
@@ -22,12 +36,18 @@ The user has submitted UI feedback changes via the iterate overlay. Your job is 
 4. **Read source files.** For each unique `sourceLocation`, read the file to understand the current code before making changes.
 
 5. **Implement the changes.** Work through each change:
-   - For DOM position changes (moves), translate the pixel delta into appropriate CSS/layout changes in the source
    - Make changes in the correct iteration worktree — the change's `iteration` field tells you which worktree the change belongs to
    - **IMPORTANT: Worktrees are full repository checkouts.** The worktree path points to the repo root, NOT the app subdirectory. If the app lives at `examples/next-app/` in the repo, you must edit files at `{worktreePath}/examples/next-app/src/...`, not `{worktreePath}/src/...`. Always use the `sourceLocation` path relative to the worktree root.
+   - **DOM changes** describe structural layout changes the user made by dragging elements. Each DOM change has a `type` field:
+     - **`reorder`** — the user reordered an element within the same parent container (e.g. a flex/grid layout). The `before.siblingIndex` and `after.siblingIndex` tell you the element's position among its siblings before and after. Implement this by reordering the JSX children in the source code.
+     - **`reorder` with `targetParentSelector`** — cross-parent move. The element was dragged from one container (`parentSelector`) to another (`targetParentSelector`). Move the JSX element from the source parent to the destination parent at `after.siblingIndex`.
+     - **`move`** — the user repositioned an element visually. The `before.rect` and `after.rect` give bounding box coordinates. Translate the delta into CSS/layout changes (margin, position, transform, etc.).
+   - DOM changes include `componentName` and `sourceLocation` to help locate the source code, plus `selector` and `parentSelector` to identify the elements.
 
-6. **Implement each change.** After implementing a change, call `iterate_implement_change` with:
-   - The change's `id`
-   - A brief `reply` summarizing what you changed (this shows in the overlay UI)
+6. **Resolve each change.** After implementing a change, you **must** mark it as resolved by calling `iterate_implement_change` with:
+   - `annotationId` — the change's `id`
+   - `reply` — a brief summary of what you changed (this shows in the overlay UI)
 
-After implementing all changes, give the user a brief summary of what you changed. The dev server will hot-reload automatically so they can see the results immediately in the browser.
+   This removes the change from the pending queue. **Do not skip this step** — unresolved changes will remain in the overlay as pending. Resolve each change immediately after implementing it, not in a batch at the end.
+
+7. **Summarize.** After resolving all changes, give the user a brief summary of what you changed. The dev server will hot-reload automatically so they can see the results immediately in the browser.
