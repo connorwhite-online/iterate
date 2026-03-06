@@ -196,6 +196,7 @@ async function main() {
             `- **ID**: ${a.id}\n` +
             `- **Status**: ${a.status}\n` +
             `- **Iteration**: ${a.iteration}\n` +
+            (a.url ? `- **Page**: ${a.url}\n` : "") +
             `- **Elements** (${a.elements.length}):\n`;
 
           for (const el of a.elements) {
@@ -252,7 +253,9 @@ async function main() {
       let text =
         `# Change: ${change.comment}\n\n` +
         `**Iteration**: ${change.iteration}\n` +
-        `**Status**: ${change.status}\n\n`;
+        `**Status**: ${change.status}\n` +
+        (change.url ? `**Page**: ${change.url}\n` : "") +
+        `\n`;
 
       text += `## Selected Elements (${change.elements.length})\n\n`;
       for (const el of change.elements) {
@@ -366,6 +369,7 @@ async function main() {
           const extraCount = a.elements.length > 1 ? ` +${a.elements.length - 1} more` : "";
           return (
             `- **${name}**${source}${extraCount}: "${a.comment}"` +
+            (a.url ? ` — page: ${a.url}` : "") +
             (a.textSelection ? ` — text: "${a.textSelection.text.slice(0, 40)}…"` : "") +
             ` — ID: ${a.id}`
           );
@@ -423,6 +427,7 @@ async function main() {
           text += `### "${a.comment}"\n`;
           text += `- **ID**: ${a.id}\n`;
           text += `- **Iteration**: ${a.iteration}\n`;
+          if (a.url) text += `- **Page**: ${a.url}\n`;
           text += `- **Elements** (${a.elements.length}):\n`;
 
           for (const el of a.elements) {
@@ -455,10 +460,24 @@ async function main() {
         for (const dc of domChanges) {
           const dcName = dc.componentName ? `<${dc.componentName}>` : dc.selector;
           const dcSource = dc.sourceLocation ? ` (${dc.sourceLocation})` : "";
-          text += `- **${dc.type}** on ${dcName}${dcSource}\n`;
+          const isCrossParent = dc.targetParentSelector && dc.targetParentSelector !== dc.parentSelector;
+          const label = isCrossParent ? "reparent" : dc.type;
+          text += `- **${label}** on ${dcName}${dcSource}\n`;
+          if (dc.url) text += `  Page: ${dc.url}\n`;
           text += `  Selector: \`${dc.selector}\`\n`;
-          text += `  Before: ${JSON.stringify(dc.before.rect)}\n`;
-          text += `  After: ${JSON.stringify(dc.after.rect)}\n`;
+          if (dc.type === "reorder" && dc.before.siblingIndex !== undefined) {
+            if (isCrossParent) {
+              text += `  From: \`${dc.parentSelector}\` (index ${dc.before.siblingIndex})\n`;
+              text += `  To: \`${dc.targetParentSelector}\` (index ${dc.after.siblingIndex})\n`;
+            } else {
+              text += `  Reordered: index ${dc.before.siblingIndex} → ${dc.after.siblingIndex}`;
+              if (dc.parentSelector) text += ` in \`${dc.parentSelector}\``;
+              text += `\n`;
+            }
+          } else {
+            text += `  Before: ${JSON.stringify(dc.before.rect)}\n`;
+            text += `  After: ${JSON.stringify(dc.after.rect)}\n`;
+          }
         }
       }
 

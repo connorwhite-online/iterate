@@ -20,13 +20,20 @@ interface IterateMessage {
     | "batch-counts"
     | "ready"
     | "request-batch-text"
-    | "batch-text";
+    | "batch-text"
+    | "keydown";
   mode?: ToolMode;
   iteration?: string;
   previewMode?: boolean;
   batchCount?: number;
   moveCount?: number;
+  processing?: boolean;
   text?: string;
+  key?: string;
+  metaKey?: boolean;
+  ctrlKey?: boolean;
+  altKey?: boolean;
+  shiftKey?: boolean;
 }
 
 function isIterateMessage(data: unknown): data is IterateMessage {
@@ -52,14 +59,24 @@ function StandaloneOverlay() {
   const iterationRef = useRef<string>(ORIGINAL_TAB);
   const previewModeRef = useRef(true);
   const [mode, setMode] = useState<ToolMode>("browse");
-  const [iteration, setIteration] = useState<string>(() => {
+  const [iteration, setIterationRaw] = useState<string>(() => {
+    const stored = sessionStorage.getItem("iterate:activeTab");
+    if (stored) return stored;
     const initial = (window as any).__iterate_shell__?.activeIteration;
     return initial && initial !== "default" && initial !== ORIGINAL_TAB
       ? initial
       : ORIGINAL_TAB;
   });
+  const setIteration = (tab: string | ((prev: string) => string)) => {
+    setIterationRaw((prev) => {
+      const next = typeof tab === "function" ? tab(prev) : tab;
+      sessionStorage.setItem("iterate:activeTab", next);
+      return next;
+    });
+  };
   const [visible, setVisible] = useState(true);
   const [tabCounts, setTabCounts] = useState<Record<string, { batch: number; move: number }>>({});
+  const [tabProcessing, setTabProcessing] = useState<Record<string, boolean>>({});
   const [previewMode, setPreviewMode] = useState(true);
   const [iterations, setIterations] = useState<Record<string, IterationInfo>>({});
   const [readyIframes, setReadyIframes] = useState<Set<string>>(new Set());
@@ -89,6 +106,7 @@ function StandaloneOverlay() {
   const moveCount = activeCounts.move;
   const totalBatchCount = Object.values(tabCounts).reduce((sum, c) => sum + c.batch, 0);
   const totalMoveCount = Object.values(tabCounts).reduce((sum, c) => sum + c.move, 0);
+  const anyProcessing = Object.values(tabProcessing).some(Boolean);
   const tabBadgeCounts: Record<string, number> = {};
   for (const [tab, counts] of Object.entries(tabCounts)) {
     const total = counts.batch + counts.move;
@@ -166,6 +184,27 @@ function StandaloneOverlay() {
     return () => window.removeEventListener("message", handler);
   }, [isEmbedded]);
 
+  // --- Embedded mode: relay keyboard events to parent for hotkey handling ---
+  useEffect(() => {
+    if (!isEmbedded) return;
+    const handler = (e: KeyboardEvent) => {
+      // Only relay keys that FloatingPanel cares about
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable) return;
+      window.parent.postMessage({
+        __iterate: true,
+        type: "keydown",
+        key: e.key,
+        metaKey: e.metaKey,
+        ctrlKey: e.ctrlKey,
+        altKey: e.altKey,
+        shiftKey: e.shiftKey,
+      } as IterateMessage, "*");
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [isEmbedded]);
+
   // --- Embedded mode: forward batch text response to parent ---
   useEffect(() => {
     if (!isEmbedded) return;
@@ -178,6 +217,7 @@ function StandaloneOverlay() {
   }, [isEmbedded]);
 
   // --- Embedded mode: send batch/move counts back to parent ---
+  const embeddedProcessing = tabProcessing[iteration] ?? false;
   useEffect(() => {
     if (!isEmbedded) return;
     const msg: IterateMessage = {
@@ -185,9 +225,10 @@ function StandaloneOverlay() {
       type: "batch-counts",
       batchCount,
       moveCount,
+      processing: embeddedProcessing,
     };
     window.parent.postMessage(msg, "*");
-  }, [isEmbedded, batchCount, moveCount]);
+  }, [isEmbedded, batchCount, moveCount, embeddedProcessing]);
 
   // --- Parent mode: forward tool/action commands to iteration iframe ---
   const postToIframe = useCallback(
@@ -234,9 +275,20 @@ function StandaloneOverlay() {
               ...prev,
               [name]: { batch: e.data.batchCount ?? 0, move: e.data.moveCount ?? 0 },
             }));
+            setTabProcessing((prev) => ({ ...prev, [name]: e.data.processing ?? false }));
             break;
           }
         }
+      } else if (e.data.type === "keydown") {
+        // Re-dispatch keyboard event from iframe so FloatingPanel's hotkey handler fires
+        window.dispatchEvent(new KeyboardEvent("keydown", {
+          key: e.data.key ?? "",
+          metaKey: e.data.metaKey ?? false,
+          ctrlKey: e.data.ctrlKey ?? false,
+          altKey: e.data.altKey ?? false,
+          shiftKey: e.data.shiftKey ?? false,
+          bubbles: true,
+        }));
       } else if (e.data.type === "ready") {
         // Find which iframe sent this ready message and sync state to it
         for (const [name, iframe] of Object.entries(iterationIframeRefs.current)) {
@@ -612,31 +664,8 @@ function StandaloneOverlay() {
   // actual tools are handled by the embedded overlay inside each iteration iframe.
   const activeIframeRef = iframeRef;
 
-  // Derive the target document for theme detection — when viewing an iteration,
-  // detect from that iframe's document so the toolbar adapts per-worktree.
-  const [themeTargetDoc, setThemeTargetDoc] = useState<Document | null>(null);
-  useEffect(() => {
-    if (!isViewingIteration) {
-      setThemeTargetDoc(null); // fall back to parent document
-      return;
-    }
-    const iframe = iterationIframeRefs.current[iteration];
-    if (!iframe) { setThemeTargetDoc(null); return; }
-    // Reset to parent doc while we attempt to read the iframe's document
-    setThemeTargetDoc(null);
-    // The iframe may not have loaded yet — wait for it
-    const tryRead = () => {
-      try {
-        const doc = iframe.contentDocument;
-        if (doc && doc.body) { setThemeTargetDoc(doc); return true; }
-      } catch { /* cross-origin — can't read, fall back */ }
-      return false;
-    };
-    if (tryRead()) return;
-    const onLoad = () => { tryRead(); };
-    iframe.addEventListener("load", onLoad);
-    return () => iframe.removeEventListener("load", onLoad);
-  }, [iteration, isViewingIteration]);
+  // Theme detection always uses the parent document — the toolbar lives in the
+  // parent page context and should follow its theme regardless of which tab is active.
 
   // If embedded in an iframe, only render the IterateOverlay (no FloatingPanel)
   if (isEmbedded) {
@@ -659,6 +688,9 @@ function StandaloneOverlay() {
             [iteration]: { batch: prev[iteration]?.batch ?? 0, move: count },
           }));
         }}
+        onProcessingChange={(p) => {
+          setTabProcessing((prev) => ({ ...prev, [iteration]: p }));
+        }}
         previewMode={previewMode}
       />
       </ThemeProvider>
@@ -666,7 +698,7 @@ function StandaloneOverlay() {
   }
 
   return (
-    <ThemeProvider targetDocument={themeTargetDoc}>
+    <ThemeProvider>
     <>
       {/* Iteration preview iframes — ALL ready iterations are rendered simultaneously
           via portal OUTSIDE overlay root to avoid pointer-events:none inheritance.
@@ -714,6 +746,9 @@ function StandaloneOverlay() {
             [ORIGINAL_TAB]: { batch: prev[ORIGINAL_TAB]?.batch ?? 0, move: count },
           }));
         }}
+        onProcessingChange={(p) => {
+          setTabProcessing((prev) => ({ ...prev, [ORIGINAL_TAB]: p }));
+        }}
         previewMode={previewMode}
         visible={visible && !isViewingIteration}
       />
@@ -726,6 +761,7 @@ function StandaloneOverlay() {
         onVisibilityChange={setVisible}
         batchCount={totalBatchCount}
         moveCount={totalMoveCount}
+        processing={anyProcessing}
         onClearBatch={handleClearBatch}
         onCopyBatch={handleCopyBatch}
         onUndoMove={handleUndoMove}

@@ -60,7 +60,7 @@ export function MarkerDraw({
 
       // Skip clicks on iterate overlay elements (badges, popups, markers layers)
       const target = e.target as Element;
-      if (target?.closest?.("#__iterate-markers-layer__, #__iterate-fixed-markers-layer__, [data-iterate-popup]")) return;
+      if (target?.closest?.("#__iterate-markers-layer__, #__iterate-fixed-markers-layer__, [data-iterate-popup], [data-iterate-panel]")) return;
 
       e.preventDefault();
       e.stopPropagation();

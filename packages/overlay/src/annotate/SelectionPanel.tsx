@@ -17,6 +17,8 @@ interface SelectionPanelProps {
   initialComment?: string;
   /** Shown as a left-aligned trash button in the toolbar (for editing existing changes) */
   onDelete?: () => void;
+  /** Reference to the iteration iframe (for click-outside detection) */
+  iframeRef?: React.RefObject<HTMLIFrameElement | null>;
 }
 
 const FONT_STACK = "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
@@ -51,6 +53,7 @@ export function SelectionPanel({
   isDrawing,
   initialComment,
   onDelete,
+  iframeRef,
 }: SelectionPanelProps) {
   const theme = useTheme();
   const [comment, setComment] = useState("");
@@ -118,6 +121,49 @@ export function SelectionPanel({
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   }, [hasSelection]);
+
+  // Shake animation on click outside
+  const [shaking, setShaking] = useState(false);
+  const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (animState !== "visible") return;
+
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (panelRef.current?.contains(e.target as Node)) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Trigger shake
+      setShaking(true);
+      if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
+      shakeTimerRef.current = setTimeout(() => {
+        setShaking(false);
+        shakeTimerRef.current = null;
+      }, 400);
+
+      // Refocus textarea
+      inputRef.current?.focus();
+    };
+
+    // Listen on both the parent document and the iframe document
+    document.addEventListener("mousedown", handleOutsideClick, { capture: true });
+
+    let iframeDoc: Document | null = null;
+    try {
+      iframeDoc = iframeRef?.current?.contentDocument ?? null;
+    } catch { /* cross-origin */ }
+    iframeDoc?.addEventListener("mousedown", handleOutsideClick, { capture: true });
+
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick, { capture: true });
+      iframeDoc?.removeEventListener("mousedown", handleOutsideClick, { capture: true });
+    };
+  }, [animState, iframeRef]);
+
+  useEffect(() => {
+    return () => { if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current); };
+  }, []);
 
   // Measure actual panel height so we can clamp position within the viewport
   useLayoutEffect(() => {
@@ -214,6 +260,18 @@ export function SelectionPanel({
   top = Math.max(window.scrollY + margin, Math.min(top, window.scrollY + window.innerHeight - effectiveHeight - margin));
 
   return (
+    <>
+    <style>{`
+      @keyframes iterate-panel-shake {
+        0% { transform: translateX(0); }
+        15% { transform: translateX(-6px); }
+        30% { transform: translateX(5px); }
+        45% { transform: translateX(-4px); }
+        60% { transform: translateX(2px); }
+        75% { transform: translateX(-1px); }
+        100% { transform: translateX(0); }
+      }
+    `}</style>
     <div
       ref={panelRef}
       style={{
@@ -227,6 +285,7 @@ export function SelectionPanel({
         opacity: isShown ? 1 : 0,
         transform: isShown ? "scale(1)" : "scale(0.92)",
         transition: `opacity 0.2s ease, transform 0.25s ${SPRING}`,
+        animation: shaking ? "iterate-panel-shake 0.4s ease" : undefined,
       }}
     >
       <form
@@ -396,7 +455,7 @@ export function SelectionPanel({
                   background: "transparent",
                   border: `1px solid ${theme.border}`,
                   borderRadius: 6,
-                  color: theme.textDisabled,
+                  color: theme.textSecondary,
                   cursor: "pointer",
                   fontSize: 12,
                   fontFamily: FONT_STACK,
@@ -426,6 +485,7 @@ export function SelectionPanel({
         </div>
       </form>
     </div>
+    </>
   );
 }
 
@@ -447,8 +507,8 @@ function TrashButton({ onClick }: { onClick: () => void }) {
         height: 32,
         borderRadius: 8,
         border: "none",
-        background: hovered ? theme.hoverBg : "transparent",
-        color: theme.textDisabled,
+        background: hovered ? "rgba(229, 57, 53, 0.12)" : "transparent",
+        color: "#e53935",
         cursor: "pointer",
         padding: 0,
         flexShrink: 0,

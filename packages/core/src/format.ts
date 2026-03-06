@@ -20,8 +20,10 @@ export interface FormatDomChange {
   selector: string;
   componentName: string | null;
   sourceLocation: string | null;
-  before: { rect: Rect };
-  after: { rect: Rect };
+  before: { rect: Rect; siblingIndex?: number };
+  after: { rect: Rect; siblingIndex?: number };
+  parentSelector?: string;
+  targetParentSelector?: string;
   url?: string;
 }
 
@@ -103,13 +105,26 @@ export function formatBatchPrompt(
     for (const dc of domChanges) {
       const dcName = dc.componentName ? `<${dc.componentName}>` : dc.selector;
       const dcSource = dc.sourceLocation ? ` — \`${dc.sourceLocation}\`` : "";
-      text += `- **${dc.type}** on ${dcName}${dcSource}\n`;
+      const isCrossParent = dc.targetParentSelector && dc.targetParentSelector !== dc.parentSelector;
+      const label = isCrossParent ? "reparent" : dc.type;
+      text += `- **${label}** on ${dcName}${dcSource}\n`;
       if (dc.url) text += `  Page: ${dc.url}\n`;
       text += `  Selector: \`${dc.selector}\`\n`;
-      const before = dc.before.rect;
-      const after = dc.after.rect;
-      text += `  Before: ${before.width.toFixed(0)}×${before.height.toFixed(0)} at (${before.x.toFixed(0)}, ${before.y.toFixed(0)})\n`;
-      text += `  After: ${after.width.toFixed(0)}×${after.height.toFixed(0)} at (${after.x.toFixed(0)}, ${after.y.toFixed(0)})\n`;
+      if (dc.type === "reorder" && dc.before.siblingIndex !== undefined) {
+        if (isCrossParent) {
+          text += `  From: \`${dc.parentSelector}\` (index ${dc.before.siblingIndex})\n`;
+          text += `  To: \`${dc.targetParentSelector}\` (index ${dc.after.siblingIndex})\n`;
+        } else {
+          text += `  Reordered: index ${dc.before.siblingIndex} → ${dc.after.siblingIndex}`;
+          if (dc.parentSelector) text += ` in \`${dc.parentSelector}\``;
+          text += `\n`;
+        }
+      } else {
+        const before = dc.before.rect;
+        const after = dc.after.rect;
+        text += `  Before: ${before.width.toFixed(0)}×${before.height.toFixed(0)} at (${before.x.toFixed(0)}, ${before.y.toFixed(0)})\n`;
+        text += `  After: ${after.width.toFixed(0)}×${after.height.toFixed(0)} at (${after.x.toFixed(0)}, ${after.y.toFixed(0)})\n`;
+      }
     }
     text += `\n`;
   }

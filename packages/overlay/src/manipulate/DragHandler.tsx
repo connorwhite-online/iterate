@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { Rect } from "iterate-ui-core";
 import { generateSelector, getRelevantStyles, getComponentInfo } from "../inspector/selector.js";
 import { TrashIcon } from "../panel/icons.js";
+import { useTheme } from "../theme.js";
 
 /** A completed move with rollback info for live preview */
 export interface PendingMove {
@@ -14,12 +15,16 @@ export interface PendingMove {
   computedStyles: Record<string, string>;
   componentName: string | null;
   sourceLocation: string | null;
+  /** Whether the element is the root of its React component (vs a child inside it) */
+  isComponentRoot?: boolean;
   /** For flex/grid reordering: the target sibling index */
   reorderIndex?: number;
   /** For flex/grid reordering: the original sibling index before drag */
   originalSiblingIndex?: number;
-  /** The parent selector for reorder context */
+  /** The original parent selector for reorder context */
   parentSelector?: string;
+  /** The destination parent selector (for cross-parent reparenting) */
+  targetParentSelector?: string;
   /** Window scroll offset when this move was created (for scroll-aware rendering) */
   scrollOffset?: { x: number; y: number };
 }
@@ -68,12 +73,21 @@ export function DragHandler({
   const [originalRect, setOriginalRect] = useState<Rect | null>(null);
   const [dropIndicator, setDropIndicator] = useState<{ x: number; y: number; width: number; height: number; isVertical: boolean } | null>(null);
   const [isReorderDrag, setIsReorderDrag] = useState(false);
+  // Cross-parent reparenting: track the drop target container and its rect for highlighting
+  const [dropTarget, setDropTarget] = useState<{ element: Element; rect: Rect } | null>(null);
+  const originalParentRef = useRef<Element | null>(null);
 
   // Refs for reorder tracking (avoid stale closures in event handlers)
   const originalSiblingIndexRef = useRef<number | null>(null);
   const lastAppliedIndexRef = useRef<number | null>(null);
-  const dragComponentInfoRef = useRef<{ component: string | null; source: string | null }>({ component: null, source: null });
+  const dragComponentInfoRef = useRef<{ component: string | null; source: string | null; isComponentRoot: boolean }>({ component: null, source: null, isComponentRoot: false });
   const dragSelectorRef = useRef<string>("");
+  // Ghost preview: offset from cursor to element top-left, and ref to the original element for opacity restore
+  const dragOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const draggedElRef = useRef<HTMLElement | null>(null);
+  // Auto-scroll: track current mouse position via ref (avoids stale closures in rAF)
+  const currentMouseRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const autoScrollRafRef = useRef<number>(0);
 
   const getTargetDocument = useCallback(() => {
     try {
@@ -96,12 +110,17 @@ export function DragHandler({
   ): { index: number; indicator: { x: number; y: number; width: number; height: number; isVertical: boolean } } | null => {
     const parentStyle = window.getComputedStyle(parent);
     const display = parentStyle.display;
-    if (!display.includes("flex") && !display.includes("grid")) return null;
+    const isFlexOrGrid = display.includes("flex") || display.includes("grid");
+    const isBlock = display === "block" || display === "flow-root" || display === "list-item";
+    if (!isFlexOrGrid && !isBlock) return null;
 
-    const isRow = display.includes("grid") ||
+    // Block containers always stack vertically; flex/grid depends on direction
+    const isRow = isFlexOrGrid && (
+      display.includes("grid") ||
       parentStyle.flexDirection === "row" ||
       parentStyle.flexDirection === "row-reverse" ||
-      parentStyle.flexDirection === "";
+      parentStyle.flexDirection === ""
+    );
 
     const children = Array.from(parent.children).filter(
       (c) => c !== draggedEl && c.getBoundingClientRect().width > 0 && c.getBoundingClientRect().height > 0
@@ -172,6 +191,41 @@ export function DragHandler({
     return null;
   }, []);
 
+  /**
+   * Find a flex/grid container under the cursor that could accept the dragged element.
+   * Used for cross-parent reparenting — returns null if only the current parent is found.
+   */
+  const findDropTarget = useCallback((
+    mouseX: number,
+    mouseY: number,
+    draggedEl: Element,
+    currentParent: Element | null,
+  ): Element | null => {
+    const doc = getTargetDocument();
+    const elements = doc.elementsFromPoint(mouseX, mouseY);
+
+    for (const el of elements) {
+      // Skip the dragged element itself and its descendants
+      if (el === draggedEl || draggedEl.contains(el)) continue;
+      // Skip body/html — too broad to be meaningful reparent targets
+      const tag = el.tagName?.toLowerCase();
+      if (tag === "body" || tag === "html") continue;
+      // Skip the current parent itself (caller gates on cursor-outside-parent)
+      if (currentParent && el === currentParent) continue;
+      // Skip iterate overlay elements
+      if (el.closest?.("#__iterate-markers-layer__, #__iterate-fixed-markers-layer__, [data-iterate-popup], [data-iterate-panel]")) continue;
+
+      const display = window.getComputedStyle(el).display;
+      if (display.includes("flex") || display.includes("grid") || display === "block" || display === "flow-root" || display === "list-item") {
+        const r = el.getBoundingClientRect();
+        if (mouseX >= r.left && mouseX <= r.right && mouseY >= r.top && mouseY <= r.bottom) {
+          return el;
+        }
+      }
+    }
+    return null;
+  }, [getTargetDocument]);
+
   /** Revert a reorder drag to its original position */
   const revertReorderDrag = useCallback((el: Element, originalIdx: number) => {
     const parent = el.parentElement;
@@ -182,6 +236,16 @@ export function DragHandler({
     (el as HTMLElement).style.opacity = "";
     (el as HTMLElement).style.transition = "";
   }, []);
+
+  // Set cursor to "move" on the target document when the move tool is active
+  useEffect(() => {
+    if (!active) return;
+    const doc = getTargetDocument();
+    const style = doc.createElement("style");
+    style.textContent = "* { cursor: move !important; }";
+    doc.head.appendChild(style);
+    return () => { style.remove(); };
+  }, [active, getTargetDocument]);
 
   useEffect(() => {
     if (!active) {
@@ -202,7 +266,7 @@ export function DragHandler({
       if (["html", "body", "head", "script", "style"].includes(tag)) return;
 
       // Skip clicks on iterate overlay elements (badges, popups, markers layers)
-      if (target.closest?.("#__iterate-markers-layer__, #__iterate-fixed-markers-layer__, [data-iterate-popup]")) return;
+      if (target.closest?.("#__iterate-markers-layer__, #__iterate-fixed-markers-layer__, [data-iterate-popup], [data-iterate-panel]")) return;
 
       e.preventDefault();
       e.stopPropagation();
@@ -210,9 +274,14 @@ export function DragHandler({
       const rect = target.getBoundingClientRect();
 
       // Check if the element is a flex/grid child for reorder mode
+      // Absolute/fixed/sticky elements always use arrow mode (coordinate-based, not flow-based)
       const parentEl = target.parentElement;
       const parentDisplay = parentEl ? window.getComputedStyle(parentEl).display : "";
-      const canReorder = parentDisplay.includes("flex") || parentDisplay.includes("grid");
+      const elPosition = window.getComputedStyle(target).position;
+      const isOutOfFlow = elPosition === "absolute" || elPosition === "fixed" || elPosition === "sticky";
+      const isFlexOrGrid = parentDisplay.includes("flex") || parentDisplay.includes("grid");
+      const isBlock = parentDisplay === "block" || parentDisplay === "flow-root" || parentDisplay === "list-item";
+      const canReorder = !isOutOfFlow && (isFlexOrGrid || isBlock);
 
       // Capture original sibling index for reorder tracking
       if (canReorder && parentEl) {
@@ -230,6 +299,18 @@ export function DragHandler({
       dragComponentInfoRef.current = getComponentInfo(target);
       dragSelectorRef.current = generateSelector(target);
 
+      // For reorder drags: capture cursor offset from element corner and dim the original
+      if (canReorder) {
+        dragOffsetRef.current = { x: e.clientX - rect.x, y: e.clientY - rect.y };
+        draggedElRef.current = target as HTMLElement;
+        originalParentRef.current = parentEl;
+        (target as HTMLElement).style.opacity = "0.3";
+      } else {
+        dragOffsetRef.current = { x: 0, y: 0 };
+        draggedElRef.current = null;
+        originalParentRef.current = null;
+      }
+
       setDragElement(target);
       setDragStart({ x: e.clientX, y: e.clientY });
       setCurrentMouse({ x: e.clientX, y: e.clientY });
@@ -245,13 +326,35 @@ export function DragHandler({
 
     const handleMouseMove = (e: MouseEvent) => {
       if (!dragging || !dragStart || !dragElement) return;
+      currentMouseRef.current = { x: e.clientX, y: e.clientY };
       setCurrentMouse({ x: e.clientX, y: e.clientY });
 
-      // Update drop indicator for flex/grid reordering (element stays in place during drag)
+      // Update drop indicator for flex/grid reordering
       if (isReorderDrag && dragElement.parentElement) {
-        const drop = getDropPosition(dragElement.parentElement, dragElement, e.clientX, e.clientY);
+        // Only look for cross-parent targets when cursor is outside the original parent
+        const origParent = originalParentRef.current;
+        let newTarget: Element | null = null;
+        if (origParent) {
+          const pr = origParent.getBoundingClientRect();
+          const outside = e.clientX < pr.left || e.clientX > pr.right || e.clientY < pr.top || e.clientY > pr.bottom;
+          if (outside) {
+            newTarget = findDropTarget(e.clientX, e.clientY, dragElement, origParent);
+          }
+        }
+        const targetContainer = newTarget ?? dragElement.parentElement;
+
+        if (newTarget) {
+          const r = newTarget.getBoundingClientRect();
+          setDropTarget({ element: newTarget, rect: { x: r.x, y: r.y, width: r.width, height: r.height } });
+        } else {
+          setDropTarget(null);
+        }
+
+        const drop = getDropPosition(targetContainer, dragElement, e.clientX, e.clientY);
         if (drop) {
-          setDropIndicator(drop.indicator);
+          // Hide indicator if target position is the same as current (no movement yet)
+          const isCurrentPosition = !newTarget && drop.index === originalSiblingIndexRef.current;
+          setDropIndicator(isCurrentPosition ? null : drop.indicator);
           lastAppliedIndexRef.current = drop.index;
         } else {
           setDropIndicator(null);
@@ -259,71 +362,115 @@ export function DragHandler({
       }
     };
 
+    /** Restore opacity on the dragged element and reset all drag state */
+    const cleanupDrag = () => {
+      if (draggedElRef.current) {
+        draggedElRef.current.style.opacity = "";
+        draggedElRef.current = null;
+      }
+      setDragging(false);
+      setDragElement(null);
+      setDragStart(null);
+      setCurrentMouse(null);
+      setOriginalRect(null);
+      setDropIndicator(null);
+      setDropTarget(null);
+    };
+
     const handleMouseUp = (e: MouseEvent) => {
       if (!dragging || !dragElement || !originalRect || !dragStart) {
-        setDragging(false);
+        cleanupDrag();
         return;
       }
 
       const dx = e.clientX - dragStart.x;
       const dy = e.clientY - dragStart.y;
 
-      // For reorder drags, check if the element actually moved
+      // For reorder drags: handle same-parent reorder or cross-parent reparent
       if (isReorderDrag) {
-        if (lastAppliedIndexRef.current === null || lastAppliedIndexRef.current === originalSiblingIndexRef.current) {
-          // No actual reorder — clean up
-          setDragging(false);
-          setDragElement(null);
-          setDragStart(null);
-          setCurrentMouse(null);
-          setOriginalRect(null);
-          setDropIndicator(null);
+        // Only detect reparent target when cursor is outside the original parent
+        const origParent = originalParentRef.current;
+        let reparentTarget: Element | null = null;
+        if (origParent) {
+          const pr = origParent.getBoundingClientRect();
+          const outside = e.clientX < pr.left || e.clientX > pr.right || e.clientY < pr.top || e.clientY > pr.bottom;
+          if (outside) {
+            reparentTarget = findDropTarget(e.clientX, e.clientY, dragElement, origParent);
+          }
+        }
+        const isCrossParent = !!reparentTarget;
+
+        // For same-parent: check if the element actually moved
+        if (!isCrossParent && (lastAppliedIndexRef.current === null || lastAppliedIndexRef.current === originalSiblingIndexRef.current)) {
+          cleanupDrag();
           return;
         }
 
-        // Apply the DOM reorder now on drop
-        const parent = dragElement.parentElement;
-        if (parent) {
-          const children = Array.from(parent.children).filter((c) => c !== dragElement);
-          const refChild = children[lastAppliedIndexRef.current] ?? null;
-          parent.insertBefore(dragElement, refChild);
+        const origParentSelector = originalParentRef.current ? generateSelector(originalParentRef.current) : undefined;
+
+        if (isCrossParent && reparentTarget) {
+          // Cross-parent reparent: move element into the new container
+          const drop = getDropPosition(reparentTarget, dragElement, e.clientX, e.clientY);
+          const insertIdx = drop?.index ?? reparentTarget.children.length;
+          const children = Array.from(reparentTarget.children);
+          const refChild = children[insertIdx] ?? null;
+          reparentTarget.insertBefore(dragElement, refChild);
+
+          const finalRect = dragElement.getBoundingClientRect();
+          const { component, source, isComponentRoot } = dragComponentInfoRef.current;
+
+          const pendingMove: PendingMove = {
+            selector: dragSelectorRef.current,
+            from: { x: finalRect.x, y: finalRect.y, width: finalRect.width, height: finalRect.height },
+            to: { x: finalRect.x, y: finalRect.y, width: finalRect.width, height: finalRect.height },
+            computedStyles: getRelevantStyles(dragElement),
+            componentName: component,
+            sourceLocation: source,
+            isComponentRoot,
+            reorderIndex: insertIdx,
+            originalSiblingIndex: originalSiblingIndexRef.current!,
+            parentSelector: origParentSelector,
+            targetParentSelector: generateSelector(reparentTarget),
+            scrollOffset: { x: 0, y: 0 },
+          };
+
+          onMove(pendingMove);
+        } else {
+          // Same-parent reorder: move element among siblings
+          const parent = dragElement.parentElement;
+          if (parent) {
+            const children = Array.from(parent.children).filter((c) => c !== dragElement);
+            const refChild = children[lastAppliedIndexRef.current!] ?? null;
+            parent.insertBefore(dragElement, refChild);
+          }
+
+          const finalRect = dragElement.getBoundingClientRect();
+          const { component, source, isComponentRoot } = dragComponentInfoRef.current;
+
+          const pendingMove: PendingMove = {
+            selector: dragSelectorRef.current,
+            from: { x: finalRect.x, y: finalRect.y, width: finalRect.width, height: finalRect.height },
+            to: { x: finalRect.x, y: finalRect.y, width: finalRect.width, height: finalRect.height },
+            computedStyles: getRelevantStyles(dragElement),
+            componentName: component,
+            sourceLocation: source,
+            isComponentRoot,
+            reorderIndex: lastAppliedIndexRef.current!,
+            originalSiblingIndex: originalSiblingIndexRef.current!,
+            parentSelector: origParentSelector,
+            scrollOffset: { x: 0, y: 0 },
+          };
+
+          onMove(pendingMove);
         }
 
-        const finalRect = dragElement.getBoundingClientRect();
-        const { component, source } = dragComponentInfoRef.current;
-
-        const pendingMove: PendingMove = {
-          selector: dragSelectorRef.current,
-          from: { x: finalRect.x, y: finalRect.y, width: finalRect.width, height: finalRect.height },
-          to: { x: finalRect.x, y: finalRect.y, width: finalRect.width, height: finalRect.height },
-          computedStyles: getRelevantStyles(dragElement),
-          componentName: component,
-          sourceLocation: source,
-          reorderIndex: lastAppliedIndexRef.current!,
-          originalSiblingIndex: originalSiblingIndexRef.current!,
-          parentSelector: dragElement.parentElement ? generateSelector(dragElement.parentElement) : undefined,
-          scrollOffset: { x: 0, y: 0 },
-        };
-
-        onMove(pendingMove);
-
-        setDragging(false);
-        setDragElement(null);
-        setDragStart(null);
-        setCurrentMouse(null);
-        setOriginalRect(null);
-        setDropIndicator(null);
+        cleanupDrag();
         return;
       }
 
       // Non-reorder (positional) moves — skip negligible drags
       if (Math.abs(dx) < 3 && Math.abs(dy) < 3) {
-        setDragging(false);
-        setDragElement(null);
-        setDragStart(null);
-        setCurrentMouse(null);
-        setOriginalRect(null);
-        setDropIndicator(null);
+        cleanupDrag();
         return;
       }
 
@@ -334,7 +481,7 @@ export function DragHandler({
         height: originalRect.height,
       };
 
-      const { component, source } = dragComponentInfoRef.current;
+      const { component, source, isComponentRoot } = dragComponentInfoRef.current;
 
       const pendingMove: PendingMove = {
         selector: generateSelector(dragElement),
@@ -343,27 +490,17 @@ export function DragHandler({
         computedStyles: getRelevantStyles(dragElement),
         componentName: component,
         sourceLocation: source,
+        isComponentRoot,
         scrollOffset: { x: 0, y: 0 },
       };
 
       onMove(pendingMove);
-
-      setDragging(false);
-      setDragElement(null);
-      setDragStart(null);
-      setCurrentMouse(null);
-      setOriginalRect(null);
-      setDropIndicator(null);
+      cleanupDrag();
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape" && dragging) {
-        setDragging(false);
-        setDragElement(null);
-        setDragStart(null);
-        setCurrentMouse(null);
-        setOriginalRect(null);
-        setDropIndicator(null);
+        cleanupDrag();
       }
     };
 
@@ -378,7 +515,37 @@ export function DragHandler({
       targetDoc.removeEventListener("mouseup", handleMouseUp);
       targetDoc.removeEventListener("keydown", handleKeyDown);
     };
-  }, [active, dragging, dragStart, dragElement, originalRect, isReorderDrag, getTargetDocument, onMove, getDropPosition, revertReorderDrag]);
+  }, [active, dragging, dragStart, dragElement, originalRect, isReorderDrag, getTargetDocument, onMove, getDropPosition, findDropTarget, revertReorderDrag]);
+
+  // Auto-scroll when cursor is near viewport edges during drag
+  useEffect(() => {
+    if (!dragging) return;
+
+    const EDGE = 60;
+    const MAX_SPEED = 15;
+
+    const tick = () => {
+      const mouse = currentMouseRef.current;
+      let scrollEl: Element | null = null;
+      try {
+        const doc = iframeRef.current?.contentDocument;
+        scrollEl = doc?.scrollingElement ?? doc?.documentElement ?? null;
+      } catch { /* cross-origin */ }
+      if (!scrollEl) scrollEl = document.scrollingElement ?? document.documentElement;
+
+      let dx = 0, dy = 0;
+      if (mouse.y < EDGE) dy = -MAX_SPEED * (1 - mouse.y / EDGE);
+      else if (mouse.y > window.innerHeight - EDGE) dy = MAX_SPEED * (1 - (window.innerHeight - mouse.y) / EDGE);
+      if (mouse.x < EDGE) dx = -MAX_SPEED * (1 - mouse.x / EDGE);
+      else if (mouse.x > window.innerWidth - EDGE) dx = MAX_SPEED * (1 - (window.innerWidth - mouse.x) / EDGE);
+
+      if (dx || dy) scrollEl.scrollBy(dx, dy);
+      autoScrollRafRef.current = requestAnimationFrame(tick);
+    };
+
+    autoScrollRafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(autoScrollRafRef.current);
+  }, [dragging, iframeRef]);
 
   return (
     <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
@@ -460,148 +627,95 @@ export function DragHandler({
             </>
           )}
 
-          {/* Highlight border around element during reorder drag */}
+          {/* Reorder drag: placeholder outline at original position + ghost following cursor */}
           {isReorderDrag && (
-            <div
-              style={{
-                position: "fixed",
-                left: originalRect.x - 1.5,
-                top: originalRect.y - 1.5,
-                width: originalRect.width + 3,
-                height: originalRect.height + 3,
-                border: "1.5px solid #6b9eff",
-                borderRadius: 4,
-                pointerEvents: "none",
-              }}
-            />
+            <>
+              {/* Placeholder outline where the element was */}
+              <div
+                style={{
+                  position: "fixed",
+                  left: originalRect.x - 1,
+                  top: originalRect.y - 1,
+                  width: originalRect.width + 2,
+                  height: originalRect.height + 2,
+                  border: "2px dashed rgba(37, 99, 235, 0.35)",
+                  borderRadius: 4,
+                  background: "rgba(37, 99, 235, 0.03)",
+                  pointerEvents: "none",
+                }}
+              />
+              {/* Ghost preview following cursor */}
+              <div
+                style={{
+                  position: "fixed",
+                  left: currentMouse.x - dragOffsetRef.current.x,
+                  top: currentMouse.y - dragOffsetRef.current.y,
+                  width: originalRect.width,
+                  height: originalRect.height,
+                  opacity: 0.7,
+                  borderRadius: 4,
+                  border: "1.5px solid #2563eb",
+                  background: "rgba(37, 99, 235, 0.06)",
+                  boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
+                  pointerEvents: "none",
+                  zIndex: 99999,
+                }}
+              />
+            </>
           )}
 
-          {/* Drop indicator line for flex/grid reordering */}
+          {/* Drop indicator line for flex/grid/block reordering */}
           {dropIndicator && (
             <div
               style={{
                 position: "absolute",
                 left: dropIndicator.x - (dropIndicator.isVertical ? 1 : 0),
                 top: dropIndicator.y - (dropIndicator.isVertical ? 0 : 1),
-                width: dropIndicator.width,
-                height: dropIndicator.height,
+                width: dropIndicator.isVertical ? 2 : dropIndicator.width,
+                height: dropIndicator.isVertical ? dropIndicator.height : 2,
                 background: "#2563eb",
-                borderRadius: 1,
+                borderRadius: 2,
                 pointerEvents: "none",
-                boxShadow: "0 0 4px rgba(37, 99, 235, 0.5)",
+                boxShadow: "0 0 6px rgba(37, 99, 235, 0.4)",
+              }}
+            />
+          )}
+
+          {/* Drop target container highlight (cross-parent reparenting) */}
+          {dropTarget && (
+            <div
+              style={{
+                position: "fixed",
+                left: dropTarget.rect.x - 2,
+                top: dropTarget.rect.y - 2,
+                width: dropTarget.rect.width + 4,
+                height: dropTarget.rect.height + 4,
+                border: "2px dashed #2563eb",
+                borderRadius: 6,
+                background: "rgba(37, 99, 235, 0.04)",
+                pointerEvents: "none",
+                transition: "all 0.15s ease",
               }}
             />
           )}
         </>
       )}
 
-      {/* Persistent markers for all pending moves.
-           data-move-idx lets the scroll handler in IterateOverlay apply CSS translate directly. */}
+      {/* Persistent markers for all pending moves */}
       {pendingMoves.map((move, idx) => {
         const isReorder = move.reorderIndex !== undefined;
         return (
-          <div key={`move-${idx}`} data-move-idx={idx}>
-            {/* For non-reorder moves: dotted border + arrow */}
-            {!isReorder && (
-              <>
-                {/* Dotted border at element's current position */}
-                <div
-                  style={{
-                    position: "absolute",
-                    left: move.from.x,
-                    top: move.from.y,
-                    width: move.from.width,
-                    height: move.from.height,
-                    border: "2px dashed rgba(37, 99, 235, 0.5)",
-                    borderRadius: 4,
-                    pointerEvents: "none",
-                  }}
-                />
-
-                {/* Arrow from original to target position */}
-                <svg
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    top: 0,
-                    width: "100%",
-                    height: "100%",
-                    pointerEvents: "none",
-                    overflow: "visible",
-                  }}
-                >
-                  <defs>
-                    <marker
-                      id={`arrowhead-${idx}`}
-                      markerWidth="8"
-                      markerHeight="6"
-                      refX="8"
-                      refY="3"
-                      orient="auto"
-                    >
-                      <polygon
-                        points="0 0, 8 3, 0 6"
-                        fill="rgba(37, 99, 235, 0.6)"
-                      />
-                    </marker>
-                  </defs>
-                  <line
-                    x1={move.from.x + move.from.width / 2}
-                    y1={move.from.y + move.from.height / 2}
-                    x2={move.to.x + move.to.width / 2}
-                    y2={move.to.y + move.to.height / 2}
-                    stroke="rgba(37, 99, 235, 0.4)"
-                    strokeWidth="1.5"
-                    strokeDasharray="4 3"
-                    markerEnd={`url(#arrowhead-${idx})`}
-                  />
-                </svg>
-              </>
-            )}
-
-            {/* Reorder badge or move badge */}
-            <div
-              onClick={(e) => {
-                e.stopPropagation();
-                setEditingMoveIdx(editingMoveIdx === idx ? -1 : idx);
-              }}
-              style={{
-                position: "absolute",
-                left: move.from.x + move.from.width - 8,
-                top: move.from.y - 8,
-                width: 18,
-                height: 18,
-                borderRadius: "50%",
-                background: "#2563eb",
-                color: "#fff",
-                fontSize: 10,
-                fontWeight: 700,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                pointerEvents: "auto",
-                cursor: "pointer",
-                fontFamily: FONT_STACK,
-                boxShadow: editingMoveIdx === idx ? "0 0 0 3px #2563eb44" : "none",
-              }}
-            >
-              {idx + 1}
-            </div>
-
-            {/* Move detail popup */}
-            {editingMoveIdx === idx && (
-              <MovePopup
-                x={move.from.x + move.from.width + 12}
-                y={move.from.y - 8}
-                move={move}
-                onDelete={() => {
-                  onDeleteMove?.(idx);
-                  setEditingMoveIdx(-1);
-                }}
-                onClose={() => setEditingMoveIdx(-1)}
-              />
-            )}
-          </div>
+          <MoveBadge
+            key={`move-${idx}`}
+            move={move}
+            idx={idx}
+            isReorder={isReorder}
+            editing={editingMoveIdx === idx}
+            onToggleEdit={() => setEditingMoveIdx(editingMoveIdx === idx ? -1 : idx)}
+            onDelete={() => { onDeleteMove?.(idx); setEditingMoveIdx(-1); }}
+            onClose={() => setEditingMoveIdx(-1)}
+            iframeRef={iframeRef}
+          />
         );
       })}
     </div>
@@ -610,6 +724,157 @@ export function DragHandler({
 
 const FONT_STACK = "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 const SPRING = "cubic-bezier(0.34, 1.56, 0.64, 1)";
+
+/** Move badge that tracks the element's live position via its selector, surviving scroll. */
+function MoveBadge({
+  move,
+  idx,
+  isReorder,
+  editing,
+  onToggleEdit,
+  onDelete,
+  onClose,
+  iframeRef,
+}: {
+  move: PendingMove;
+  idx: number;
+  isReorder: boolean;
+  editing: boolean;
+  onToggleEdit: () => void;
+  onDelete: () => void;
+  onClose: () => void;
+  iframeRef: React.RefObject<HTMLIFrameElement | null>;
+}) {
+  const [rect, setRect] = useState<Rect | null>(null);
+
+  // Query the element's live bounding rect and update on scroll/resize
+  useEffect(() => {
+    const doc = (() => { try { return iframeRef.current?.contentDocument ?? document; } catch { return document; } })();
+    const scrollEl = (() => { try { return iframeRef.current?.contentWindow ?? window; } catch { return window; } })();
+
+    const update = () => {
+      // For reorders: use parentSelector + after.siblingIndex (stable after DOM reorder)
+      let el: Element | null = null;
+      if (isReorder && move.parentSelector && move.reorderIndex !== undefined) {
+        const targetParentSel = move.targetParentSelector ?? move.parentSelector;
+        const parent = doc.querySelector(targetParentSel);
+        if (parent) el = parent.children[move.reorderIndex] ?? null;
+      }
+      if (!el) el = doc.querySelector(move.selector);
+      if (el) {
+        const r = el.getBoundingClientRect();
+        setRect({ x: r.x, y: r.y, width: r.width, height: r.height });
+      }
+    };
+
+    update();
+    scrollEl.addEventListener("scroll", update, { passive: true });
+    scrollEl.addEventListener("resize", update, { passive: true });
+    return () => {
+      scrollEl.removeEventListener("scroll", update);
+      scrollEl.removeEventListener("resize", update);
+    };
+  }, [iframeRef, move.selector, move.parentSelector, move.targetParentSelector, move.reorderIndex, isReorder]);
+
+  if (!rect) return null;
+
+  return (
+    <>
+      {/* For non-reorder moves: dotted border + arrow */}
+      {!isReorder && (
+        <>
+          <div
+            style={{
+              position: "fixed",
+              left: rect.x,
+              top: rect.y,
+              width: rect.width,
+              height: rect.height,
+              border: "2px dashed rgba(37, 99, 235, 0.5)",
+              borderRadius: 4,
+              pointerEvents: "none",
+            }}
+          />
+          <svg
+            style={{
+              position: "fixed",
+              left: 0,
+              top: 0,
+              width: "100vw",
+              height: "100vh",
+              pointerEvents: "none",
+              overflow: "visible",
+            }}
+          >
+            <defs>
+              <marker
+                id={`arrowhead-${idx}`}
+                markerWidth="8"
+                markerHeight="6"
+                refX="8"
+                refY="3"
+                orient="auto"
+              >
+                <polygon
+                  points="0 0, 8 3, 0 6"
+                  fill="rgba(37, 99, 235, 0.6)"
+                />
+              </marker>
+            </defs>
+            <line
+              x1={rect.x + rect.width / 2}
+              y1={rect.y + rect.height / 2}
+              x2={move.to.x + move.to.width / 2}
+              y2={move.to.y + move.to.height / 2}
+              stroke="rgba(37, 99, 235, 0.4)"
+              strokeWidth="1.5"
+              strokeDasharray="4 3"
+              markerEnd={`url(#arrowhead-${idx})`}
+            />
+          </svg>
+        </>
+      )}
+
+      {/* Badge */}
+      <div
+        onClick={(e) => { e.stopPropagation(); onToggleEdit(); }}
+        style={{
+          position: "fixed",
+          left: rect.x + rect.width - 8,
+          top: rect.y - 8,
+          width: 18,
+          height: 18,
+          borderRadius: "50% 50% 50% 2px",
+          background: "#2563eb",
+          color: "#fff",
+          fontSize: 10,
+          fontWeight: 700,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          pointerEvents: "auto",
+          cursor: "pointer",
+          fontFamily: FONT_STACK,
+          boxShadow: editing ? "0 0 0 3px #2563eb44" : "none",
+          zIndex: 10001,
+        }}
+      >
+        {idx + 1}
+      </div>
+
+      {/* Move detail popup */}
+      {editing && (
+        <MovePopup
+          x={rect.x + rect.width + 12}
+          y={rect.y - 8}
+          move={move}
+          onDelete={onDelete}
+          onClose={onClose}
+        />
+      )}
+    </>
+  );
+}
 
 /** Move detail popup — styled like the annotation panel with component name, positions, and actions. */
 function MovePopup({
@@ -625,6 +890,7 @@ function MovePopup({
   onDelete: () => void;
   onClose: () => void;
 }) {
+  const theme = useTheme();
   const [appeared, setAppeared] = useState(false);
 
   useEffect(() => {
@@ -639,6 +905,7 @@ function MovePopup({
   }, []);
 
   const isReorder = move.reorderIndex !== undefined;
+  const isCrossParent = !!(move.targetParentSelector && move.targetParentSelector !== move.parentSelector);
   const popupWidth = 240;
   const margin = 16;
   let left = x;
@@ -669,7 +936,7 @@ function MovePopup({
           overflow: "hidden",
           boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
           fontFamily: FONT_STACK,
-          background: "#f7f7f7",
+          background: theme.panelBg,
           padding: 4,
         }}
       >
@@ -679,17 +946,22 @@ function MovePopup({
             padding: "4px 8px",
             fontSize: 12,
             fontWeight: 500,
-            color: "#333",
+            color: theme.textPrimary,
           }}
         >
-          {move.componentName || move.selector.split(" ").pop() || "Element"}
+          {(() => {
+            if (move.isComponentRoot && move.componentName) return `<${move.componentName}>`;
+            const lastPart = move.selector.split(" ").pop() || "";
+            const tag = lastPart.replace(/[:.#\[].*$/, "").toLowerCase();
+            return tag ? `<${tag}>` : move.componentName || "Element";
+          })()}
         </div>
 
         {/* Main card — position details + actions */}
         <div
           style={{
-            background: "#fff",
-            border: "1px solid #e0e0e0",
+            background: theme.cardBg,
+            border: `1px solid ${theme.border}`,
             borderRadius: 10,
             padding: 8,
             display: "flex",
@@ -702,22 +974,29 @@ function MovePopup({
             style={{
               fontSize: 10,
               fontFamily: "monospace",
-              color: "#666",
+              color: theme.textSecondary,
               lineHeight: 1.7,
-              background: "#f5f5f5",
+              background: theme.drawerBg,
               borderRadius: 6,
               padding: "6px 8px",
             }}
           >
             {isReorder ? (
-              <>
-                <div><span style={{ color: "#999" }}>from:</span> index {move.originalSiblingIndex ?? "?"}</div>
-                <div><span style={{ color: "#999" }}>to:</span> index {move.reorderIndex}</div>
-              </>
+              isCrossParent ? (
+                <>
+                  <div><span style={{ color: theme.textTertiary }}>from:</span> {move.parentSelector?.split(" ").pop() ?? "parent"}</div>
+                  <div><span style={{ color: theme.textTertiary }}>to:</span> {move.targetParentSelector?.split(" ").pop() ?? "parent"}</div>
+                </>
+              ) : (
+                <>
+                  <div><span style={{ color: theme.textTertiary }}>from:</span> index {move.originalSiblingIndex ?? "?"}</div>
+                  <div><span style={{ color: theme.textTertiary }}>to:</span> index {move.reorderIndex}</div>
+                </>
+              )
             ) : (
               <>
-                <div><span style={{ color: "#999" }}>from:</span> {Math.round(move.from.x)}, {Math.round(move.from.y)}</div>
-                <div><span style={{ color: "#999" }}>to:</span> {Math.round(move.to.x)}, {Math.round(move.to.y)}</div>
+                <div><span style={{ color: theme.textTertiary }}>from:</span> {Math.round(move.from.x)}, {Math.round(move.from.y)}</div>
+                <div><span style={{ color: theme.textTertiary }}>to:</span> {Math.round(move.to.x)}, {Math.round(move.to.y)}</div>
               </>
             )}
           </div>
@@ -737,9 +1016,9 @@ function MovePopup({
               style={{
                 padding: "6px 14px",
                 background: "transparent",
-                border: "1px solid #e0e0e0",
+                border: `1px solid ${theme.border}`,
                 borderRadius: 6,
-                color: "#888",
+                color: theme.textSecondary,
                 cursor: "pointer",
                 fontSize: 12,
                 fontFamily: FONT_STACK,
@@ -757,6 +1036,7 @@ function MovePopup({
 /** Square trash button with red icon and rounded hover background */
 function MoveTrashButton({ onClick }: { onClick: (e: React.MouseEvent) => void }) {
   const [hovered, setHovered] = React.useState(false);
+  const theme = useTheme();
   return (
     <button
       type="button"
@@ -771,7 +1051,7 @@ function MoveTrashButton({ onClick }: { onClick: (e: React.MouseEvent) => void }
         height: 32,
         borderRadius: 8,
         border: "none",
-        background: hovered ? "#fef2f2" : "transparent",
+        background: hovered ? theme.hoverBg : "transparent",
         color: "#dc2626",
         cursor: "pointer",
         padding: 0,

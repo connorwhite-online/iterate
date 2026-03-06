@@ -54,6 +54,8 @@ export interface FloatingPanelProps {
   tabBadgeCounts?: Record<string, number>;
   /** Set of iteration names whose iframes have sent a "ready" postMessage */
   readyIframes?: Set<string>;
+  /** Whether any changes are currently being processed (in-progress) */
+  processing?: boolean;
 }
 
 type Corner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
@@ -61,7 +63,7 @@ type Corner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 const PANEL_MARGIN = 16;
 const ICON_SIZE = 24;
 
-// Spring-like cubic bezier
+// Spring-like cubic bezier (pronounced overshoot for scale/transform)
 const SPRING = "cubic-bezier(0.34, 1.56, 0.64, 1)";
 
 /** Whether tooltips should appear below (true) or above (false) the buttons */
@@ -110,6 +112,7 @@ export function FloatingPanel({
   isViewingIteration = false,
   tabBadgeCounts = {},
   readyIframes,
+  processing = false,
 }: FloatingPanelProps) {
   const theme = useTheme();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -122,6 +125,7 @@ export function FloatingPanel({
   const [discardLoading, setDiscardLoading] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
 
   const iterationNames = iterations
     ? Object.keys(iterations).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
@@ -325,6 +329,7 @@ export function FloatingPanel({
 
       <div
         ref={panelRef}
+        data-iterate-panel=""
         onMouseDown={handleMouseDown}
         style={{
           position: "fixed",
@@ -342,19 +347,19 @@ export function FloatingPanel({
           userSelect: "none",
           overflow: "visible",
           padding: 4,
-          transition: `${positionTransition}`,
+          transition: positionTransition,
         }}
       >
         {/* Annotation count badge — always visible, overflows container */}
         {totalPending > 0 && (
-          <PanelBadge count={totalPending} isLeftSide={isLeftSide} />
+          <PanelBadge count={totalPending} isLeftSide={isLeftSide} processing={processing} />
         )}
         {/* Iteration tab layer — recessed lower layer behind the main toolbar */}
         {hasIterations && (
           <div
             style={{
               background: theme.panelBg,
-              maxHeight: visible ? 48 : 0,
+              maxHeight: visible ? 56 : 0,
               maxWidth: visible ? 999 : 0,
               opacity: visible ? 1 : 0,
               overflow: "hidden",
@@ -393,12 +398,17 @@ export function FloatingPanel({
                 gap: 2,
                 overflowX: "auto",
                 scrollbarWidth: "none",
+                // Extra padding so absolutely-positioned tab badges aren't clipped
+                paddingTop: 6,
+                paddingRight: 6,
+                marginTop: -6,
+                marginRight: -6,
               } as React.CSSProperties}
             >
               {/* Original tab — switch back to the base page */}
               <TabButton
                 active={activeIteration === ORIGINAL_TAB}
-                hasChanges={(tabBadgeCounts[ORIGINAL_TAB] ?? 0) > 0}
+                badgeCount={tabBadgeCounts[ORIGINAL_TAB] ?? 0}
                 title="View original page"
                 onClick={() => onIterationChange?.(ORIGINAL_TAB)}
               >
@@ -421,7 +431,7 @@ export function FloatingPanel({
                   <TabButton
                     key={name}
                     active={isActive}
-                    hasChanges={badgeCount > 0}
+                    badgeCount={badgeCount}
                     title={info?.commandPrompt || name}
                     onClick={() => onIterationChange?.(name)}
                   >
@@ -552,7 +562,7 @@ export function FloatingPanel({
             {(forkLoading || isCreating) && (
               <IconButton
                 icon={<SpinnerIcon size={ICON_SIZE} />}
-                label="Creating iterations\u2026"
+                label="Creating iterations"
                 onClick={() => {}}
               />
             )}
@@ -685,7 +695,7 @@ function SuspenseOverlay({ active, message }: { active: boolean; message: string
 }
 
 /** Per-item stagger delay in ms */
-const STAGGER_MS = 20;
+const STAGGER_MS = 15;
 /** Total time for all stagger items to finish appearing — used as the
  *  max-width transition duration so the container tracks the content. */
 const GROUP_COLLAPSE_MS = 250;
@@ -856,14 +866,14 @@ function CloseToggleButton({
  *  Shows a PortalTooltip with the full title when text is truncated. */
 function TabButton({
   active,
-  hasChanges,
+  badgeCount = 0,
   title,
   onClick,
   children,
 }: {
   active: boolean;
-  /** When true, shows a light blue outline to indicate pending changes */
-  hasChanges?: boolean;
+  /** When > 0, shows a numbered badge at the top-right corner */
+  badgeCount?: number;
   title: string;
   onClick: () => void;
   children: React.ReactNode;
@@ -886,7 +896,6 @@ function TabButton({
         setHovered(true);
         if (buttonRef.current) {
           setAnchorRect(buttonRef.current.getBoundingClientRect());
-          // Check if content is truncated (scrollWidth > clientWidth)
           setIsTruncated(buttonRef.current.scrollWidth > buttonRef.current.clientWidth);
         }
       }}
@@ -900,7 +909,7 @@ function TabButton({
         maxWidth: 80,
         padding: "3px 8px",
         borderRadius: 6,
-        border: hasChanges ? "1px solid rgba(37, 99, 235, 0.4)" : "1px solid transparent",
+        border: "1px solid transparent",
         background: active ? theme.activeBg : "transparent",
         color: active || hovered ? theme.iconHover : theme.iconDefault,
         cursor: "pointer",
@@ -908,13 +917,14 @@ function TabButton({
         fontWeight: 500,
         fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
         whiteSpace: "nowrap",
-        overflow: "hidden",
+        overflow: "visible",
         textOverflow: "ellipsis",
         flexShrink: 0,
         transition: "all 0.15s ease",
       }}
     >
       {children}
+      {badgeCount > 0 && <TabBadge count={badgeCount} />}
       {hovered && isTruncated && anchorRect && createPortal(
         <PortalTooltip label={title} anchorRect={anchorRect} below={tooltipBelow} />,
         document.body,
@@ -1088,18 +1098,15 @@ function PortalTooltip({
   );
 }
 
-/** Small amber badge rendered inline within a tab button.
+/** Small blue badge positioned at the top-right corner of a tab button.
  *  Perfectly circular for single digits; pill-shaped for double digits.
- *  Animates in with a spring scale-up on mount and when count changes.
- *  Uses inline flow (not absolute positioning) so it is never clipped
- *  by parent overflow containers. */
+ *  Animates in with a spring scale-up on mount and when count changes. */
 function TabBadge({ count }: { count: number }) {
   const isDouble = count >= 10;
   const [appeared, setAppeared] = useState(false);
   const prevCountRef = useRef(count);
 
   useEffect(() => {
-    // Re-trigger animation on mount or count change
     setAppeared(false);
     let frame2 = 0;
     const frame1 = requestAnimationFrame(() => {
@@ -1117,20 +1124,24 @@ function TabBadge({ count }: { count: number }) {
   return (
     <span
       style={{
-        display: "inline-flex",
+        position: "absolute",
+        top: -5,
+        right: -5,
+        display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        flexShrink: 0,
         ...(isDouble
-          ? { minWidth: 16, height: 16, borderRadius: 8, padding: "0 4px" }
-          : { width: 16, height: 16, borderRadius: "50%" }),
+          ? { minWidth: 14, height: 14, borderRadius: 7, padding: "0 3px" }
+          : { width: 14, height: 14, borderRadius: "50%" }),
         background: "#2563eb",
         color: "#fff",
-        fontSize: 9,
+        fontSize: 8,
         fontWeight: 700,
         fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
         lineHeight: 1,
         pointerEvents: "none",
+        zIndex: 1,
+        boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
         transform: appeared ? "scale(1)" : "scale(0)",
         transition: `transform 0.3s ${SPRING}`,
       }}
@@ -1141,10 +1152,13 @@ function TabBadge({ count }: { count: number }) {
 }
 
 /** Annotation count badge positioned at the corner of the panel container.
- *  Overflows the panel bounds. Always visible (open or closed). */
-function PanelBadge({ count, isLeftSide }: { count: number; isLeftSide: boolean }) {
+ *  Overflows the panel bounds. Always visible (open or closed).
+ *  When processing, turns green and shows a spinning border ring. */
+function PanelBadge({ count, isLeftSide, processing = false }: { count: number; isLeftSide: boolean; processing?: boolean }) {
   const isDouble = count >= 10;
   const [appeared, setAppeared] = useState(false);
+  const badgeRef = useRef<HTMLSpanElement>(null);
+  const [badgeW, setBadgeW] = useState(18);
 
   useEffect(() => {
     setAppeared(false);
@@ -1152,6 +1166,10 @@ function PanelBadge({ count, isLeftSide }: { count: number; isLeftSide: boolean 
     const frame1 = requestAnimationFrame(() => {
       frame2 = requestAnimationFrame(() => {
         setAppeared(true);
+        // Measure after the badge has appeared and painted
+        if (badgeRef.current) {
+          setBadgeW(badgeRef.current.offsetWidth);
+        }
       });
     });
     return () => {
@@ -1160,8 +1178,19 @@ function PanelBadge({ count, isLeftSide }: { count: number; isLeftSide: boolean 
     };
   }, [count]);
 
+  // Spinner ring geometry
+  const gap = 2;
+  const strokeW = 1.5;
+  const badgeH = 18;
+  const badgeRx = 9; // border-radius for both circle (18/2) and pill
+  const ringW = badgeW + 2 * (gap + strokeW);
+  const ringH = badgeH + 2 * (gap + strokeW);
+  const ringRx = badgeRx + gap + strokeW / 2;
+  const offset = gap + strokeW; // how far the SVG extends beyond the badge on each side
+
   return (
     <span
+      ref={badgeRef}
       style={{
         position: "absolute",
         top: -6,
@@ -1172,7 +1201,7 @@ function PanelBadge({ count, isLeftSide }: { count: number; isLeftSide: boolean 
         ...(isDouble
           ? { minWidth: 18, height: 18, borderRadius: 9, padding: "0 4px" }
           : { width: 18, height: 18, borderRadius: "50%" }),
-        background: "#2563eb",
+        background: processing ? "#16a34a" : "#2563eb",
         color: "#fff",
         fontSize: 10,
         fontWeight: 700,
@@ -1182,10 +1211,47 @@ function PanelBadge({ count, isLeftSide }: { count: number; isLeftSide: boolean 
         zIndex: 1,
         boxShadow: "0 1px 4px rgba(0,0,0,0.15)",
         transform: appeared ? "scale(1)" : "scale(0)",
-        transition: `transform 0.3s ${SPRING}`,
+        transition: `transform 0.3s ${SPRING}, background 0.3s ease`,
+        overflow: "visible",
       }}
     >
       {count}
+      {/* Spinner ring — SVG inside badge, extends outward via negative positioning */}
+      {processing && (
+        <>
+          <style>{`
+            @keyframes iterate-badge-spin {
+              to { stroke-dashoffset: -100; }
+            }
+          `}</style>
+          <svg
+            width={ringW}
+            height={ringH}
+            style={{
+              position: "absolute",
+              top: -offset,
+              left: -offset,
+            }}
+          >
+            {/* Track */}
+            <rect
+              x={strokeW / 2} y={strokeW / 2}
+              width={ringW - strokeW} height={ringH - strokeW}
+              rx={ringRx} fill="none"
+              stroke="rgba(34, 197, 94, 0.2)" strokeWidth={strokeW}
+            />
+            {/* Spinning segment */}
+            <rect
+              x={strokeW / 2} y={strokeW / 2}
+              width={ringW - strokeW} height={ringH - strokeW}
+              rx={ringRx} fill="none"
+              stroke="#22c55e" strokeWidth={strokeW}
+              pathLength={100} strokeDasharray="25 75" strokeLinecap="round"
+              style={{ animation: "iterate-badge-spin 1s linear infinite" }}
+            />
+          </svg>
+        </>
+      )}
     </span>
   );
 }

@@ -32,6 +32,8 @@ export interface IterateOverlayProps {
   onBatchCountChange?: (count: number) => void;
   /** Current pending move count (passed up for toolbar badge) */
   onMoveCountChange?: (count: number) => void;
+  /** Whether any changes are currently being processed (in-progress) */
+  onProcessingChange?: (processing: boolean) => void;
   /** Whether live preview is enabled */
   previewMode?: boolean;
   /** Whether the toolbar is visible — when false, badges are hidden and tools are disabled */
@@ -134,6 +136,7 @@ export function IterateOverlay({
   iframeRef,
   onBatchCountChange,
   onMoveCountChange,
+  onProcessingChange,
   previewMode = true,
   visible = true,
 }: IterateOverlayProps) {
@@ -152,6 +155,8 @@ export function IterateOverlay({
   // Server-side DOM changes — synced from daemon via WebSocket
   const [domChanges, setDomChanges] = useState<DomChange[]>([]);
   const domChangesRef = useRef<DomChange[]>([]);
+  // Track which DOM change IDs have been applied to the live DOM (survives re-renders, not reloads)
+  const appliedDomChangesRef = useRef<Set<string>>(new Set());
 
   // Track whether marquee drag is in progress (suppresses ElementPicker hover)
   const [isMarqueeDragging, setIsMarqueeDragging] = useState(false);
@@ -252,6 +257,9 @@ export function IterateOverlay({
           break;
         case "dom:changed":
           if (msg.payload.iteration === iteration) {
+            // Mark as already applied — during a live session, the DOM mutation
+            // happened before the change was recorded, so no replay needed
+            appliedDomChangesRef.current.add(msg.payload.id);
             setDomChanges((prev) => {
               if (prev.some((dc) => dc.id === msg.payload.id)) return prev;
               // For reorders, replace any existing entry for the same selector (coalescing)
@@ -263,6 +271,7 @@ export function IterateOverlay({
           }
           break;
         case "dom:deleted":
+          appliedDomChangesRef.current.delete(msg.payload.id);
           setDomChanges((prev) => prev.filter((dc) => dc.id !== msg.payload.id));
           break;
       }
@@ -289,6 +298,7 @@ export function IterateOverlay({
   // Pending counts for toolbar badges
   const pendingChangeCount = changes.filter((a) => a.status === "queued" || a.status === "in-progress").length;
   const pendingDomChangeCount = domChanges.length;
+  const isProcessing = changes.some((a) => a.status === "in-progress");
 
   // Notify parent of count changes
   useEffect(() => {
@@ -298,6 +308,10 @@ export function IterateOverlay({
   useEffect(() => {
     onMoveCountChange?.(pendingDomChangeCount);
   }, [pendingDomChangeCount, onMoveCountChange]);
+
+  useEffect(() => {
+    onProcessingChange?.(isProcessing);
+  }, [isProcessing, onProcessingChange]);
 
   // Handle element selection from ElementPicker (click / ctrl+click)
   const handleElementSelect = useCallback(
@@ -534,8 +548,9 @@ export function IterateOverlay({
       const isReorder = move.reorderIndex !== undefined;
 
       // Coalesce reorders: if there's already a reorder for this element,
-      // delete the old one and preserve its original before.siblingIndex
+      // delete the old one and preserve its original before.siblingIndex and parentSelector
       let originalSiblingIndex = move.originalSiblingIndex;
+      let originalParentSelector = move.parentSelector;
       if (isReorder) {
         const existing = domChangesRef.current.find(
           (dc) => dc.type === "reorder" && dc.selector === move.selector
@@ -543,11 +558,13 @@ export function IterateOverlay({
         if (existing) {
           // Preserve the true original position from the first move
           originalSiblingIndex = existing.before.siblingIndex;
+          originalParentSelector = existing.parentSelector;
           conn.send({ type: "dom-change:delete", payload: { id: existing.id } });
         }
 
-        // If dragged back to original position, just delete — no net change
-        if (move.reorderIndex === originalSiblingIndex) {
+        // If dragged back to original parent at original index, just delete — no net change
+        const sameParent = !move.targetParentSelector || move.targetParentSelector === originalParentSelector;
+        if (sameParent && move.reorderIndex === originalSiblingIndex) {
           return;
         }
       }
@@ -558,7 +575,8 @@ export function IterateOverlay({
           iteration,
           url: getCurrentPageUrl(iframeRef),
           selector: move.selector,
-          parentSelector: move.parentSelector,
+          parentSelector: originalParentSelector,
+          targetParentSelector: move.targetParentSelector,
           type: isReorder ? "reorder" : "move",
           componentName: move.componentName,
           sourceLocation: move.sourceLocation,
@@ -579,14 +597,82 @@ export function IterateOverlay({
   );
 
   // Helper: revert a single reorder move in the DOM
+  /** Apply a persisted DOM change to the live page (used on reload to replay reorders) */
+  const applyDomChange = useCallback(
+    (change: DomChange) => {
+      if (change.type !== "reorder" || change.after.siblingIndex === undefined) return;
+      const doc = (() => { try { return iframeRef.current?.contentDocument ?? document; } catch { return document; } })();
+      try {
+        const isCrossParent = change.targetParentSelector && change.targetParentSelector !== change.parentSelector;
+
+        if (isCrossParent) {
+          // Cross-parent apply: find element in original parent, move to target parent
+          const originalParent = change.parentSelector ? doc.querySelector(change.parentSelector) : null;
+          const targetParent = doc.querySelector(change.targetParentSelector!);
+          if (!originalParent || !targetParent) return;
+          const el = change.before.siblingIndex !== undefined
+            ? originalParent.children[change.before.siblingIndex] ?? null
+            : null;
+          if (!el) return;
+          const targetChildren = Array.from(targetParent.children);
+          const refChild = targetChildren[change.after.siblingIndex] ?? null;
+          targetParent.insertBefore(el, refChild);
+          return;
+        }
+
+        // Same-parent apply: find element at before index, move to after index
+        const parent = change.parentSelector ? doc.querySelector(change.parentSelector) : null;
+        if (!parent) return;
+        const el = change.before.siblingIndex !== undefined
+          ? parent.children[change.before.siblingIndex] ?? null
+          : null;
+        if (!el) return;
+        const children = Array.from(parent.children).filter((c) => c !== el);
+        const refChild = children[change.after.siblingIndex] ?? null;
+        parent.insertBefore(el, refChild);
+      } catch { /* cross-origin or invalid selector */ }
+    },
+    [iframeRef]
+  );
+
+  // Replay persisted DOM changes on reload — apply any reorders that haven't been applied yet
+  useEffect(() => {
+    if (domChanges.length === 0) return;
+    const unapplied = domChanges
+      .filter((dc) => dc.type === "reorder" && !appliedDomChangesRef.current.has(dc.id))
+      .sort((a, b) => a.timestamp - b.timestamp);
+    for (const dc of unapplied) {
+      applyDomChange(dc);
+      appliedDomChangesRef.current.add(dc.id);
+    }
+  }, [domChanges, applyDomChange]);
+
   const revertDomChange = useCallback(
     (change: DomChange) => {
       if (change.type !== "reorder" || change.before.siblingIndex === undefined) return;
       const doc = (() => { try { return iframeRef.current?.contentDocument ?? document; } catch { return document; } })();
       try {
-        // Find the element: prefer using parentSelector + after.siblingIndex (stable after DOM reorder)
-        // since the element's own selector uses nth-child which becomes stale after reordering
+        const isCrossParent = change.targetParentSelector && change.targetParentSelector !== change.parentSelector;
+
+        if (isCrossParent) {
+          // Cross-parent revert: find element in target parent, move back to original parent
+          const targetParent = doc.querySelector(change.targetParentSelector!);
+          const originalParent = change.parentSelector ? doc.querySelector(change.parentSelector) : null;
+          if (!targetParent || !originalParent) return;
+          const el = change.after.siblingIndex !== undefined
+            ? targetParent.children[change.after.siblingIndex] ?? null
+            : null;
+          if (!el) return;
+          const origChildren = Array.from(originalParent.children);
+          const refChild = origChildren[change.before.siblingIndex] ?? null;
+          originalParent.insertBefore(el, refChild);
+          return;
+        }
+
+        // Same-parent revert: find the element, move it back to original sibling index
         let el: Element | null = null;
+        // Prefer using parentSelector + after.siblingIndex (stable after DOM reorder)
+        // since the element's own selector uses nth-child which becomes stale after reordering
         if (change.parentSelector && change.after.siblingIndex !== undefined) {
           const parent = doc.querySelector(change.parentSelector);
           if (parent) {
@@ -628,6 +714,8 @@ export function IterateOverlay({
     sourceLocation: dc.sourceLocation,
     reorderIndex: dc.after.siblingIndex,
     originalSiblingIndex: dc.before.siblingIndex,
+    parentSelector: dc.parentSelector,
+    targetParentSelector: dc.targetParentSelector,
   }));
 
   // Handle clearing all pending changes and moves
@@ -836,35 +924,37 @@ export function IterateOverlay({
                   boxSizing: "border-box",
                 }}
               />
-              <div
-                style={{
-                  position: "absolute",
-                  left: px,
-                  top: py - 26,
-                  background: "#6b9eff",
-                  color: "#fff",
-                  padding: "2px 8px",
-                  borderRadius: 4,
-                  fontSize: 10,
-                  fontFamily: "monospace",
-                  whiteSpace: "nowrap",
-                  pointerEvents: "none",
-                  display: "flex",
-                  gap: 6,
-                  alignItems: "center",
-                  maxWidth: 400,
-                  overflow: "hidden",
-                }}
-              >
-                <span style={{ fontWeight: 700 }}>
-                  {el.elementName}
-                </span>
-                {el.sourceLocation && (
-                  <span style={{ opacity: 0.7, fontSize: 9 }}>
-                    {el.sourceLocation}
+              {!isAnnotating && (
+                <div
+                  style={{
+                    position: "absolute",
+                    left: px,
+                    top: py - 26,
+                    background: "#6b9eff",
+                    color: "#fff",
+                    padding: "2px 8px",
+                    borderRadius: 4,
+                    fontSize: 10,
+                    fontFamily: "monospace",
+                    whiteSpace: "nowrap",
+                    pointerEvents: "none",
+                    display: "flex",
+                    gap: 6,
+                    alignItems: "center",
+                    maxWidth: 400,
+                    overflow: "hidden",
+                  }}
+                >
+                  <span style={{ fontWeight: 700 }}>
+                    {el.elementName}
                   </span>
-                )}
-              </div>
+                  {el.sourceLocation && (
+                    <span style={{ opacity: 0.7, fontSize: 9 }}>
+                      {el.sourceLocation}
+                    </span>
+                  )}
+                </div>
+              )}
             </React.Fragment>
           );
         })}
@@ -889,12 +979,17 @@ export function IterateOverlay({
             x={clickPosition.x}
             y={clickPosition.y}
             color="#2563eb"
+            elementRect={activeDrawing ? { ...activeDrawing.bounds, x: activeDrawing.bounds.x + drawingScroll.x, y: activeDrawing.bounds.y + drawingScroll.y } : selectedElements[0]?.rect}
           />
         )}
         {visibleChanges.map((change, idx) => {
           if (change.isFixedPosition) return null; // rendered in fixed layer
           const pos = change.pagePosition;
           if (!pos) return null;
+          const scrollOff = change.drawingScrollOffset ?? { x: 0, y: 0 };
+          const badgeRect = change.drawing
+            ? { x: change.drawing.bounds.x + scrollOff.x, y: change.drawing.bounds.y + scrollOff.y, width: change.drawing.bounds.width, height: change.drawing.bounds.height }
+            : change.elements[0]?.rect;
 
           return (
             <React.Fragment key={change.id}>
@@ -902,8 +997,8 @@ export function IterateOverlay({
                 <svg
                   style={{
                     position: "absolute",
-                    left: change.drawingScrollOffset?.x ?? 0,
-                    top: change.drawingScrollOffset?.y ?? 0,
+                    left: scrollOff.x,
+                    top: scrollOff.y,
                     width: "100vw",
                     height: "100vh",
                     pointerEvents: "none",
@@ -928,6 +1023,7 @@ export function IterateOverlay({
                 color={change.status === "in-progress" ? "#16a34a" : "#2563eb"}
                 onEdit={() => handleEditChange(change.id)}
                 isEditing={editingId === change.id}
+                elementRect={badgeRect}
               />
             </React.Fragment>
           );
@@ -941,6 +1037,9 @@ export function IterateOverlay({
           if (!change.isFixedPosition) return null; // rendered in absolute layer
           const pos = change.pagePosition;
           if (!pos) return null;
+          const fixedBadgeRect = change.drawing
+            ? change.drawing.bounds
+            : change.elements[0]?.rect;
 
           return (
             <React.Fragment key={change.id}>
@@ -974,6 +1073,7 @@ export function IterateOverlay({
                 color={change.status === "in-progress" ? "#16a34a" : "#2563eb"}
                 onEdit={() => handleEditChange(change.id)}
                 isEditing={editingId === change.id}
+                elementRect={fixedBadgeRect}
               />
             </React.Fragment>
           );
@@ -989,6 +1089,26 @@ export function IterateOverlay({
 const BADGE_SPRING = "cubic-bezier(0.34, 1.56, 0.64, 1)";
 
 /**
+ * Compute border-radius so the pointy corner faces toward the element center.
+ */
+function badgeCornerRadius(
+  badgeX: number,
+  badgeY: number,
+  elementRect?: { x: number; y: number; width: number; height: number },
+): string {
+  if (!elementRect) return "50% 50% 2px 50%";
+  const cx = elementRect.x + elementRect.width / 2;
+  const cy = elementRect.y + elementRect.height / 2;
+  const left = badgeX <= cx;
+  const above = badgeY <= cy;
+  // Pointy corner faces toward element center (opposite side from badge position)
+  if (left && above) return "50% 50% 2px 50%";   // bottom-right pointy
+  if (!left && above) return "50% 50% 50% 2px";   // bottom-left pointy
+  if (!left && !above) return "2px 50% 50% 50%";  // top-left pointy
+  return "50% 2px 50% 50%";                        // top-right pointy
+}
+
+/**
  * Animated number badge that pops in at a specific position.
  */
 function AnimatedBadge({
@@ -996,11 +1116,13 @@ function AnimatedBadge({
   x,
   y,
   color,
+  elementRect,
 }: {
   number: number;
   x: number;
   y: number;
   color: string;
+  elementRect?: { x: number; y: number; width: number; height: number };
 }) {
   const [appeared, setAppeared] = useState(false);
 
@@ -1025,7 +1147,7 @@ function AnimatedBadge({
         top: y - 9,
         width: 18,
         height: 18,
-        borderRadius: "50%",
+        borderRadius: badgeCornerRadius(x, y, elementRect),
         background: color,
         color: "#fff",
         fontSize: 10,
@@ -1057,6 +1179,7 @@ function InteractiveBadge({
   color,
   onEdit,
   isEditing,
+  elementRect,
 }: {
   number: number;
   x: number;
@@ -1064,6 +1187,7 @@ function InteractiveBadge({
   color: string;
   onEdit: () => void;
   isEditing?: boolean;
+  elementRect?: { x: number; y: number; width: number; height: number };
 }) {
   const [appeared, setAppeared] = useState(false);
 
@@ -1092,7 +1216,7 @@ function InteractiveBadge({
         top: y - 9,
         width: 18,
         height: 18,
-        borderRadius: "50%",
+        borderRadius: badgeCornerRadius(x, y, elementRect),
         background: color,
         color: "#fff",
         fontSize: 10,
