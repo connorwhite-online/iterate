@@ -346,41 +346,70 @@ async function main() {
 
   server.tool(
     "iterate_get_pending_changes",
-    "Get all queued changes that need attention. Use this to check for new user feedback. Shows element names, React component names, and source file paths.",
+    "Get all queued changes that need attention. Use this to check for new user feedback. Shows element names, React component names, source file paths, as well as DOM move/reorder changes.",
     {},
     async () => {
       const changes = client
         .getChanges()
         .filter((a) => a.status === "queued");
+      const domChanges = client.getDomChanges();
 
-      if (changes.length === 0) {
+      if (changes.length === 0 && domChanges.length === 0) {
         return {
           content: [{ type: "text", text: "No queued changes." }],
         };
       }
 
-      const text = changes
-        .map((a) => {
-          const primary = a.elements[0];
-          const name = primary
-            ? (primary.componentName ? `<${primary.componentName}>` : primary.elementName || primary.selector)
-            : "(no elements)";
-          const source = primary?.sourceLocation ? ` (${primary.sourceLocation})` : "";
-          const extraCount = a.elements.length > 1 ? ` +${a.elements.length - 1} more` : "";
-          return (
-            `- **${name}**${source}${extraCount}: "${a.comment}"` +
-            (a.url ? ` — page: ${a.url}` : "") +
-            (a.textSelection ? ` — text: "${a.textSelection.text.slice(0, 40)}…"` : "") +
-            ` — ID: ${a.id}`
-          );
-        })
-        .join("\n");
+      let text = "";
 
+      if (changes.length > 0) {
+        text += changes
+          .map((a) => {
+            const primary = a.elements[0];
+            const name = primary
+              ? (primary.componentName ? `<${primary.componentName}>` : primary.elementName || primary.selector)
+              : "(no elements)";
+            const source = primary?.sourceLocation ? ` (${primary.sourceLocation})` : "";
+            const extraCount = a.elements.length > 1 ? ` +${a.elements.length - 1} more` : "";
+            return (
+              `- **${name}**${source}${extraCount}: "${a.comment}"` +
+              (a.url ? ` — page: ${a.url}` : "") +
+              (a.textSelection ? ` — text: "${a.textSelection.text.slice(0, 40)}…"` : "") +
+              ` — ID: ${a.id}`
+            );
+          })
+          .join("\n");
+      }
+
+      if (domChanges.length > 0) {
+        if (text) text += "\n\n";
+        text += domChanges
+          .map((dc) => {
+            const dcName = dc.componentName ? `<${dc.componentName}>` : dc.selector;
+            const dcSource = dc.sourceLocation ? ` (${dc.sourceLocation})` : "";
+            const isCrossParent = dc.targetParentSelector && dc.targetParentSelector !== dc.parentSelector;
+            const label = isCrossParent ? "reparent" : dc.type;
+            let line = `- **${label}** on ${dcName}${dcSource}`;
+            if (dc.type === "reorder" && dc.before.siblingIndex !== undefined) {
+              if (isCrossParent) {
+                line += ` — from \`${dc.parentSelector}\` to \`${dc.targetParentSelector}\``;
+              } else {
+                line += ` — index ${dc.before.siblingIndex} → ${dc.after.siblingIndex}`;
+              }
+            } else if (dc.type === "move") {
+              line += ` — (${Math.round(dc.before.rect.x)},${Math.round(dc.before.rect.y)}) → (${Math.round(dc.after.rect.x)},${Math.round(dc.after.rect.y)})`;
+            }
+            return line;
+          })
+          .join("\n");
+      }
+
+      const total = changes.length + domChanges.length;
       return {
         content: [
           {
             type: "text",
-            text: `${changes.length} queued change(s):\n\n${text}`,
+            text: `${total} pending item(s):\n\n${text}`,
           },
         ],
       };

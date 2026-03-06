@@ -206,6 +206,13 @@ export class DaemonClient {
           this.state.domChanges.push(msg.payload);
         }
         break;
+      case "dom:deleted":
+        if (this.state) {
+          this.state.domChanges = this.state.domChanges.filter(
+            (dc) => dc.id !== msg.payload.id
+          );
+        }
+        break;
 
       // --- Iterations ---
       case "iteration:created":
