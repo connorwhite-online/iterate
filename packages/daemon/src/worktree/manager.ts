@@ -187,6 +187,18 @@ export class WorktreeManager {
 
     const winnerDisplayName = winnerBranch.replace("iterate/", "");
 
+    // Auto-commit any uncommitted/untracked changes on main so merge can proceed
+    const mainStatus = await this.git.status();
+    if (
+      mainStatus.modified.length > 0 ||
+      mainStatus.not_added.length > 0 ||
+      mainStatus.created.length > 0 ||
+      mainStatus.deleted.length > 0
+    ) {
+      await this.git.add(".");
+      await this.git.commit("iterate: save changes before pick");
+    }
+
     try {
       if (strategy === "squash") {
         await this.git.raw(["merge", "--squash", winnerBranch]);
