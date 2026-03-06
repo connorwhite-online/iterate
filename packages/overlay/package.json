@@ -1,6 +1,6 @@
 {
   "name": "iterate-ui-overlay",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "iterate browser overlay — annotation canvas, element inspector, DOM manipulation",
   "license": "MIT",
   "repository": {

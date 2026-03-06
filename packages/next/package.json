@@ -1,6 +1,6 @@
 {
   "name": "iterate-ui-next",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "iterate Next.js plugin — auto-starts daemon and injects overlay",
   "license": "MIT",
   "repository": {
@@ -42,6 +42,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@babel/core": "^7.24.0",
+    "babel-loader": "^10.1.0",
     "iterate-ui-babel-plugin": "workspace:*",
     "iterate-ui-daemon": "workspace:*",
     "iterate-ui-overlay": "workspace:*"
