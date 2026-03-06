@@ -47,8 +47,6 @@ function applyTheme(theme: Theme) {
   const root = document.documentElement;
   if (theme === "system") {
     root.removeAttribute("data-theme");
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    root.setAttribute("data-theme", prefersDark ? "dark" : "light");
   } else {
     root.setAttribute("data-theme", theme);
   }
@@ -67,14 +65,6 @@ function ThemeToggle() {
       applyTheme("system");
     }
   }, []);
-
-  useEffect(() => {
-    if (theme !== "system") return;
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const handler = () => applyTheme("system");
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, [theme]);
 
   const cycle = () => {
     setTransitioning(true);
@@ -101,6 +91,66 @@ function ThemeToggle() {
   );
 }
 
+function MenuIcon({ open }: { open: boolean }) {
+  return (
+    <span className={`${styles.menuIcon} ${open ? styles.menuIconOpen : ""}`}>
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="9" />
+        <line x1="9" y1="12" x2="15" y2="12" />
+        <line x1="12" y1="9" x2="12" y2="15" />
+      </svg>
+    </span>
+  );
+}
+
+export function MobileNav() {
+  const pathname = usePathname();
+  const [open, setOpen] = useState(false);
+
+  const isActive = (href: string) => {
+    if (href === "/") return pathname === "/" || pathname === "";
+    return pathname.startsWith(href);
+  };
+
+  return (
+    <div className={styles.mobileNav}>
+      <div className={styles.mobileHeader}>
+        <Link href="/" className={styles.logoLink}>
+          <Logo size={28} color="var(--color-text-secondary)" />
+        </Link>
+        <button
+          className={styles.menuButton}
+          onClick={() => setOpen(!open)}
+          aria-label={open ? "Close menu" : "Open menu"}
+        >
+          <MenuIcon open={open} />
+        </button>
+      </div>
+      <div className={`${styles.mobileBody} ${open ? styles.mobileBodyOpen : ""}`}>
+        <div className={styles.mobileBodyInner}>
+          <nav className={styles.navLinks}>
+            {navigation.flatMap((section) =>
+              section.links.map((link) => (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className={`${styles.link} ${styles.mobileLink} ${isActive(link.href) ? styles.linkActive : ""}`}
+                  onClick={() => setOpen(false)}
+                >
+                  {link.title}
+                </Link>
+              ))
+            )}
+          </nav>
+          <div className={styles.mobileThemeRow}>
+            <ThemeToggle />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function FloatingNav() {
   const pathname = usePathname();
 
@@ -114,7 +164,7 @@ export function FloatingNav() {
       {/* Top section: logo */}
       <div className={styles.header}>
         <Link href="/" className={styles.logoLink}>
-          <Logo size={32} />
+          <Logo size={32} color="var(--color-text-secondary)" />
         </Link>
       </div>
 

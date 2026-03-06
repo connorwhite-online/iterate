@@ -19,6 +19,12 @@ export default function WorktreeWorkflowPage() {
       </p>
 
       <h2>How it works</h2>
+      <p>
+        Each iteration is a full git worktree with its own branch, dev server, and port.
+        The toolbar loads each server in an iframe and layers an interactive overlay on top
+        for selecting elements, adding annotations, and dragging components. When you submit
+        feedback, Claude Code edits the source files directly and the dev server hot-reloads.
+      </p>
       <MermaidDiagram
         code={`
 graph TD
@@ -50,12 +56,6 @@ graph TD
   agent -->|edit files| wt3
 `}
       />
-      <p>
-        Each iteration is a full git worktree with its own branch, dev server, and port.
-        The toolbar loads each server in an iframe and layers an interactive overlay on top
-        for selecting elements, adding annotations, and dragging components. When you submit
-        feedback, Claude Code edits the source files directly and the dev server hot-reloads.
-      </p>
 
       <h2>From the toolbar:</h2>
       <p>
@@ -230,7 +230,8 @@ graph LR
         <li>Run <code>/iterate:prompt &quot;Create 3 distinct hero sections&quot;</code> or press the <strong><ForkIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Fork</strong> button on the toolbar.</li>
         <li>Switch between tabs in the toolbar to compare.</li>
         <li>Select elements, annotate what you&apos;d change, drag things around.</li>
-        <li>Run <code>/iterate:go</code> in your Claude session — the agent reads all pending changes, implements them, and the dev server hot-reloads.</li>
+        <li>Implement all changes by simply typing <code>/iterate:go</code> in your Claude session.</li>
+        <li>The agent reads all pending changes, implements them, and the dev server hot-reloads.</li>
         <li>Satisfied with an iteration? Press <strong><PickIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Pick</strong> in the toolbar or enter <code>/iterate:keep &lt;tab-name&gt;</code> in your chat session.</li>
         <li>The preferred branch is merged to base and other worktrees are removed. Or use <strong><DiscardIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Discard</strong> in the Original tab to delete all worktrees and keep the base changes.</li>
       </ol>

@@ -7,7 +7,7 @@
 }
 
 .fork {
-  font-size: 0.9rem;
+  font-size: 13px;
   font-family: var(--font-sans);
   letter-spacing: -0.02em;
   color: var(--color-text);
@@ -20,7 +20,7 @@
 
 /* Spacer — invisible copy that reserves the inline width */
 .spacer {
-  font-size: 0.9rem;
+  font-size: 13px;
   font-family: var(--font-sans);
   letter-spacing: -0.02em;
   font-weight: 700;

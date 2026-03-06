@@ -31,7 +31,33 @@
   --toolbar-text-tertiary: #999;
 }
 
-/* Dark theme */
+/* System dark preference — applies instantly without JS */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-bg: #1a1a1a;
+    --color-bg-code: #2a2a2a;
+    --color-bg-nav: #242424;
+    --color-bg-nav-inner: var(--color-bg);
+    --color-text: #e8e8e8;
+    --color-text-secondary: #999999;
+    --color-text-tertiary: #6b6b6b;
+    --color-border: #333333;
+    --color-border-nav: #3a3a3a;
+    --color-accent: #e8e8e8;
+    --color-primary: #e8e8e8;
+
+    /* Toolbar mockup — matches overlay theme.ts dark palette */
+    --toolbar-panel-bg: #1e1e1e;
+    --toolbar-bg: #2a2a2a;
+    --toolbar-active-bg: #3a3a3a;
+    --toolbar-border: #3a3a3a;
+    --toolbar-icon-default: #999;
+    --toolbar-icon-hover: #e0e0e0;
+    --toolbar-text-tertiary: #666;
+  }
+}
+
+/* Explicit dark theme override */
 [data-theme="dark"] {
   --color-bg: #1a1a1a;
   --color-bg-code: #2a2a2a;
@@ -97,18 +123,18 @@ h1, h2, h3, h4 {
 }
 
 h1 {
-  font-size: 1.5rem;
+  font-size: 21px;
   margin-bottom: 1rem;
 }
 
 h2 {
-  font-size: 1.15rem;
+  font-size: 16px;
   margin-top: 2.5rem;
   margin-bottom: 0.75rem;
 }
 
 h3 {
-  font-size: 1rem;
+  font-size: 14px;
   margin-top: 1.75rem;
   margin-bottom: 0.5rem;
 }
@@ -127,7 +153,7 @@ code {
 
 pre {
   font-family: var(--font-mono);
-  font-size: 0.85rem;
+  font-size: 12px;
   line-height: 1.6;
   background: var(--color-bg-code);
   border: 1px solid var(--color-border);
@@ -156,7 +182,7 @@ table {
   width: 100%;
   border-collapse: collapse;
   margin-bottom: 1.5rem;
-  font-size: 0.9rem;
+  font-size: 13px;
 }
 
 th, td {
@@ -168,7 +194,7 @@ th, td {
 th {
   font-weight: 600;
   color: var(--color-text-secondary);
-  font-size: 0.8rem;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -207,7 +233,21 @@ strong {
   background-color: var(--shiki-dark-bg) !important;
 }
 
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .shiki,
+  :root:not([data-theme="light"]) .shiki span {
+    color: var(--shiki-dark) !important;
+    background-color: var(--shiki-dark-bg) !important;
+  }
+}
+
 /* Mermaid diagrams: invert in dark mode */
 [data-theme="dark"] .mermaid-diagram {
   filter: invert(0.88) hue-rotate(180deg);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .mermaid-diagram {
+    filter: invert(0.88) hue-rotate(180deg);
+  }
 }

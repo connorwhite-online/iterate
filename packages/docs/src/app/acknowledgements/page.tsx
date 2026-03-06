@@ -21,6 +21,13 @@ export default function AcknowledgementsPage() {
         would not have been possible without their meticulous efforts and ideation.
       </p>
 
+      <h2>Why rebuild the annotation framework?</h2>
+      <p>
+        The annotations needed to work within the larger foundation of multiple worktree contexts,
+        and new tools like MCP and the agent editing loop required the framework to be rebuilt
+        from the ground up.
+      </p>
+
       <h2>Open source</h2>
       <p>
         <strong>iterate</strong> is built with open-source tools:

@@ -11,6 +11,7 @@ import {
   DiscardIcon,
   CloseIcon,
 } from "@/lib/icons";
+import { Callout } from "@/components/Callout";
 
 export const metadata: Metadata = {
   title: "Toolbar",
@@ -22,9 +23,7 @@ export default function ToolbarPage() {
     <>
       <h1 style={{ display: "flex", alignItems: "center" }}>Toolbar <kbd style={{ fontSize: "0.6em", padding: "2px 8px", borderRadius: 4, border: "1px solid var(--color-border)", background: "var(--color-bg-code)", fontWeight: 500, marginLeft: "auto" }}>⌘I</kbd></h1>
       <p>
-        The overlay injects a floating panel in the bottom-right corner of your app during
-        development only — it has zero production impact. It&apos;s draggable
-        to any corner.
+        An injected toolbar overlay visible on your app during development only. It&apos;s draggable to any corner of the screen.
       </p>
 
       {/* Dummy toolbar matching the real overlay */}
@@ -156,6 +155,11 @@ export default function ToolbarPage() {
         Drag any element to a new position. Each move is recorded in the pending batch with
         before/after coordinates.
       </p>
+      <Callout>
+        <p>
+          This feature is still in beta, but the output has been quite helpful. Improvements will be made to this tool rapidly.
+        </p>
+      </Callout>
 
       <h3 style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}><UndoIcon size={16} /> Undo <kbd style={{ fontSize: "0.75em", padding: "1px 5px", borderRadius: 4, border: "1px solid var(--color-border)", background: "var(--color-bg-code)", fontWeight: 500, marginLeft: "auto" }}>U</kbd></h3>
       <p>

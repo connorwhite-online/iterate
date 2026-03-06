@@ -1,14 +1,21 @@
 .wrapper {
   min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
 .content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
   max-width: var(--content-max-width);
   margin: 0 auto;
   padding: 4rem 1.5rem 6rem;
 }
 
 .footer {
+  width: 100%;
   max-width: var(--content-max-width);
   margin: 0 auto;
   padding: 1.5rem 1.5rem;
@@ -17,7 +24,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 0.85rem;
+  font-size: 12px;
   color: var(--color-text-tertiary);
 }
 

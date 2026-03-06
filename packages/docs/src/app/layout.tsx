@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { FloatingNav } from "@/components/FloatingNav";
+import { FloatingNav, MobileNav } from "@/components/FloatingNav";
 import { PageContent } from "@/components/PageContent";
 import "./globals.css";
 
@@ -20,6 +20,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
+        <MobileNav />
         <FloatingNav />
         <PageContent>{children}</PageContent>
       </body>

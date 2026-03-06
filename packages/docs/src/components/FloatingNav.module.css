@@ -25,7 +25,7 @@
 
 .logoLink {
   text-decoration: none;
-  font-size: 1.1rem;
+  font-size: 16px;
   font-weight: 700;
   color: var(--color-text);
 }
@@ -48,7 +48,7 @@
 .link {
   display: block;
   padding: 4px 10px;
-  font-size: 0.825rem;
+  font-size: 12px;
   color: var(--color-text-secondary);
   border-radius: 6px;
   transition: color 0.15s, background 0.15s;
@@ -99,4 +99,86 @@
   .floatingNav {
     display: none;
   }
+}
+
+/* ── Mobile Nav ── */
+
+.mobileNav {
+  display: none;
+  background: var(--color-bg-nav);
+  border-radius: 16px;
+  padding: 4px;
+  margin: 1rem;
+}
+
+@media (max-width: 1100px) {
+  .mobileNav {
+    display: block;
+  }
+}
+
+.mobileHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 8px 8px 24px;
+}
+
+.menuButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.menuButton:hover {
+  color: var(--color-text);
+}
+
+.menuIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transform: rotate(0deg);
+}
+
+.menuIconOpen {
+  transform: rotate(225deg);
+}
+
+.mobileBody {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.mobileBodyOpen {
+  grid-template-rows: 1fr;
+}
+
+.mobileBodyInner {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mobileLink {
+  font-size: 14px;  /* intentionally larger than desktop */
+}
+
+.mobileThemeRow {
+  display: flex;
+  justify-content: center;
+  padding: 0 0 4px;
 }
