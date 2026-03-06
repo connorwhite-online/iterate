@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, existsSync, unlinkSync, globSync } from "node:fs";
+import { copyFileSync, mkdirSync, existsSync, unlinkSync, globSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { execSync } from "node:child_process";
 
@@ -15,6 +15,7 @@ export function copyFilesToWorktree(
     const matches = globSync(pattern, { cwd });
     for (const match of matches) {
       const src = join(cwd, match);
+      if (statSync(src).isDirectory()) continue;
       const dest = join(worktreePath, match);
       mkdirSync(dirname(dest), { recursive: true });
       copyFileSync(src, dest);
@@ -57,9 +58,9 @@ export function copyUncommittedFiles(
       continue;
     }
 
-    // Copy the file if it exists in the working directory
+    // Copy the file if it exists in the working directory (skip directories)
     const src = join(cwd, filePath);
-    if (!existsSync(src)) continue;
+    if (!existsSync(src) || statSync(src).isDirectory()) continue;
 
     const dest = join(worktreePath, filePath);
     mkdirSync(dirname(dest), { recursive: true });
