@@ -1,4 +1,8 @@
-# iterate
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/logo.svg">
+  <img alt="iterate" src="assets/logo.svg" height="48">
+</picture>
 
 Iterate manages git worktrees with an easily navigable toolbar system, allowing you to ideate in parallel easily.
 
