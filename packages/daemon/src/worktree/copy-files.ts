@@ -51,6 +51,9 @@ export function copyUncommittedFiles(
 
     filePath = filePath.trim();
 
+    // Skip .iterate/ directory to avoid copying worktrees into themselves
+    if (filePath === ".iterate" || filePath.startsWith(".iterate/")) continue;
+
     // Deleted files: remove from worktree if present
     if (statusCode === " D" || statusCode === "D ") {
       const dest = join(worktreePath, filePath);
