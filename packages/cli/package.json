@@ -24,6 +24,7 @@
     ".claude-plugin"
   ],
   "scripts": {
+    "prepublishOnly": "pnpm build",
     "build": "tsup",
     "dev": "tsup --watch",
     "clean": "rm -rf dist"

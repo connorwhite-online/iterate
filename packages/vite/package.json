@@ -21,6 +21,7 @@
     }
   },
   "scripts": {
+    "prepublishOnly": "pnpm build",
     "build": "tsup src/index.ts --format esm --dts --external @babel/core",
     "dev": "tsup src/index.ts --format esm --dts --watch --external @babel/core",
     "clean": "rm -rf dist"

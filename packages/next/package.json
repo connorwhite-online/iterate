@@ -37,6 +37,7 @@
     }
   },
   "scripts": {
+    "prepublishOnly": "pnpm build",
     "build": "tsup src/index.ts src/devtools.tsx --format esm,cjs --dts --external react --external next",
     "dev": "tsup src/index.ts src/devtools.tsx --format esm,cjs --dts --external react --external next --watch",
     "clean": "rm -rf dist"
