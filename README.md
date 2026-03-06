@@ -28,17 +28,57 @@ Then in Claude Code, run `/iterate` — it detects your framework, installs the 
 
 ```bash
 npm i iterate-ui
+npx iterate init
 ```
 
-**Next.js** (`next.config.mjs`):
+#### Next.js 14–15 (Webpack)
+
+Wrap your existing config:
+
 ```js
+// next.config.mjs
 import { withIterate } from 'iterate-ui-next'
+
 export default withIterate(nextConfig)
 ```
 
-**Vite** (`vite.config.ts`):
+The overlay auto-injects through webpack — no additional setup needed.
+
+#### Next.js 16+ (Turbopack)
+
+Next.js 16 defaults to Turbopack, which doesn't support webpack injection. Use the same config wrapper, then add the DevTools component to your root layout:
+
+```js
+// next.config.mjs
+import { withIterate } from 'iterate-ui-next'
+
+export default withIterate(nextConfig)
+```
+
+```tsx
+// app/layout.tsx
+import { IterateDevTools } from "iterate-ui-next/devtools"
+
+export default function RootLayout({ children }) {
+  return (
+    <html lang="en">
+      <body>
+        {children}
+        <IterateDevTools />
+      </body>
+    </html>
+  )
+}
+```
+
+Alternatively, run `next dev --webpack` to use webpack instead, enabling auto-injection without the manual component.
+
+#### Vite
+
 ```ts
+// vite.config.ts
 import { iterate } from 'iterate-ui-vite'
+
 export default defineConfig({ plugins: [react(), iterate()] })
 ```
 
