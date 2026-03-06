@@ -157,7 +157,7 @@ export default function ToolbarPage() {
       </p>
       <Callout>
         <p>
-          This feature is still in beta, but the output has been quite helpful. Improvements will be made to this tool rapidly.
+          This feature is still in beta, but the output has been quite helpful. Movements may require a page refresh after the agent implements changes to see the final output. Improvements will be made to this tool rapidly.
         </p>
       </Callout>
 
