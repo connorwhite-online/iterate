@@ -9,7 +9,7 @@ export default function IntroductionPage() {
       </h1>
 
       <p style={{ fontSize: "1.1rem", color: "var(--color-text-secondary)", marginBottom: "2rem" }}>
-        Iterate allows you to explore multiple versions of your app simultaneously with agents from a minimal toolbar overlay in your browser.
+        Explore multiple versions of your app simultaneously with agents from a minimal toolbar overlay in your browser.
       </p>
 
       <h2>How to iterate</h2>
@@ -52,11 +52,19 @@ export default function IntroductionPage() {
         code={`npx skills add connorwhite-online/iterate`}
       />
       <p>
-        Then in Claude Code:
+        Open a new Claude Code session to make the slash commands available, then run:
       </p>
       <CodeBlock
         code={`/iterate`}
       />
+
+      <h2>Requirements</h2>
+      <ul>
+        <li><strong>React</strong> projects using <strong>Next.js</strong> or <strong>Vite</strong></li>
+        <li><strong>Claude Code</strong> with MCP support for full agent integration</li>
+        <li>Other MCP-compatible agents can connect via the <code>iterate-mcp</code> server</li>
+        <li>Without an agent, you can still use the toolbar to select elements, annotate, and copy context manually</li>
+      </ul>
 
     </>
   );

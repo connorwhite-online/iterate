@@ -71,7 +71,7 @@ graph TD
       <h3>2. Review and refine</h3>
       <p>
         Switch between iteration tabs to compare. Select elements, describe what you want changed, drag things around.
-        Each change is scoped to the active iteration tab. When you&apos;re ready, run the slash command:
+        Each change is scoped to the active iteration tab. When you&apos;re ready to implement changes, run the slash command:
       </p>
       <CodeBlock
         code={`/iterate:go`}

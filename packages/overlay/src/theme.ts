@@ -112,10 +112,14 @@ const dark: ThemeTokens = {
 // Detection helpers
 // ---------------------------------------------------------------------------
 
-/** Parse an rgb/rgba string and return relative luminance (0 = black, 1 = white). */
+/** Parse an rgb/rgba string and return relative luminance (0 = black, 1 = white).
+ *  Returns null for transparent colors (alpha ≈ 0) or unparseable values. */
 function luminance(color: string): number | null {
-  const m = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  const m = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*(\d*\.?\d+))?\)/);
   if (!m) return null;
+  // Skip fully transparent backgrounds (e.g. body with no explicit background)
+  const alpha = m[4] !== undefined ? Number(m[4]) : 1;
+  if (alpha < 0.1) return null;
   const [r, g, b] = [Number(m[1]) / 255, Number(m[2]) / 255, Number(m[3]) / 255];
   // sRGB luminance
   const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
@@ -149,9 +153,10 @@ function detectDark(doc?: Document | null): boolean {
     if (bodyScheme === "light") return false;
   }
 
-  // 3. Body background luminance heuristic
-  if (body) {
-    const bg = targetDoc.defaultView?.getComputedStyle(body).backgroundColor ?? "";
+  // 3. Background luminance heuristic (check body first, then html)
+  for (const el of [body, html]) {
+    if (!el) continue;
+    const bg = targetDoc.defaultView?.getComputedStyle(el).backgroundColor ?? "";
     const lum = luminance(bg);
     if (lum !== null && lum < 0.2) return true;
     if (lum !== null && lum > 0.8) return false;

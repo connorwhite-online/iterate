@@ -12,7 +12,7 @@ export default function InstallationPage() {
     <>
       <h1>Installation</h1>
       <p>
-        <strong>iterate</strong> supports Next.js and Vite projects. The fastest path is through the Claude Code slash command,
+        <strong>iterate</strong> works with React projects using Next.js or Vite. The fastest path is through the Claude Code slash command,
         but you can also set things up manually.
       </p>
 
@@ -24,7 +24,12 @@ export default function InstallationPage() {
         code={`npx skills add connorwhite-online/iterate`}
       />
 
-      <h2>2. Set up your project</h2>
+      <h2>2. Open a new Claude Code session</h2>
+      <p>
+        Restart Claude Code or open a new session so the new slash commands become available.
+      </p>
+
+      <h2>3. Set up your project</h2>
       <p>
         In Claude Code, run:
       </p>
@@ -40,16 +45,17 @@ export default function InstallationPage() {
         <li>Wrap your framework config with the <strong>iterate</strong> plugin</li>
         <li>Create <code>.iterate/config.json</code>, <code>.mcp.json</code>, and register the Claude Code plugin</li>
       </ul>
-      <p>
-        Restart Claude Code or open a new session to connect the MCP server and slash commands.
-      </p>
-
-      <h2>3. Run</h2>
+      <h2>4. Run</h2>
       <CodeBlock
         code={`npm run dev`}
       />
       <p>
         Open your app in the browser — you&apos;ll see the <strong>iterate</strong> overlay. Toggle it with <strong>Cmd+I</strong>.
+      </p>
+
+      <h2>5. Connect to the MCP</h2>
+      <p>
+        Once the dev server is running, open a new Claude Code session to connect to the MCP.
       </p>
 
       <hr />
@@ -72,9 +78,9 @@ export default function InstallationPage() {
         This detects your package manager and dev command, then creates <code>.iterate/config.json</code>.
       </p>
 
-      <h3>Next.js</h3>
+      <h3>Next.js 14–15 (webpack)</h3>
       <p>
-        Wrap your existing config with <code>withIterate</code>:
+        Wrap your existing config with <code>withIterate</code>. The overlay auto-injects via webpack:
       </p>
       <CodeBlock
         lang="javascript"
@@ -83,6 +89,40 @@ export default function InstallationPage() {
 
 export default withIterate(nextConfig)`}
       />
+
+      <h3>Next.js 16+ (Turbopack)</h3>
+      <p>
+        Next.js 16 defaults to Turbopack, which doesn&apos;t support webpack entry injection.
+        Wrap your config the same way, then add the devtools component to your root layout:
+      </p>
+      <CodeBlock
+        lang="javascript"
+        filename="next.config.mjs"
+        code={`import { withIterate } from 'iterate-ui-next'
+
+export default withIterate(nextConfig)`}
+      />
+      <CodeBlock
+        lang="tsx"
+        filename="app/layout.tsx"
+        code={`import { IterateDevTools } from "iterate-ui-next/devtools"
+
+export default function RootLayout({ children }) {
+  return (
+    <html lang="en">
+      <body>
+        {children}
+        <IterateDevTools />
+      </body>
+    </html>
+  )
+}`}
+      />
+      <Callout>
+        <p>
+          Alternatively, you can run <code>next dev --webpack</code> to use webpack instead of Turbopack, which allows the overlay to auto-inject without the manual component.
+        </p>
+      </Callout>
 
       <h3>Vite</h3>
       <p>
@@ -123,8 +163,8 @@ export default defineConfig({
             <td>Registers the <strong>iterate</strong> MCP server with Claude Code</td>
           </tr>
           <tr>
-            <td><code>.claude-plugin</code></td>
-            <td>Claude Code plugin configuration for slash commands</td>
+            <td><code>.claude/settings.json</code></td>
+            <td>Registers the iterate plugin so slash commands are available</td>
           </tr>
         </tbody>
       </table>
