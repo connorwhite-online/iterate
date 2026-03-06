@@ -11,6 +11,7 @@
   "keywords": ["iterate", "ui", "nextjs", "vite", "react", "ai", "worktree", "claude", "mcp"],
   "dependencies": {
     "iterate-ui-cli": "workspace:*",
+    "iterate-ui-mcp": "workspace:*",
     "iterate-ui-next": "workspace:*",
     "iterate-ui-vite": "workspace:*"
   }
