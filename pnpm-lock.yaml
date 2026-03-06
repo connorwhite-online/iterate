@@ -181,6 +181,9 @@ importers:
       iterate-ui-cli:
         specifier: workspace:*
         version: link:../cli
+      iterate-ui-mcp:
+        specifier: workspace:*
+        version: link:../mcp
       iterate-ui-next:
         specifier: workspace:*
         version: link:../next
