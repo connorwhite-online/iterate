@@ -35,6 +35,14 @@ Set up iterate in the user's project. This skill detects the framework, installs
      export default withIterate(nextConfig);
      ```
    - If the config already uses `withIterate`, skip this step
+   - **Next.js 16+ / Turbopack**: Check the installed Next.js version. If it's 16+, the overlay
+     must also be loaded via a React component (webpack injection is ignored by Turbopack).
+     Find the root layout file (`app/layout.tsx` or `app/layout.jsx`) and add:
+     ```tsx
+     import { IterateDevTools } from "iterate-ui-next/devtools";
+     ```
+     Then render `<IterateDevTools />` inside `<body>`, after `{children}`.
+     If the layout already has `<IterateDevTools />`, skip this step.
 
    **Vite** (`vite.config.ts`, `vite.config.js`, or `vite.config.mjs`):
    - Add `import { iterate } from "iterate-ui-vite"` at the top
