@@ -409,7 +409,7 @@ export function FloatingPanel({
               <TabButton
                 active={activeIteration === ORIGINAL_TAB}
                 badgeCount={tabBadgeCounts[ORIGINAL_TAB] ?? 0}
-                title="View original page"
+                title="Root directory"
                 onClick={() => onIterationChange?.(ORIGINAL_TAB)}
               >
                 <span
@@ -432,7 +432,7 @@ export function FloatingPanel({
                     key={name}
                     active={isActive}
                     badgeCount={badgeCount}
-                    title={info?.commandPrompt || name}
+                    title={`${name} worktree`}
                     onClick={() => onIterationChange?.(name)}
                   >
                     <span
@@ -647,6 +647,8 @@ function SuspenseOverlay({ active, message }: { active: boolean; message: string
         alignItems: "center",
         justifyContent: "center",
         gap: 20,
+        backdropFilter: "blur(8px)",
+        WebkitBackdropFilter: "blur(8px)",
         opacity: active ? 1 : 0,
         pointerEvents: active ? "auto" : "none",
         transition: "opacity 0.3s ease",

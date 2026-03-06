@@ -64,7 +64,7 @@ const light: ThemeTokens = {
   iconDefault: "#666",
   iconHover: "#141414",
 
-  suspenseOverlay: "rgba(255,255,255,0.96)",
+  suspenseOverlay: "rgba(255,255,255,0.75)",
   spinnerBg: "#e0e0e0",
   spinnerFg: "#666",
 
@@ -95,7 +95,7 @@ const dark: ThemeTokens = {
   iconDefault: "#999",
   iconHover: "#e0e0e0",
 
-  suspenseOverlay: "rgba(30,30,30,0.96)",
+  suspenseOverlay: "rgba(30,30,30,0.75)",
   spinnerBg: "#3a3a3a",
   spinnerFg: "#999",
 
