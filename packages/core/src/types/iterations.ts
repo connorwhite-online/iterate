@@ -25,4 +25,6 @@ export interface IterationInfo {
   commandId?: string;
   /** How this iteration was created: "iterate" (via API) or "external" (discovered worktree) */
   source?: IterationSource;
+  /** Error message when status is "error" */
+  error?: string;
 }

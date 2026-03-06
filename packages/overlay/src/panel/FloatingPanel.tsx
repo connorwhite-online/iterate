@@ -432,7 +432,7 @@ export function FloatingPanel({
                     key={name}
                     active={isActive}
                     badgeCount={badgeCount}
-                    title={`${name} worktree`}
+                    title={info?.error ? `${name}: ${info.error}` : `${name} worktree`}
                     onClick={() => onIterationChange?.(name)}
                   >
                     <span

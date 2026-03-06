@@ -93,7 +93,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
       info.branch = branch;
 
       // Copy config files (e.g., .env.local) and uncommitted changes into the new worktree
-      copyFilesToWorktree(cwd, worktreePath, config.copyFiles ?? [".env*"]);
+      copyFilesToWorktree(cwd, worktreePath, config.copyFiles ?? [".env*", ".npmrc"]);
       copyUncommittedFiles(cwd, worktreePath);
 
       // Install dependencies (always at worktree root)
@@ -135,14 +135,16 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
 
       return info;
     } catch (err) {
+      const errorMessage = (err as Error).message;
       const info = store.getIteration(name);
       if (info) {
         info.status = "error";
+        info.error = errorMessage;
         store.setIteration(name, info);
-        wsHub.broadcast({ type: "iteration:status", payload: { name, status: "error" } });
+        wsHub.broadcast({ type: "iteration:status", payload: { name, status: "error", error: errorMessage } });
       }
       return reply.status(500).send({
-        message: `Failed to create iteration: ${(err as Error).message}`,
+        message: `Failed to create iteration: ${errorMessage}`,
       });
     }
   });
@@ -362,7 +364,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
             info.branch = branch;
 
             // Copy config files (e.g., .env.local) and uncommitted changes into the new worktree
-            copyFilesToWorktree(cwd, worktreePath, config.copyFiles ?? [".env*"]);
+            copyFilesToWorktree(cwd, worktreePath, config.copyFiles ?? [".env*", ".npmrc"]);
             copyUncommittedFiles(cwd, worktreePath);
 
             info.status = "installing";
@@ -400,10 +402,12 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
             store.setIteration(name, info);
             wsHub.broadcast({ type: "iteration:created", payload: info });
           } catch (err) {
-            console.error(`[iterate] Failed to create iteration "${name}":`, (err as Error).message);
+            const errorMessage = (err as Error).message;
+            console.error(`[iterate] Failed to create iteration "${name}":`, errorMessage);
             info.status = "error";
+            info.error = errorMessage;
             store.setIteration(name, info);
-            wsHub.broadcast({ type: "iteration:status", payload: { name, status: "error" } });
+            wsHub.broadcast({ type: "iteration:status", payload: { name, status: "error", error: errorMessage } });
           }
         })();
       } catch (err) {
@@ -632,10 +636,12 @@ async function discoverAndRegisterWorktrees(
         store.setIteration(name, info);
         wsHub.broadcast({ type: "iteration:created", payload: info });
       } catch (err) {
-        console.error(`[iterate] Failed to start external worktree "${name}":`, (err as Error).message);
+        const errorMessage = (err as Error).message;
+        console.error(`[iterate] Failed to start external worktree "${name}":`, errorMessage);
         info.status = "error";
+        info.error = errorMessage;
         store.setIteration(name, info);
-        wsHub.broadcast({ type: "iteration:status", payload: { name, status: "error" } });
+        wsHub.broadcast({ type: "iteration:status", payload: { name, status: "error", error: errorMessage } });
       } finally {
         pendingPaths.delete(wt.path);
       }
@@ -756,7 +762,7 @@ function getShellHTML(): string {
       switch (msg.type) {
         case 'state:sync': state = msg.payload; render(); break;
         case 'iteration:created': state.iterations[msg.payload.name] = msg.payload; render(); break;
-        case 'iteration:status': if (state.iterations[msg.payload.name]) state.iterations[msg.payload.name].status = msg.payload.status; render(); break;
+        case 'iteration:status': if (state.iterations[msg.payload.name]) { state.iterations[msg.payload.name].status = msg.payload.status; if (msg.payload.error) state.iterations[msg.payload.name].error = msg.payload.error; } render(); break;
         case 'iteration:removed': delete state.iterations[msg.payload.name]; if (activeIteration === msg.payload.name) activeIteration = null; render(); break;
         case 'change:created': state.changes.push(msg.payload); break;
         case 'change:deleted': state.changes = state.changes.filter(a => a.id !== msg.payload.id); break;
@@ -798,7 +804,10 @@ function getShellHTML(): string {
         if (!iframe) { iframe = document.createElement('iframe'); iframe.src = '/' + encodeURIComponent(activeIteration) + '/'; iframe.dataset.iteration = activeIteration; viewport.appendChild(iframe); iframeCache[activeIteration] = iframe; }
         iframe.style.display = '';
       } else {
-        const empty = document.createElement('div'); empty.className = 'empty-state'; empty.textContent = 'Iteration "' + activeIteration + '" is ' + (info.status || 'unknown') + '...'; viewport.appendChild(empty);
+        const empty = document.createElement('div'); empty.className = 'empty-state';
+        const statusText = document.createElement('p'); statusText.textContent = 'Iteration "' + activeIteration + '" is ' + (info.status || 'unknown') + '...'; empty.appendChild(statusText);
+        if (info.status === 'error' && info.error) { const errEl = document.createElement('code'); errEl.style.cssText = 'color:#ef4444;font-size:12px;max-width:600px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;padding:8px 12px;background:#1a1a1a;border-radius:6px;margin-top:8px;display:block;'; errEl.textContent = info.error; empty.appendChild(errEl); }
+        viewport.appendChild(empty);
       }
     }
 

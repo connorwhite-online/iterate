@@ -9,33 +9,50 @@
     "directory": "packages/next"
   },
   "homepage": "https://iterate-ui.com",
-  "keywords": ["iterate", "ui", "nextjs", "next", "plugin", "ai", "worktree"],
+  "keywords": [
+    "iterate",
+    "ui",
+    "nextjs",
+    "next",
+    "plugin",
+    "ai",
+    "worktree"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
+    },
+    "./devtools": {
+      "types": "./dist/devtools.d.ts",
+      "import": "./dist/devtools.js",
+      "require": "./dist/devtools.cjs"
     }
   },
   "scripts": {
-    "build": "tsup src/index.ts --format esm,cjs --dts",
-    "dev": "tsup src/index.ts --format esm,cjs --dts --watch",
+    "build": "tsup src/index.ts src/devtools.tsx --format esm,cjs --dts --external react --external next",
+    "dev": "tsup src/index.ts src/devtools.tsx --format esm,cjs --dts --external react --external next --watch",
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "iterate-ui-babel-plugin": "workspace:*",
     "iterate-ui-daemon": "workspace:*",
-    "iterate-ui-overlay": "workspace:*",
-    "iterate-ui-babel-plugin": "workspace:*"
+    "iterate-ui-overlay": "workspace:*"
   },
   "peerDependencies": {
-    "next": "^14.0.0 || ^15.0.0"
+    "next": "^14.0.0 || ^15.0.0 || ^16.0.0",
+    "react": "^18.0.0 || ^19.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/react": "^19.2.14",
     "tsup": "^8.3.0",
     "typescript": "^5.7.0"
   }

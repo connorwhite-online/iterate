@@ -124,6 +124,7 @@ export class DaemonConnection {
             [msg.payload.name]: {
               ...this._iterations[msg.payload.name],
               status: msg.payload.status,
+              ...(msg.payload.error ? { error: msg.payload.error } : {}),
             },
           };
           changed = true;

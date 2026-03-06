@@ -29,7 +29,7 @@ export type ServerMessage =
   | { type: "state:sync"; payload: IterateState }
   | { type: "iteration:created"; payload: IterationInfo }
   | { type: "iteration:removed"; payload: { name: string } }
-  | { type: "iteration:status"; payload: { name: string; status: IterationStatus } }
+  | { type: "iteration:status"; payload: { name: string; status: IterationStatus; error?: string } }
   | { type: "change:created"; payload: Change }
   | { type: "change:updated"; payload: Change }
   | { type: "change:deleted"; payload: { id: string } }

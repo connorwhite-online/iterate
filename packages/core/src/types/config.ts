@@ -16,7 +16,7 @@ export interface IterateConfig {
   buildCommand?: string;
   /** Subdirectory within the repo where the app lives (for monorepos). Dev command runs here. */
   appDir?: string;
-  /** Glob patterns for files to copy from project root into each new worktree (default: [".env*"]) */
+  /** Glob patterns for files to copy from project root into each new worktree (default: [".env*", ".npmrc"]) */
   copyFiles?: string[];
 }
 
@@ -27,5 +27,5 @@ export const DEFAULT_CONFIG: IterateConfig = {
   daemonPort: 4000,
   maxIterations: 3,
   idleTimeout: 0,
-  copyFiles: [".env*"],
+  copyFiles: [".env*", ".npmrc"],
 };

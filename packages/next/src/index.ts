@@ -5,6 +5,23 @@ import { join, dirname } from "node:path";
 import { readFileSync } from "node:fs";
 
 /**
+ * Detect whether Turbopack is active.
+ * Next.js 16+ defaults to Turbopack unless --webpack is passed.
+ */
+function isTurbopackMode(): boolean {
+  if (process.env.TURBOPACK === "1") return true;
+  if (process.argv.some((a) => a === "--turbo" || a === "--turbopack")) return true;
+  // Next.js 16+ defaults to turbopack — detect by reading next/package.json
+  try {
+    const _req = typeof require !== "undefined" ? require : createRequire(import.meta.url);
+    const nextPkg = JSON.parse(readFileSync(_req.resolve("next/package.json"), "utf-8"));
+    const major = parseInt(nextPkg.version.split(".")[0], 10);
+    if (major >= 16 && !process.argv.includes("--webpack")) return true;
+  } catch {}
+  return false;
+}
+
+/**
  * Resolve a package's entry point via require.resolve, falling back to
  * reading the package.json for ESM-only packages without a "require" export.
  */
@@ -97,7 +114,19 @@ export function withIterate(
     console.warn("[iterate] Could not resolve overlay bundle or babel plugin");
   }
 
-  return {
+  const turbopack = isTurbopackMode();
+
+  if (turbopack) {
+    console.warn(
+      "\x1b[33m[iterate]\x1b[0m Turbopack detected — webpack entry injection is disabled.\n" +
+      "  The overlay will not auto-inject. To fix, choose one of:\n" +
+      "  1. Run with webpack:  next dev --webpack\n" +
+      '  2. Add to your root layout:  import { IterateDevTools } from "iterate-ui-next/devtools"\n' +
+      "     Then render <IterateDevTools /> inside <body>.\n"
+    );
+  }
+
+  const result: NextConfig = {
     ...nextConfig,
 
     // Add rewrites to proxy to the daemon
@@ -144,9 +173,12 @@ export function withIterate(
         ],
       };
     },
+  };
 
-    // Inject overlay via webpack
-    webpack(config: any, context: any) {
+  // Only inject via webpack when NOT using Turbopack (avoids the
+  // "webpack config present but no turbopack config" warning in Next 16+)
+  if (!turbopack) {
+    result.webpack = function webpack(config: any, context: any) {
       if (context.isServer || !context.dev) {
         return nextConfig.webpack?.(config, context) ?? config;
       }
@@ -174,8 +206,10 @@ export function withIterate(
       };
 
       return nextConfig.webpack?.(config, context) ?? config;
-    },
-  };
+    };
+  }
+
+  return result;
 }
 
 /**
