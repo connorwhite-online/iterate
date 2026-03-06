@@ -9,7 +9,7 @@ export default function IntroductionPage() {
       </h1>
 
       <p style={{ fontSize: "1.1rem", color: "var(--color-text-secondary)", marginBottom: "2rem" }}>
-        Iterate allows you to explore multiple versions of your app simultaneously with Claude from a minimal toolbar overlay in your browser.
+        Iterate allows you to explore multiple versions of your app simultaneously with agents from a minimal toolbar overlay in your browser.
       </p>
 
       <h2>How to iterate</h2>
@@ -18,13 +18,13 @@ export default function IntroductionPage() {
           <strong>Create</strong> iterations (worktrees) from the press of a button, or enter <code>/iterate:prompt</code> in a Claude session followed by whatever you want to riff on.
         </li>
         <li>
-          <strong>Explore</strong> iterations instantly from the toolbar tabs, and continue working in parallel as long as you wish.
+          <strong>Explore</strong> iterations instantly from the toolbar tabs.
         </li>
         <li>
-          <strong>Annotate</strong> with the select, draw, and move tools to point at elements and areas, add context with written feedback, and drag elements to reposition them.
+          <strong>Add context</strong> with the select, draw and move tools by pointing at elements and areas to add feedback, or moving them around in real-time.
         </li>
         <li>
-          <strong>Pick</strong> a direction and merge it back to your base branch with a single click.
+          <strong>Pick</strong> a direction and merge changes back to your base branch with a single click.
         </li>
         <li>
           <strong>Repeat</strong> as needed whenever you need to riff on an idea!

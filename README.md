@@ -4,14 +4,15 @@
   <img alt="iterate" src="assets/logo.svg" height="48">
 </picture>
 
-Iterate manages git worktrees with an easily navigable toolbar system, allowing you to ideate in parallel easily.
+Explore multiple versions of your app simultaneously with agents from a minimal toolbar overlay in your browser.
 
 ## How it works
 
 1. **Create** iterations (worktrees) from the press of a button, or enter /iterate:prompt in a Claude session followed by whatever you want to riff on.
-2. **Compare** iterations instantly from the toolbar tabs, and continue working in parallel as long as you wish.
-3. **Pick** a direction and merge it back to your base branch with a single click.
-4. **Repeat** as needed whenever you need to riff on an idea!
+2. **Explore** iterations instantly from the toolbar tabs.
+3. **Add context** — use the select, draw and move tools by pointing at elements and areas to add feedback, or moving them around in real-time.
+4. **Pick** a direction and merge changes back to your base branch with a single click.
+5. **Repeat** as needed whenever you need to riff on an idea!
 
 ## Quick Start
 
