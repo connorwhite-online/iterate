@@ -72,7 +72,7 @@ describe("FloatingPanel", () => {
     // (pointer-events: auto instead of none)
     const toolGroups = container.querySelectorAll("div[style]");
     const visibleGroups = Array.from(toolGroups).filter(
-      (g) => (g as HTMLElement).style.pointerEvents === "auto" && (g as HTMLElement).style.maxWidth === "500px"
+      (g) => (g as HTMLElement).style.pointerEvents === "auto" && (g as HTMLElement).style.maxWidth === "800px"
     );
     // Should have at least one visible ToolGroup for batch actions
     expect(visibleGroups.length).toBeGreaterThan(0);
