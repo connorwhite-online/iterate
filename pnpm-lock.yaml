@@ -176,6 +176,18 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  packages/iterate-ui:
+    dependencies:
+      iterate-ui-cli:
+        specifier: workspace:*
+        version: link:../cli
+      iterate-ui-next:
+        specifier: workspace:*
+        version: link:../next
+      iterate-ui-vite:
+        specifier: workspace:*
+        version: link:../vite
+
   packages/mcp:
     dependencies:
       '@modelcontextprotocol/sdk':
@@ -268,6 +280,9 @@ importers:
       iterate-ui-babel-plugin:
         specifier: workspace:*
         version: link:../babel-plugin
+      iterate-ui-daemon:
+        specifier: workspace:*
+        version: link:../daemon
       iterate-ui-overlay:
         specifier: workspace:*
         version: link:../overlay

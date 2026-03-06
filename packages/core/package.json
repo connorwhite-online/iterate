@@ -2,9 +2,18 @@
   "name": "iterate-ui-core",
   "version": "0.1.0",
   "description": "Shared types and protocol for iterate",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/connorwhite-online/iterate",
+    "directory": "packages/core"
+  },
+  "homepage": "https://iterate-ui.com",
+  "keywords": ["iterate", "ui", "types", "protocol"],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": ["dist"],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

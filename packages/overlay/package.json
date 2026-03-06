@@ -2,9 +2,18 @@
   "name": "iterate-ui-overlay",
   "version": "0.1.0",
   "description": "iterate browser overlay — annotation canvas, element inspector, DOM manipulation",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/connorwhite-online/iterate",
+    "directory": "packages/overlay"
+  },
+  "homepage": "https://iterate-ui.com",
+  "keywords": ["iterate", "ui", "overlay", "react", "annotation", "inspector"],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": ["dist"],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

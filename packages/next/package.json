@@ -2,9 +2,18 @@
   "name": "iterate-ui-next",
   "version": "0.1.0",
   "description": "iterate Next.js plugin — auto-starts daemon and injects overlay",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/connorwhite-online/iterate",
+    "directory": "packages/next"
+  },
+  "homepage": "https://iterate-ui.com",
+  "keywords": ["iterate", "ui", "nextjs", "next", "plugin", "ai", "worktree"],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": ["dist"],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

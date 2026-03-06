@@ -2,9 +2,18 @@
   "name": "iterate-ui-daemon",
   "version": "0.1.0",
   "description": "iterate daemon — control server, worktree manager, proxy",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/connorwhite-online/iterate",
+    "directory": "packages/daemon"
+  },
+  "homepage": "https://iterate-ui.com",
+  "keywords": ["iterate", "ui", "daemon", "worktree", "proxy", "fastify"],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": ["dist"],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

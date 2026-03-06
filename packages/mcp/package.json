@@ -2,9 +2,21 @@
   "name": "iterate-ui-mcp",
   "version": "0.1.0",
   "description": "MCP server for iterate — AI agent integration",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/connorwhite-online/iterate",
+    "directory": "packages/mcp"
+  },
+  "homepage": "https://iterate-ui.com",
+  "keywords": ["iterate", "ui", "mcp", "model-context-protocol", "ai", "agent"],
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": ["dist"],
   "bin": {
     "iterate-mcp": "./dist/index.js"
   },

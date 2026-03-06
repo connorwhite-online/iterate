@@ -2,9 +2,18 @@
   "name": "iterate-ui-vite",
   "version": "0.1.0",
   "description": "iterate Vite plugin — auto-starts daemon and injects overlay",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/connorwhite-online/iterate",
+    "directory": "packages/vite"
+  },
+  "homepage": "https://iterate-ui.com",
+  "keywords": ["iterate", "ui", "vite", "plugin", "ai", "worktree"],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": ["dist"],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -18,6 +27,7 @@
   },
   "dependencies": {
     "iterate-ui-babel-plugin": "workspace:*",
+    "iterate-ui-daemon": "workspace:*",
     "iterate-ui-overlay": "workspace:*"
   },
   "peerDependencies": {
