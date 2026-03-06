@@ -1,6 +1,6 @@
 {
   "name": "iterate-ui-cli",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "CLI for iterate — manage worktree iterations",
   "license": "MIT",
   "repository": {
