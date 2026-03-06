@@ -70,7 +70,7 @@ Set up iterate in the user's project. This skill detects the framework, installs
      "mcpServers": {
        "iterate": {
          "command": "npx",
-         "args": ["iterate-mcp"],
+         "args": ["iterate-ui-mcp"],
          "env": {
            "ITERATE_DAEMON_PORT": "4000"
          }
@@ -79,7 +79,9 @@ Set up iterate in the user's project. This skill detects the framework, installs
    }
    ```
 
-7. **Register the Claude Code plugin** in `.claude/settings.json` so the iterate skills (`/iterate:go`, `/iterate:prompt`, `/iterate:keep`) are available. Create the file if it doesn't exist, or merge into the existing settings:
+7. **Add `.iterate` to `.gitignore`** if not already present. Create `.gitignore` if it doesn't exist.
+
+8. **Register the Claude Code plugin** in `.claude/settings.json` so the iterate skills (`/iterate:go`, `/iterate:prompt`, `/iterate:keep`) are available. Create the file if it doesn't exist, or merge into the existing settings:
    ```json
    {
      "extraKnownMarketplaces": {
@@ -96,7 +98,7 @@ Set up iterate in the user's project. This skill detects the framework, installs
    }
    ```
 
-8. **Summarize.** Tell the user what was set up and what to do next:
+9. **Summarize.** Tell the user what was set up and what to do next:
    - Restart Claude Code to activate the MCP server and slash commands
    - Available slash commands: `/iterate:prompt`, `/iterate:go`, `/iterate:keep`
    - The iterate overlay will appear automatically when their dev server runs

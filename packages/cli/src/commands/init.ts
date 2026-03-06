@@ -53,7 +53,7 @@ export const initCommand = new Command("init")
         mcpServers: {
           iterate: {
             command: "npx",
-            args: ["iterate-mcp"],
+            args: ["iterate-ui-mcp"],
             env: {
               ITERATE_DAEMON_PORT: String(config.daemonPort),
             },
@@ -108,6 +108,19 @@ export const initCommand = new Command("init")
     if (settingsModified) {
       writeFileSync(claudeSettingsPath, JSON.stringify(claudeSettings, null, 2) + "\n");
       console.log("Registered iterate plugin in .claude/settings.json.");
+    }
+
+    // Ensure .iterate is in .gitignore
+    const gitignorePath = join(cwd, ".gitignore");
+    if (existsSync(gitignorePath)) {
+      const content = readFileSync(gitignorePath, "utf-8");
+      if (!content.split("\n").some((line) => line.trim() === ".iterate")) {
+        writeFileSync(gitignorePath, content.trimEnd() + "\n.iterate\n");
+        console.log("Added .iterate to .gitignore.");
+      }
+    } else {
+      writeFileSync(gitignorePath, ".iterate\n");
+      console.log("Created .gitignore with .iterate entry.");
     }
 
     console.log("\nInitialized iterate:");
