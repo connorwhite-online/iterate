@@ -12,6 +12,50 @@ export default function IntroductionPage() {
         Explore multiple versions of your app simultaneously with agents from a minimal toolbar overlay in your browser.
       </p>
 
+      <div style={{
+        borderRadius: "16px",
+        border: "1px solid var(--color-border)",
+        overflow: "hidden",
+        marginBottom: "2rem",
+      }}>
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          padding: "6px 14px",
+          background: "var(--color-bg-code)",
+          borderBottom: "1px solid var(--color-border)",
+        }}>
+          <div style={{ display: "flex", gap: "6px", marginRight: "4px" }}>
+            <div style={{ width: 10, height: 10, borderRadius: "50%", background: "var(--color-border)" }} />
+            <div style={{ width: 10, height: 10, borderRadius: "50%", background: "var(--color-border)" }} />
+            <div style={{ width: 10, height: 10, borderRadius: "50%", background: "var(--color-border)" }} />
+          </div>
+          <div style={{
+            width: "75%",
+            background: "var(--color-bg)",
+            borderRadius: "6px",
+            padding: "2px 8px",
+            fontSize: "9px",
+            fontFamily: "var(--font-mono)",
+            color: "var(--color-text-secondary)",
+          }}>
+            localhost:3000
+          </div>
+        </div>
+        <video
+          src="/iterate-v1.mp4"
+          autoPlay
+          loop
+          muted
+          playsInline
+          style={{
+            width: "100%",
+            display: "block",
+          }}
+        />
+      </div>
+
       <h2>How to iterate</h2>
       <ol>
         <li>
