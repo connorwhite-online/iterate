@@ -10,6 +10,7 @@
     "clean": "rm -rf .next out"
   },
   "dependencies": {
+    "@vercel/analytics": "^1.6.1",
     "beautiful-mermaid": "^1.1.3",
     "iterate-ui-next": "workspace:*",
     "next": "^15.3.3",

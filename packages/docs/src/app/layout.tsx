@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Analytics } from "@vercel/analytics/react";
 import { FloatingNav, MobileNav } from "@/components/FloatingNav";
 import { PageContent } from "@/components/PageContent";
 import "./globals.css";
@@ -41,6 +42,7 @@ export default function RootLayout({
         <MobileNav />
         <FloatingNav />
         <PageContent>{children}</PageContent>
+        <Analytics />
       </body>
     </html>
   );
