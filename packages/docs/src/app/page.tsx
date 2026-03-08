@@ -26,7 +26,7 @@ export default function IntroductionPage() {
         }}
       />
 
-      <h2>How to iterate</h2>
+      <h2>How it works</h2>
       <ol>
         <li>
           <strong>Create</strong> iterations (worktrees) from the press of a button, or enter <code>/iterate:prompt</code> in a Claude session followed by whatever you want to riff on.
