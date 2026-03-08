@@ -6,6 +6,7 @@ export type {
   DrawingData,
   Rect,
   ChangeStatus,
+  AnimationSnapshot,
 } from "./types/annotations.js";
 export type { IterationInfo, IterationStatus, IterationSource } from "./types/iterations.js";
 export type { DomChange, DomSnapshot } from "./types/dom.js";

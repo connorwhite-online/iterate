@@ -186,6 +186,30 @@ export function CheckIcon({ size = 24, color = "currentColor", animate = false }
   );
 }
 
+/** Pause animations */
+export function PauseIcon({ size = 24, color = "currentColor" }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <path
+        d="M8 5H10V19H8V5ZM14 5H16V19H14V5Z"
+        fill={color}
+      />
+    </svg>
+  );
+}
+
+/** Play / resume animations */
+export function PlayIcon({ size = 24, color = "currentColor" }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <path
+        d="M7 4.884C7 4.014 7.952 3.47 8.693 3.932L19.119 10.048C19.83 10.491 19.83 13.509 19.119 13.952L8.693 20.068C7.952 20.53 7 19.986 7 19.116V4.884Z"
+        fill={color}
+      />
+    </svg>
+  );
+}
+
 /** Spinning loader — circular arc with CSS animation */
 export function SpinnerIcon({ size = 24, color = "currentColor" }: IconProps) {
   return (

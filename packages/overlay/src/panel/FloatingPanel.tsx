@@ -17,6 +17,8 @@ import {
   PickIcon,
   SpinnerIcon,
   DiscardIcon,
+  PauseIcon,
+  PlayIcon,
 } from "./icons.js";
 
 export const ORIGINAL_TAB = "__original__";
@@ -56,6 +58,18 @@ export interface FloatingPanelProps {
   readyIframes?: Set<string>;
   /** Whether any changes are currently being processed (in-progress) */
   processing?: boolean;
+  /** Whether animations are currently paused */
+  animationsPaused?: boolean;
+  /** Number of animations detected on the page */
+  animationCount?: number;
+  /** Current scrub position (0..1) */
+  scrubPosition?: number;
+  /** Timeline duration in ms (for scrubber display) */
+  timelineDuration?: number;
+  /** Called when user clicks play/pause */
+  onAnimationToggle?: () => void;
+  /** Called when user scrubs the timeline */
+  onScrub?: (position: number) => void;
 }
 
 type Corner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
@@ -113,6 +127,12 @@ export function FloatingPanel({
   tabBadgeCounts = {},
   readyIframes,
   processing = false,
+  animationsPaused = false,
+  animationCount = 0,
+  scrubPosition = 0,
+  timelineDuration = 0,
+  onAnimationToggle,
+  onScrub,
 }: FloatingPanelProps) {
   const theme = useTheme();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -256,11 +276,15 @@ export function FloatingPanel({
           if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
           copyTimerRef.current = setTimeout(() => setCopySuccess(false), 3000);
           break;
+        case "p":
+          e.preventDefault();
+          onAnimationToggle?.();
+          break;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [visible, onVisibilityChange, mode, onModeChange, onUndoMove, onClearBatch, onCopyBatch]);
+  }, [visible, onVisibilityChange, mode, onModeChange, onUndoMove, onClearBatch, onCopyBatch, onAnimationToggle]);
 
   // Drag start — only from the panel background, not buttons
   const handleMouseDown = useCallback(
@@ -489,6 +513,35 @@ export function FloatingPanel({
               onClick={() => onModeChange(mode === "move" ? "browse" : "move")}
             />
 
+            {/* Animation play/pause — pauses all page animations for annotation */}
+            <Divider />
+            <div style={{ position: "relative" }}>
+              <IconButton
+                icon={
+                  animationsPaused
+                    ? <PlayIcon size={ICON_SIZE} />
+                    : <PauseIcon size={ICON_SIZE} />
+                }
+                label={
+                  animationsPaused
+                    ? `Resume animations (P)`
+                    : `Pause animations (P)`
+                }
+                active={animationsPaused}
+                onClick={() => onAnimationToggle?.()}
+              />
+              {/* Scrubber popup — appears above/below the button when paused */}
+              {animationsPaused && animationCount > 0 && (
+                <ScrubberPopup
+                  position={scrubPosition}
+                  duration={timelineDuration}
+                  animationCount={animationCount}
+                  onScrub={onScrub}
+                  above={!isTopSide}
+                />
+              )}
+            </div>
+
             {/* Change tools — always visible, disabled when no pending changes */}
             <Divider />
             <IconButton
@@ -691,6 +744,173 @@ function SuspenseOverlay({ active, message }: { active: boolean; message: string
         }}
       >
         {message}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Scrubber popup — appears above the play/pause button when animations are paused.
+ * Shows a horizontal slider to scrub through the animation timeline.
+ */
+function ScrubberPopup({
+  position,
+  duration,
+  animationCount,
+  onScrub,
+  above,
+}: {
+  position: number;
+  duration: number;
+  animationCount: number;
+  onScrub?: (position: number) => void;
+  above: boolean;
+}) {
+  const theme = useTheme();
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [dragging, setDragging] = useState(false);
+
+  const handleScrub = useCallback(
+    (clientX: number) => {
+      const track = trackRef.current;
+      if (!track) return;
+      const rect = track.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      onScrub?.(ratio);
+    },
+    [onScrub]
+  );
+
+  useEffect(() => {
+    if (!dragging) return;
+    const onMove = (e: MouseEvent) => handleScrub(e.clientX);
+    const onUp = () => setDragging(false);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [dragging, handleScrub]);
+
+  const currentMs = Math.round(position * duration);
+  const totalMs = Math.round(duration);
+  const formatTime = (ms: number) => {
+    if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
+    return `${ms}ms`;
+  };
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: "50%",
+        transform: "translateX(-50%)",
+        ...(above ? { bottom: "100%", marginBottom: 8 } : { top: "100%", marginTop: 8 }),
+        background: theme.panelBg,
+        border: `1px solid ${theme.border}`,
+        borderRadius: 10,
+        padding: "8px 12px",
+        boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
+        zIndex: 10002,
+        pointerEvents: "auto",
+        whiteSpace: "nowrap",
+        minWidth: 180,
+        cursor: "default",
+      }}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      {/* Header */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 6,
+          fontSize: 10,
+          fontWeight: 600,
+          fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+          color: theme.textTertiary,
+          textTransform: "uppercase",
+          letterSpacing: "0.5px",
+        }}
+      >
+        <span>Timeline</span>
+        <span style={{ fontWeight: 400 }}>
+          {animationCount} animation{animationCount !== 1 ? "s" : ""}
+        </span>
+      </div>
+
+      {/* Track */}
+      <div
+        ref={trackRef}
+        onMouseDown={(e) => {
+          e.stopPropagation();
+          setDragging(true);
+          handleScrub(e.clientX);
+        }}
+        style={{
+          position: "relative",
+          height: 20,
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+        }}
+      >
+        {/* Background track */}
+        <div
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            height: 4,
+            borderRadius: 2,
+            background: theme.border,
+          }}
+        />
+        {/* Filled track */}
+        <div
+          style={{
+            position: "absolute",
+            left: 0,
+            width: `${position * 100}%`,
+            height: 4,
+            borderRadius: 2,
+            background: "#2563eb",
+            transition: dragging ? "none" : "width 0.1s ease",
+          }}
+        />
+        {/* Thumb */}
+        <div
+          style={{
+            position: "absolute",
+            left: `${position * 100}%`,
+            width: 12,
+            height: 12,
+            borderRadius: "50%",
+            background: "#2563eb",
+            border: "2px solid #fff",
+            boxShadow: "0 1px 4px rgba(0,0,0,0.2)",
+            transform: "translateX(-50%)",
+            transition: dragging ? "none" : "left 0.1s ease",
+          }}
+        />
+      </div>
+
+      {/* Time labels */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          marginTop: 4,
+          fontSize: 10,
+          fontWeight: 500,
+          fontFamily: "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace",
+          color: theme.textTertiary,
+        }}
+      >
+        <span>{formatTime(currentMs)}</span>
+        <span>{formatTime(totalMs)}</span>
       </div>
     </div>
   );

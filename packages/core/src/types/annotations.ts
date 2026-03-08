@@ -43,6 +43,31 @@ export interface DrawingData {
   strokeWidth: number;
 }
 
+/** Snapshot of page animation state at the moment an annotation was created */
+export interface AnimationSnapshot {
+  /** Whether animations were paused when the annotation was created */
+  paused: boolean;
+  /** Total number of running/paused animations on the page */
+  animationCount: number;
+  /** Scrubber position as a normalized value (0..1) within the timeline */
+  scrubPosition: number;
+  /** Duration of the longest animation on the page (ms) */
+  timelineDuration: number;
+  /** Individual animation details for context */
+  animations: {
+    /** CSS selector for the animated element */
+    target: string;
+    /** "css-animation" | "css-transition" | "web-animation" */
+    type: "css-animation" | "css-transition" | "web-animation";
+    /** Animation name or transition property */
+    name: string;
+    /** Current time in ms when captured */
+    currentTime: number;
+    /** Total duration in ms */
+    duration: number;
+  }[];
+}
+
 /** A change targeting one or more elements in an iteration */
 export interface Change {
   id: string;
@@ -64,6 +89,8 @@ export interface Change {
   isFixedPosition?: boolean;
   /** Scroll offset when drawing was created (to convert viewport drawing coords to page coords) */
   drawingScrollOffset?: { x: number; y: number };
+  /** Animation state when annotation was created (present when animations were paused) */
+  animationSnapshot?: AnimationSnapshot;
 
   // Agent workflow
   status: ChangeStatus;

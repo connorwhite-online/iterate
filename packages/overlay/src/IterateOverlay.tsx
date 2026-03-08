@@ -6,6 +6,7 @@ import type {
   TextSelection,
   DrawingData,
   DomChange,
+  AnimationSnapshot,
 } from "iterate-ui-core";
 import { formatBatchPrompt } from "iterate-ui-core";
 import { ElementPicker, type PickedElement } from "./inspector/ElementPicker.js";
@@ -38,6 +39,8 @@ export interface IterateOverlayProps {
   previewMode?: boolean;
   /** Whether the toolbar is visible — when false, badges are hidden and tools are disabled */
   visible?: boolean;
+  /** Current animation snapshot to attach to new annotations (when animations are paused) */
+  animationSnapshot?: AnimationSnapshot;
 }
 
 /** Get the current URL from the iteration iframe (same-origin with cross-origin fallback). */
@@ -139,6 +142,7 @@ export function IterateOverlay({
   onProcessingChange,
   previewMode = true,
   visible = true,
+  animationSnapshot,
 }: IterateOverlayProps) {
   const connectionRef = useRef<DaemonConnection | null>(null);
 
@@ -461,6 +465,7 @@ export function IterateOverlay({
           pagePosition: pagePos,
           isFixedPosition: fixed || undefined,
           drawingScrollOffset: activeDrawing ? { x: scroll.x, y: scroll.y } : undefined,
+          animationSnapshot: animationSnapshot ?? undefined,
         },
       });
 
@@ -469,7 +474,7 @@ export function IterateOverlay({
       setTextSelection(null);
       setActiveDrawing(null);
     },
-    [selectedElements, textSelection, activeDrawing, iteration, iframeRef, clickPosition, editingId, editingIsFixed]
+    [selectedElements, textSelection, activeDrawing, iteration, iframeRef, clickPosition, editingId, editingIsFixed, animationSnapshot]
   );
 
   // Delete a change from the daemon

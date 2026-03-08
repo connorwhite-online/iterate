@@ -5,7 +5,8 @@ import { IterateOverlay, type ToolMode } from "./IterateOverlay.js";
 import { FloatingPanel, ORIGINAL_TAB } from "./panel/FloatingPanel.js";
 import { DaemonConnection } from "./transport/connection.js";
 import { ThemeProvider } from "./theme.js";
-import type { IterationInfo } from "iterate-ui-core";
+import { AnimationController } from "./animation/controller.js";
+import type { IterationInfo, AnimationSnapshot } from "iterate-ui-core";
 
 /** postMessage types for parent <-> iframe communication */
 interface IterateMessage {
@@ -80,6 +81,13 @@ function StandaloneOverlay() {
   const [previewMode, setPreviewMode] = useState(true);
   const [iterations, setIterations] = useState<Record<string, IterationInfo>>({});
   const [readyIframes, setReadyIframes] = useState<Set<string>>(new Set());
+
+  // Animation controller state
+  const animControllerRef = useRef<AnimationController | null>(null);
+  const [animPaused, setAnimPaused] = useState(false);
+  const [animCount, setAnimCount] = useState(0);
+  const [scrubPos, setScrubPos] = useState(0);
+  const [timelineDuration, setTimelineDuration] = useState(0);
 
   // Detect context
   const isDaemonShell = typeof document !== "undefined" && !!document.getElementById("viewport");
@@ -599,6 +607,45 @@ function StandaloneOverlay() {
     [iterations]
   );
 
+  // Animation toggle handler
+  const handleAnimationToggle = useCallback(() => {
+    if (!animControllerRef.current) {
+      animControllerRef.current = new AnimationController();
+    }
+    const ctrl = animControllerRef.current;
+    if (ctrl.isPaused) {
+      ctrl.resume();
+      setAnimPaused(false);
+      setAnimCount(0);
+      setScrubPos(0);
+      setTimelineDuration(0);
+    } else {
+      const snapshot = ctrl.pause();
+      setAnimPaused(true);
+      setAnimCount(snapshot.animationCount);
+      setScrubPos(
+        snapshot.timelineDuration > 0
+          ? snapshot.timelinePosition / snapshot.timelineDuration
+          : 0
+      );
+      setTimelineDuration(snapshot.timelineDuration);
+    }
+  }, []);
+
+  // Animation scrub handler
+  const handleScrub = useCallback((position: number) => {
+    if (!animControllerRef.current) return;
+    animControllerRef.current.scrub(position);
+    setScrubPos(position);
+  }, []);
+
+  // Clean up animation controller on unmount
+  useEffect(() => {
+    return () => {
+      animControllerRef.current?.destroy();
+    };
+  }, []);
+
   // Clean up stale iframe refs and readyIframes when iterations are removed
   useEffect(() => {
     const currentNames = new Set(Object.keys(iterations));
@@ -668,6 +715,24 @@ function StandaloneOverlay() {
   // parent page context and should follow its theme regardless of which tab is active.
 
   // If embedded in an iframe, only render the IterateOverlay (no FloatingPanel)
+  // Build animation snapshot to pass to IterateOverlay for annotation context
+  const currentAnimSnapshot: AnimationSnapshot | undefined =
+    animPaused && animCount > 0
+      ? {
+          paused: true,
+          animationCount: animCount,
+          scrubPosition: scrubPos,
+          timelineDuration,
+          animations: animControllerRef.current?.getSnapshot().animations.map((a) => ({
+            target: a.target,
+            type: a.type,
+            name: a.name,
+            currentTime: a.currentTime,
+            duration: a.duration,
+          })) ?? [],
+        }
+      : undefined;
+
   if (isEmbedded) {
     return (
       <ThemeProvider>
@@ -692,6 +757,7 @@ function StandaloneOverlay() {
           setTabProcessing((prev) => ({ ...prev, [iteration]: p }));
         }}
         previewMode={previewMode}
+        animationSnapshot={currentAnimSnapshot}
       />
       </ThemeProvider>
     );
@@ -751,6 +817,7 @@ function StandaloneOverlay() {
         }}
         previewMode={previewMode}
         visible={visible && !isViewingIteration}
+        animationSnapshot={currentAnimSnapshot}
       />
 
       {/* Floating toolbar panel */}
@@ -774,6 +841,12 @@ function StandaloneOverlay() {
         isViewingIteration={isViewingIteration}
         tabBadgeCounts={tabBadgeCounts}
         readyIframes={readyIframes}
+        animationsPaused={animPaused}
+        animationCount={animCount}
+        scrubPosition={scrubPos}
+        timelineDuration={timelineDuration}
+        onAnimationToggle={handleAnimationToggle}
+        onScrub={handleScrub}
       />
     </>
     </ThemeProvider>

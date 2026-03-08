@@ -1,4 +1,4 @@
-import type { SelectedElement, TextSelection, DrawingData, Rect } from "./types/annotations.js";
+import type { SelectedElement, TextSelection, DrawingData, Rect, AnimationSnapshot } from "./types/annotations.js";
 
 /**
  * A single change item to format (works for both pending and persisted changes).
@@ -10,6 +10,7 @@ export interface FormatChange {
   drawing?: DrawingData;
   iteration?: string;
   url?: string;
+  animationSnapshot?: AnimationSnapshot;
 }
 
 /**
@@ -97,6 +98,20 @@ export function formatBatchPrompt(
       text += `  Region: ${a.drawing.bounds.width.toFixed(0)}×${a.drawing.bounds.height.toFixed(0)} at (${a.drawing.bounds.x.toFixed(0)}, ${a.drawing.bounds.y.toFixed(0)})\n`;
       text += `  SVG path: \`${a.drawing.path}\`\n`;
       text += `  Stroke: ${a.drawing.strokeColor}, width ${a.drawing.strokeWidth}\n`;
+    }
+
+    if (a.animationSnapshot?.paused) {
+      const snap = a.animationSnapshot;
+      const posMs = Math.round(snap.scrubPosition * snap.timelineDuration);
+      text += `- **Animation state** (paused at ${posMs}ms / ${Math.round(snap.timelineDuration)}ms, ${(snap.scrubPosition * 100).toFixed(1)}% through timeline)\n`;
+      text += `  ${snap.animationCount} animation${snap.animationCount !== 1 ? "s" : ""} on page\n`;
+      for (const anim of snap.animations.slice(0, 8)) {
+        const durStr = anim.duration > 0 && isFinite(anim.duration) ? `${Math.round(anim.duration)}ms` : "infinite";
+        text += `  - \`${anim.target}\`: ${anim.type} "${anim.name}" at ${Math.round(anim.currentTime)}ms / ${durStr}\n`;
+      }
+      if (snap.animations.length > 8) {
+        text += `  - ... and ${snap.animations.length - 8} more\n`;
+      }
     }
 
     text += `\n`;
