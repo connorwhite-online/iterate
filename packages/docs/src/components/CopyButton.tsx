@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { track } from "@vercel/analytics";
 import styles from "./CopyButton.module.css";
 
 const SPRING = "cubic-bezier(0.34, 1.56, 0.64, 1)";
@@ -10,6 +11,7 @@ export function CopyButton({ text }: { text: string }) {
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(text);
+    track("copy_install_command");
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };

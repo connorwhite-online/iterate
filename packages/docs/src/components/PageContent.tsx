@@ -1,3 +1,6 @@
+"use client";
+
+import { track } from "@vercel/analytics";
 import styles from "./PageContent.module.css";
 
 function NpmIcon() {
@@ -24,7 +27,7 @@ export function PageContent({ children }: { children: React.ReactNode }) {
         {children}
       </article>
       <footer className={styles.footer}>
-        <span>Created by <a href="https://x.com/connor_online" target="_blank" rel="noopener noreferrer">Connor White</a></span>
+        <span>Created by <a href="https://x.com/connor_online" target="_blank" rel="noopener noreferrer" onClick={() => track("click_x_profile")}>Connor White</a></span>
         <span className={styles.footerLinks}>
           <a href="https://www.npmjs.com/package/iterate-ui" target="_blank" rel="noopener noreferrer" aria-label="npm package"><NpmIcon /></a>
           <a href="https://github.com/connorwhite-online/iterate" target="_blank" rel="noopener noreferrer" aria-label="GitHub repository"><GithubIcon /></a>
