@@ -88,7 +88,8 @@ function StandaloneOverlay() {
   // In framework plugin mode, connect directly to the daemon port
   const shell = (window as any).__iterate_shell__;
   const daemonPort = shell?.daemonPort ?? 4000;
-  const wsUrl = !isDaemonShell && shell?.daemonPort
+  const isProductionMode = !!shell?.production;
+  const wsUrl = !isDaemonShell && !isProductionMode && shell?.daemonPort
     ? `ws://${window.location.hostname}:${shell.daemonPort}/ws`
     : undefined;
 
@@ -326,7 +327,7 @@ function StandaloneOverlay() {
 
   // Set up a separate DaemonConnection for iteration state tracking
   useEffect(() => {
-    if (isEmbedded) return; // Embedded overlays don't need their own iteration tracking
+    if (isEmbedded || isProductionMode) return; // Skip in production mode (no daemon)
 
     const conn = new DaemonConnection(wsUrl);
     connectionRef.current = conn;
@@ -341,7 +342,7 @@ function StandaloneOverlay() {
       unsub();
       conn.disconnect();
     };
-  }, [wsUrl, isEmbedded]);
+  }, [wsUrl, isEmbedded, isProductionMode]);
 
   // Listen for shell events (daemon shell mode)
   useEffect(() => {
@@ -768,9 +769,9 @@ function StandaloneOverlay() {
         iterations={iterations}
         activeIteration={iteration}
         onIterationChange={handleIterationChange}
-        onFork={handleFork}
-        onPick={handlePick}
-        onDiscard={handleDiscard}
+        onFork={isProductionMode ? undefined : handleFork}
+        onPick={isProductionMode ? undefined : handlePick}
+        onDiscard={isProductionMode ? undefined : handleDiscard}
         isViewingIteration={isViewingIteration}
         tabBadgeCounts={tabBadgeCounts}
         readyIframes={readyIframes}

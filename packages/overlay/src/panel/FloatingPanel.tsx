@@ -151,11 +151,11 @@ export function FloatingPanel({
 
   // Whether any branching tool is showing (to render divider)
   const branchingVisible =
-    (!hasIterations && !forkLoading && !isCreating) ||
+    (onFork && !hasIterations && !forkLoading && !isCreating) ||
     (forkLoading || isCreating) ||
-    (hasIterations && isViewingIteration && !pickLoading && !isCreating) ||
+    (onPick && hasIterations && isViewingIteration && !pickLoading && !isCreating) ||
     pickLoading ||
-    (hasIterations && !isViewingIteration && !discardLoading && !isCreating) ||
+    (onDiscard && hasIterations && !isViewingIteration && !discardLoading && !isCreating) ||
     discardLoading;
 
   // Clean up success timers on unmount
@@ -548,7 +548,7 @@ export function FloatingPanel({
             {branchingVisible && <Divider />}
 
             {/* Fork button */}
-            {!hasIterations && !forkLoading && !isCreating && (
+            {onFork && !hasIterations && !forkLoading && !isCreating && (
               <IconButton
                 icon={<ForkIcon size={ICON_SIZE} />}
                 label="Create iterations"
@@ -567,7 +567,7 @@ export function FloatingPanel({
               />
             )}
             {/* Pick/Merge button */}
-            {hasIterations && isViewingIteration && !pickLoading && !isCreating && (
+            {onPick && hasIterations && isViewingIteration && !pickLoading && !isCreating && (
               <IconButton
                 icon={<PickIcon size={ICON_SIZE} />}
                 label={`Merge "${activeIteration}"`}
@@ -591,7 +591,7 @@ export function FloatingPanel({
               />
             )}
             {/* Discard button */}
-            {hasIterations && !isViewingIteration && !discardLoading && !isCreating && (
+            {onDiscard && hasIterations && !isViewingIteration && !discardLoading && !isCreating && (
               <IconButton
                 icon={<DiscardIcon size={ICON_SIZE} />}
                 label="Discard all iterations"

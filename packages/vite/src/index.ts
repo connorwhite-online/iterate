@@ -9,6 +9,12 @@ export interface IteratePluginOptions {
   daemonPort?: number;
   /** Disable the babel plugin that injects component names/source locations (default: false) */
   disableBabelPlugin?: boolean;
+  /**
+   * Enable production mode — injects the toolbar overlay into production builds
+   * with fork/pick/discard disabled (no daemon required).
+   * Useful for deploying the annotation toolbar on live sites (e.g. docs).
+   */
+  production?: boolean;
 }
 
 /**
@@ -32,6 +38,7 @@ export interface IteratePluginOptions {
  */
 export function iterate(options: IteratePluginOptions = {}): Plugin[] {
   const daemonPort = options.daemonPort ?? 4000;
+  const productionMode = options.production ?? false;
   let daemon: ChildProcess | null = null;
   let overlayJS: string | null = null;
 
@@ -44,7 +51,7 @@ export function iterate(options: IteratePluginOptions = {}): Plugin[] {
 
     plugins.push({
       name: "iterate:component-source",
-      apply: "serve",
+      ...(productionMode ? {} : { apply: "serve" as const }),
       enforce: "pre", // Run before @vitejs/plugin-react transforms JSX
 
       async configResolved(config) {
@@ -98,12 +105,15 @@ export function iterate(options: IteratePluginOptions = {}): Plugin[] {
   // Main iterate plugin: daemon, overlay, proxy
   plugins.push({
     name: "iterate",
-    apply: "serve", // Only active during dev
+    // In production mode, apply during both serve and build
+    ...(productionMode ? {} : { apply: "serve" as const }),
 
     configureServer(server: ViteDevServer) {
-      // Start the daemon
-      const repoRoot = getGitRoot() ?? server.config.root;
-      daemon = startDaemon(daemonPort, repoRoot);
+      // Skip daemon in production mode
+      if (!productionMode) {
+        const repoRoot = getGitRoot() ?? server.config.root;
+        daemon = startDaemon(daemonPort, repoRoot);
+      }
 
       // Serve the overlay bundle directly (avoids extra proxy hop)
       server.middlewares.use("/__iterate__/overlay.js", (_req, res) => {
@@ -123,20 +133,22 @@ export function iterate(options: IteratePluginOptions = {}): Plugin[] {
         res.end(overlayJS);
       });
 
-      // Proxy iterate API and WebSocket to daemon
-      server.middlewares.use((req, res, next) => {
-        const url = req.url ?? "";
+      // Proxy iterate API and WebSocket to daemon (not needed in production mode)
+      if (!productionMode) {
+        server.middlewares.use((req, res, next) => {
+          const url = req.url ?? "";
 
-        if (url.startsWith("/api/") || url.startsWith("/__iterate__/")) {
-          proxyRequest(req, res, daemonPort);
-          return;
-        }
+          if (url.startsWith("/api/") || url.startsWith("/__iterate__/")) {
+            proxyRequest(req, res, daemonPort);
+            return;
+          }
 
-        next();
-      });
+          next();
+        });
+      }
 
       // Proxy WebSocket upgrade for /ws
-      server.httpServer?.on("upgrade", (req, socket, head) => {
+      if (!productionMode) server.httpServer?.on("upgrade", (req, socket, head) => {
         if (req.url === "/ws") {
           const proxy = http.request(
             {
@@ -178,10 +190,12 @@ export function iterate(options: IteratePluginOptions = {}): Plugin[] {
       });
 
       // Clean up daemon when dev server closes
-      server.httpServer?.on("close", () => {
-        stopDaemon(daemon, daemonPort);
-        daemon = null;
-      });
+      if (!productionMode) {
+        server.httpServer?.on("close", () => {
+          stopDaemon(daemon, daemonPort);
+          daemon = null;
+        });
+      }
     },
 
     // Inject the overlay script into HTML
@@ -190,10 +204,11 @@ export function iterate(options: IteratePluginOptions = {}): Plugin[] {
       // ITERATE_ITERATION_NAME is set by the daemon's process manager when starting
       // iteration dev servers — this lets the overlay know which iteration it's in.
       const iterationName = JSON.stringify(process.env.ITERATE_ITERATION_NAME ?? "__original__");
+      const productionFlag = productionMode ? ", production: true" : "";
       return html.replace(
         "</body>",
         `<script>
-  window.__iterate_shell__ = { activeTool: 'select', activeIteration: ${iterationName}, daemonPort: ${daemonPort} };
+  window.__iterate_shell__ = { activeTool: 'select', activeIteration: ${iterationName}, daemonPort: ${daemonPort}${productionFlag} };
 </script>
 <script src="/__iterate__/overlay.js" defer></script>
 </body>`

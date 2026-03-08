@@ -19,16 +19,29 @@ import { useEffect } from "react";
  *   );
  * }
  * ```
+ *
+ * For production mode (annotation toolbar without fork/pick/discard):
+ * ```tsx
+ * <IterateDevTools production />
+ * ```
  */
-export function IterateDevTools({ port = 4000 }: { port?: number }) {
+export function IterateDevTools({
+  port = 4000,
+  production = false,
+}: {
+  port?: number;
+  /** Enable production mode — shows the toolbar with fork/pick/discard disabled */
+  production?: boolean;
+}) {
   useEffect(() => {
-    if (process.env.NODE_ENV === "production") return;
+    if (process.env.NODE_ENV === "production" && !production) return;
 
     if (!(window as any).__iterate_shell__) {
       (window as any).__iterate_shell__ = {
         activeTool: "browse",
         activeIteration: "__original__",
         daemonPort: port,
+        ...(production ? { production: true } : {}),
       };
     }
 
@@ -38,7 +51,7 @@ export function IterateDevTools({ port = 4000 }: { port?: number }) {
       script.src = "/__iterate__/overlay.js";
       document.body.appendChild(script);
     }
-  }, [port]);
+  }, [port, production]);
 
   return null;
 }

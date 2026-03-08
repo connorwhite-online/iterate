@@ -41,6 +41,12 @@ export interface IterateNextOptions {
   daemonPort?: number;
   /** Disable the babel plugin that injects component names/source locations (default: false) */
   disableBabelPlugin?: boolean;
+  /**
+   * Enable production mode — injects the toolbar overlay into production builds
+   * with fork/pick/discard disabled (no daemon required).
+   * Useful for deploying the annotation toolbar on live sites (e.g. docs).
+   */
+  production?: boolean;
 }
 
 type NextConfig = Record<string, any>;
@@ -72,14 +78,15 @@ export function withIterate(
 ): NextConfig {
   const daemonPort = options.daemonPort ?? 4000;
   const isDev = process.env.NODE_ENV !== "production";
+  const productionMode = options.production ?? false;
 
-  if (!isDev) {
-    // In production, don't modify anything
+  if (!isDev && !productionMode) {
+    // In production without production mode, don't modify anything
     return nextConfig;
   }
 
-  // Start the daemon when the config is loaded (dev only)
-  if (!daemon && !daemonStarting) {
+  // Start the daemon when the config is loaded (dev only, not in production mode)
+  if (isDev && !daemon && !daemonStarting) {
     daemonStarting = true;
     const repoRoot = getGitRoot() ?? process.cwd();
     startDaemonIfNeeded(daemonPort, repoRoot).then((child) => {
@@ -116,7 +123,7 @@ export function withIterate(
 
   const turbopack = isTurbopackMode();
 
-  if (turbopack) {
+  if (turbopack && !productionMode) {
     console.warn(
       "\x1b[33m[iterate]\x1b[0m Turbopack detected — webpack entry injection is disabled.\n" +
       "  The overlay will not auto-inject. To fix, choose one of:\n" +
@@ -129,50 +136,52 @@ export function withIterate(
   const result: NextConfig = {
     ...nextConfig,
 
-    // Add rewrites to proxy to the daemon
-    async rewrites() {
-      const existingRewrites = await (nextConfig.rewrites?.() ?? []);
+    // Add rewrites to proxy to the daemon (not needed in production mode)
+    ...(!productionMode ? {
+      async rewrites() {
+        const existingRewrites = await (nextConfig.rewrites?.() ?? []);
 
-      const iterateRewrites = [
-        {
-          source: "/__iterate__/:path*",
-          destination: `http://127.0.0.1:${daemonPort}/__iterate__/:path*`,
-        },
-        {
-          source: "/api/iterations/:path*",
-          destination: `http://127.0.0.1:${daemonPort}/api/iterations/:path*`,
-        },
-        {
-          source: "/api/annotations/:path*",
-          destination: `http://127.0.0.1:${daemonPort}/api/annotations/:path*`,
-        },
-        {
-          source: "/api/dom-changes",
-          destination: `http://127.0.0.1:${daemonPort}/api/dom-changes`,
-        },
-        {
-          source: "/api/command",
-          destination: `http://127.0.0.1:${daemonPort}/api/command`,
-        },
-        {
-          source: "/api/command-context/:path*",
-          destination: `http://127.0.0.1:${daemonPort}/api/command-context/:path*`,
-        },
-      ];
+        const iterateRewrites = [
+          {
+            source: "/__iterate__/:path*",
+            destination: `http://127.0.0.1:${daemonPort}/__iterate__/:path*`,
+          },
+          {
+            source: "/api/iterations/:path*",
+            destination: `http://127.0.0.1:${daemonPort}/api/iterations/:path*`,
+          },
+          {
+            source: "/api/annotations/:path*",
+            destination: `http://127.0.0.1:${daemonPort}/api/annotations/:path*`,
+          },
+          {
+            source: "/api/dom-changes",
+            destination: `http://127.0.0.1:${daemonPort}/api/dom-changes`,
+          },
+          {
+            source: "/api/command",
+            destination: `http://127.0.0.1:${daemonPort}/api/command`,
+          },
+          {
+            source: "/api/command-context/:path*",
+            destination: `http://127.0.0.1:${daemonPort}/api/command-context/:path*`,
+          },
+        ];
 
-      // Handle both array and object rewrite formats
-      if (Array.isArray(existingRewrites)) {
-        return [...iterateRewrites, ...existingRewrites];
-      }
+        // Handle both array and object rewrite formats
+        if (Array.isArray(existingRewrites)) {
+          return [...iterateRewrites, ...existingRewrites];
+        }
 
-      return {
-        ...existingRewrites,
-        beforeFiles: [
-          ...iterateRewrites,
-          ...(existingRewrites.beforeFiles ?? []),
-        ],
-      };
-    },
+        return {
+          ...existingRewrites,
+          beforeFiles: [
+            ...iterateRewrites,
+            ...(existingRewrites.beforeFiles ?? []),
+          ],
+        };
+      },
+    } : {}),
   };
 
   // Resolve babel-loader for the component name injection pre-loader
@@ -189,7 +198,7 @@ export function withIterate(
   // "webpack config present but no turbopack config" warning in Next 16+)
   if (!turbopack) {
     result.webpack = function webpack(config: any, context: any) {
-      if (!context.dev) {
+      if (!context.dev && !productionMode) {
         return nextConfig.webpack?.(config, context) ?? config;
       }
 
@@ -220,15 +229,26 @@ export function withIterate(
             ? originalEntry()
             : originalEntry);
 
-          // Add our injector to the main client entry
-          const injectorPath = createIterateInjector(overlayBundlePath, daemonPort);
-          if (injectorPath && entries["main-app"]) {
-            if (Array.isArray(entries["main-app"])) {
-              entries["main-app"].push(injectorPath);
+          // In production mode, bundle the overlay directly via webpack entry
+          // instead of loading from the daemon at runtime
+          if (productionMode && overlayBundlePath) {
+            const bootstrapPath = createIterateBootstrap(daemonPort);
+            const entryKey = entries["main-app"] ? "main-app" : "main";
+            if (entries[entryKey] && Array.isArray(entries[entryKey])) {
+              if (bootstrapPath) entries[entryKey].push(bootstrapPath);
+              entries[entryKey].push(overlayBundlePath);
             }
-          } else if (injectorPath && entries["main"]) {
-            if (Array.isArray(entries["main"])) {
-              entries["main"].push(injectorPath);
+          } else {
+            // Dev mode: inject a script tag that loads overlay from the daemon
+            const injectorPath = createIterateInjector(overlayBundlePath, daemonPort);
+            if (injectorPath && entries["main-app"]) {
+              if (Array.isArray(entries["main-app"])) {
+                entries["main-app"].push(injectorPath);
+              }
+            } else if (injectorPath && entries["main"]) {
+              if (Array.isArray(entries["main"])) {
+                entries["main"].push(injectorPath);
+              }
             }
           }
 
@@ -244,12 +264,25 @@ export function withIterate(
 }
 
 /**
+ * Create a bootstrap module that sets up window.__iterate_shell__ globals.
+ * Used in production mode where the overlay is bundled directly via webpack.
+ */
+function createIterateBootstrap(daemonPort: number): string | null {
+  const code = `
+    if (typeof window !== 'undefined') {
+      window.__iterate_shell__ = { activeTool: 'browse', activeIteration: '__original__', daemonPort: ${daemonPort}, production: true };
+    }
+  `;
+  return `data:text/javascript;base64,${Buffer.from(code).toString("base64")}`;
+}
+
+/**
  * Create a temporary JS module that injects the overlay script tag.
  * Returns the path to write the injector, or writes it inline via data URI.
  */
 function createIterateInjector(
   _overlayPath: string | undefined,
-  daemonPort: number
+  daemonPort: number,
 ): string | null {
   // Use a data URI as a virtual module — webpack supports this.
   // ITERATE_ITERATION_NAME is set by the daemon's process manager when starting
