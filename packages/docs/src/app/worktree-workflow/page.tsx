@@ -145,6 +145,7 @@ graph LR
   style untracked fill:#d4edda,stroke:#28a745,color:#155724
   style envfiles fill:#d4edda,stroke:#28a745,color:#155724
 `}
+        style={{ transform: "scale(0.7)", transformOrigin: "top left", width: "142.8%", fontSize: "0.7em" }}
       />
 
       <p>

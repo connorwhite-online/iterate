@@ -16,70 +16,120 @@ export default function InstallationPage() {
         but you can also set things up manually.
       </p>
 
-      <h2>1. Install skills</h2>
-      <p>
-        Add the <strong>iterate</strong> slash commands to your Claude Code session:
-      </p>
-      <CodeBlock
-        code={`npx skills add connorwhite-online/iterate`}
-      />
+      <style>{`
+        @keyframes mascotWalk {
+          0%    { left: 75%; transform: translateX(-50%) translateY(-100%) scaleX(1); }
+          10%   { left: 75%; transform: translateX(-50%) translateY(-100%) scaleX(1); animation-timing-function: ease-in-out; }
+          20%   { left: 88%; transform: translateX(-50%) translateY(-100%) scaleX(1); animation-timing-function: steps(1); }
+          20.1% { left: 88%; transform: translateX(-50%) translateY(-100%) scaleX(-1); }
+          30%   { left: 88%; transform: translateX(-50%) translateY(-100%) scaleX(-1); animation-timing-function: ease-in-out; }
+          45%   { left: 55%; transform: translateX(-50%) translateY(-100%) scaleX(-1); animation-timing-function: steps(1); }
+          45.1% { left: 55%; transform: translateX(-50%) translateY(-100%) scaleX(1); }
+          55%   { left: 55%; transform: translateX(-50%) translateY(-100%) scaleX(1); animation-timing-function: ease-in-out; }
+          65%   { left: 78%; transform: translateX(-50%) translateY(-100%) scaleX(1); animation-timing-function: steps(1); }
+          65.1% { left: 78%; transform: translateX(-50%) translateY(-100%) scaleX(-1); }
+          75%   { left: 78%; transform: translateX(-50%) translateY(-100%) scaleX(-1); animation-timing-function: ease-in-out; }
+          85%   { left: 60%; transform: translateX(-50%) translateY(-100%) scaleX(-1); animation-timing-function: steps(1); }
+          85.1% { left: 60%; transform: translateX(-50%) translateY(-100%) scaleX(1); }
+          92%   { left: 60%; transform: translateX(-50%) translateY(-100%) scaleX(1); animation-timing-function: ease-in-out; }
+          100%  { left: 75%; transform: translateX(-50%) translateY(-100%) scaleX(1); }
+        }
+        @keyframes legA {
+          0%,10%,12%,14%,16%,18%,20%,30%,32%,34%,36%,38%,40%,42%,44%,45%,55%,57%,59%,61%,63%,65%,75%,77%,79%,81%,83%,85%,92%,94%,96%,98%,100% { transform: translateY(0); }
+          11%,13%,15%,17%,19%,31%,33%,35%,37%,39%,41%,43%,56%,58%,60%,62%,64%,76%,78%,80%,82%,84%,93%,95%,97%,99% { transform: translateY(-6px); }
+        }
+        @keyframes legB {
+          0%,10%,11%,13%,15%,17%,19%,20%,30%,31%,33%,35%,37%,39%,41%,43%,45%,55%,56%,58%,60%,62%,64%,65%,75%,76%,78%,80%,82%,84%,85%,92%,93%,95%,97%,99%,100% { transform: translateY(0); }
+          12%,14%,16%,18%,32%,34%,36%,38%,40%,42%,44%,57%,59%,61%,63%,77%,79%,81%,83%,94%,96%,98% { transform: translateY(-6px); }
+        }
+        .claude-mascot-walk {
+          position: absolute;
+          top: -1px;
+          animation: mascotWalk 24s ease-in-out infinite;
+          z-index: 1;
+          cursor: pointer;
+        }
+        .claude-mascot-walk .leg-1,
+        .claude-mascot-walk .leg-4 {
+          animation: legA 24s linear infinite;
+        }
+        .claude-mascot-walk .leg-2,
+        .claude-mascot-walk .leg-3 {
+          animation: legB 24s linear infinite;
+        }
+        .claude-mascot-walk .eye-expr {
+          opacity: 0;
+        }
+        .claude-mascot-walk:hover .eye-normal,
+        .claude-mascot-walk:active .eye-normal {
+          opacity: 0;
+        }
+        .claude-mascot-walk:hover .eye-expr,
+        .claude-mascot-walk:active .eye-expr {
+          opacity: 1;
+        }
+      `}</style>
 
-      <h2>2. Open a new Claude Code session</h2>
-      <p>
-        Restart Claude Code or open a new session so the new slash commands become available.
-      </p>
-
-      <h2>3. Set up your project</h2>
-      <p>
-        In Claude Code, run:
-      </p>
-      <CodeBlock
-        code={`/iterate`}
-      />
-      <p>
-        Claude will automatically:
-      </p>
-      <ul>
-        <li>Detect your framework (Next.js or Vite)</li>
-        <li>Install the adapter package (<code>iterate-ui-next</code> or <code>iterate-ui-vite</code>)</li>
-        <li>Wrap your framework config with the <strong>iterate</strong> plugin</li>
-        <li>Create <code>.iterate/config.json</code>, <code>.mcp.json</code>, and register the Claude Code plugin</li>
-      </ul>
-      <h2>4. Run</h2>
-      <CodeBlock
-        code={`npm run dev`}
-      />
-      <p>
-        Open your app in the browser — you&apos;ll see the <strong>iterate</strong> overlay. Toggle it with <strong>Cmd+I</strong>.
-      </p>
-
-      <h2>5. Connect to the MCP</h2>
-      <p>
-        Once the dev server is running, open a new Claude Code session to connect to the MCP.
-      </p>
-
-      <hr />
+      <h2 style={{ marginBottom: "0.5rem", color: "hsl(15, 63.1%, 59.6%)" }}>Claude Code setup</h2>
+      <div style={{
+        position: "relative",
+        border: "1px solid var(--color-border)",
+        borderRadius: "12px",
+        padding: "0.75rem 1.25rem",
+      }}>
+        <div className="claude-mascot-walk">
+          <svg width="48" height="38" viewBox="0 0 66 52" fill="none" style={{ display: "block" }}>
+            {/* Body */}
+            <rect x="6" y="0" width="54" height="39" fill="hsl(15, 63.1%, 59.6%)" />
+            {/* Arm stubs */}
+            <rect x="0" y="13" width="6" height="13" fill="hsl(15, 63.1%, 59.6%)" />
+            <rect x="60" y="13" width="6" height="13" fill="hsl(15, 63.1%, 59.6%)" />
+            {/* Normal eyes */}
+            <rect className="eye-normal" x="12" y="13" width="6" height="6.5" fill="black" />
+            <rect className="eye-normal" x="48" y="13" width="6" height="6.5" fill="black" />
+            {/* Expression eyes (> <) */}
+            <path className="eye-expr" d="M12,13 L18,16.25 L12,19.5" fill="none" stroke="black" strokeWidth="2.5" />
+            <path className="eye-expr" d="M54,13 L48,16.25 L54,19.5" fill="none" stroke="black" strokeWidth="2.5" />
+            {/* Legs - two pairs flush to body edges */}
+            <rect className="leg-1" x="6" y="39" width="6" height="13" fill="hsl(15, 63.1%, 59.6%)" />
+            <rect className="leg-2" x="18" y="39" width="6" height="13" fill="hsl(15, 63.1%, 59.6%)" />
+            <rect className="leg-3" x="42" y="39" width="6" height="13" fill="hsl(15, 63.1%, 59.6%)" />
+            <rect className="leg-4" x="54" y="39" width="6" height="13" fill="hsl(15, 63.1%, 59.6%)" />
+          </svg>
+        </div>
+        <ol style={{ margin: 0, paddingLeft: "1.25rem" }}>
+          <li>Install the skill:
+            <CodeBlock code={`npx skills add connorwhite-online/iterate`} />
+          </li>
+          <li>Restart your Claude Code session to load the new slash commands, then run:
+            <CodeBlock code={`/iterate`} />
+          </li>
+          <li style={{ color: "var(--color-text-secondary)" }}>
+            You&apos;re all set! With your app running, restart your Claude session again to connect the MCP server.
+          </li>
+        </ol>
+      </div>
 
       <h2>Manual setup</h2>
       <p>
         If you prefer to configure things yourself:
       </p>
 
-      <h3>Install</h3>
+      <h3 style={{ marginTop: "1rem" }}>Install</h3>
       <CodeBlock
         code={`npm i iterate-ui`}
       />
 
-      <h3>Initialize</h3>
+      <h3 style={{ marginTop: "1rem" }}>Initialize</h3>
       <CodeBlock
         code={`npx iterate init`}
       />
-      <p>
+      <p style={{ marginBottom: "0.5rem" }}>
         This detects your package manager and dev command, then creates <code>.iterate/config.json</code>.
       </p>
 
-      <h3>Next.js 14–15 (webpack)</h3>
-      <p>
+      <h3 style={{ marginTop: "1rem" }}>Next.js 14–15 (webpack)</h3>
+      <p style={{ marginBottom: "0.5rem" }}>
         Wrap your existing config with <code>withIterate</code>. The overlay auto-injects via webpack:
       </p>
       <CodeBlock
@@ -90,8 +140,8 @@ export default function InstallationPage() {
 export default withIterate(nextConfig)`}
       />
 
-      <h3>Next.js 16+ (Turbopack)</h3>
-      <p>
+      <h3 style={{ marginTop: "1rem" }}>Next.js 16+ (Turbopack)</h3>
+      <p style={{ marginBottom: "0.5rem" }}>
         Next.js 16 defaults to Turbopack, which doesn&apos;t support webpack entry injection.
         Wrap your config the same way, then add the devtools component to your root layout:
       </p>
@@ -124,8 +174,8 @@ export default function RootLayout({ children }) {
         </p>
       </Callout>
 
-      <h3>Vite</h3>
-      <p>
+      <h3 style={{ marginTop: "1rem" }}>Vite</h3>
+      <p style={{ marginBottom: "0.5rem" }}>
         Add the <code>iterate()</code> plugin:
       </p>
       <CodeBlock
