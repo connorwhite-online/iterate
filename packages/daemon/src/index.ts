@@ -672,7 +672,13 @@ function getInstallCommand(pm: IterateConfig["packageManager"]): string {
 }
 
 function buildDevCommand(baseCommand: string, port: number): string {
-  if (baseCommand.includes("next")) return `${baseCommand} -p ${port}`;
+  if (baseCommand.includes("next")) {
+    // Force webpack for iteration dev servers — Turbopack panics in git
+    // worktrees inside monorepos due to a path resolution bug.
+    // The --webpack flag is available in Next 15.3+ and required for Next 16+
+    // (which defaults to Turbopack). The main dev server still uses Turbopack.
+    return `${baseCommand} --webpack -p ${port}`;
+  }
   if (baseCommand.includes("vite")) return `${baseCommand} --port ${port}`;
   return baseCommand;
 }

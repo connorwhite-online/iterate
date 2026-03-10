@@ -43,11 +43,12 @@ export class ProcessManager {
 
     const child = execa(cmd!, args, {
       cwd,
-      env: {
-        ...process.env,
-        PORT: String(port),
-        ITERATE_ITERATION_NAME: name,
-      },
+      env: (() => {
+        const env = { ...process.env, PORT: String(port), ITERATE_ITERATION_NAME: name };
+        // Remove Turbopack env so --webpack flag doesn't conflict
+        delete env.TURBOPACK;
+        return env;
+      })(),
       stdout: "pipe",
       stderr: "pipe",
     });

@@ -255,8 +255,11 @@ export function withIterate(
   // For Turbopack (Next 16+): inject babel plugin via turbopack.rules
   // so server components get data-iterate-component attributes.
   // The condition API requires Next 16+ (turbopack.rules.*.condition).
+  // Skip in iteration worktrees — Turbopack panics on resource paths
+  // that resolve outside the worktree's project filesystem.
   const nextMajor = getNextMajorVersion();
-  if (turbopack && babelLoaderPath && babelPluginPath && nextMajor !== null && nextMajor >= 16) {
+  const isIteration = process.env.ITERATE_ITERATION_NAME && process.env.ITERATE_ITERATION_NAME !== "__original__";
+  if (turbopack && babelLoaderPath && babelPluginPath && nextMajor !== null && nextMajor >= 16 && !isIteration) {
     const iterateLoader = {
       loader: babelLoaderPath,
       options: {
