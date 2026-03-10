@@ -297,6 +297,15 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     return store.getDomChanges();
   });
 
+  /** Remove a DOM change (agent has implemented the move/reorder) */
+  app.delete("/api/dom-changes/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const removed = store.removeDomChange(id);
+    if (!removed) return reply.status(404).send({ message: "DOM change not found" });
+    wsHub.broadcast({ type: "dom:deleted", payload: { id } });
+    return { ok: true };
+  });
+
   app.get("/api/command-context", async () => {
     const latest = store.getLatestCommand();
     if (!latest) return { command: null };

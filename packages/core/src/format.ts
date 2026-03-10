@@ -16,6 +16,7 @@ export interface FormatChange {
  * A DOM change item to format.
  */
 export interface FormatDomChange {
+  id?: string;
   type: string;
   selector: string;
   componentName: string | null;
@@ -110,6 +111,7 @@ export function formatBatchPrompt(
       const isCrossParent = dc.targetParentSelector && dc.targetParentSelector !== dc.parentSelector;
       const label = isCrossParent ? "reparent" : dc.type;
       text += `- **${label}** on ${dcName}${dcSource}\n`;
+      if (dc.id) text += `  ID: ${dc.id}\n`;
       if (dc.url) text += `  Page: ${dc.url}\n`;
       text += `  Selector: \`${dc.selector}\`\n`;
       if (dc.type === "reorder" && dc.before.siblingIndex !== undefined) {

@@ -358,6 +358,29 @@ async function main() {
   );
 
   server.tool(
+    "iterate_implement_dom_change",
+    "Mark a DOM change (move/reorder) as implemented — removes it from the pending list",
+    {
+      id: z.string().describe("DOM change ID to resolve"),
+      reply: z
+        .string()
+        .optional()
+        .describe("Brief reply explaining what was done"),
+    },
+    async ({ id, reply }) => {
+      await client.callApi("DELETE", `/api/dom-changes/${id}`);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Implemented DOM change "${id}".${reply ? ` Summary: ${reply}` : ""}`,
+          },
+        ],
+      };
+    }
+  );
+
+  server.tool(
     "iterate_get_pending_changes",
     "Get all queued changes that need attention. Use this to check for new user feedback. Shows element names, React component names, source file paths, as well as DOM move/reorder changes.",
     {},
@@ -413,6 +436,7 @@ async function main() {
             } else if (dc.type === "move") {
               line += ` — (${Math.round(dc.before.rect.x)},${Math.round(dc.before.rect.y)}) → (${Math.round(dc.after.rect.x)},${Math.round(dc.after.rect.y)})`;
             }
+            line += ` — ID: ${dc.id}`;
             return line;
           })
           .join("\n");
@@ -513,6 +537,7 @@ async function main() {
           const isCrossParent = dc.targetParentSelector && dc.targetParentSelector !== dc.parentSelector;
           const label = isCrossParent ? "reparent" : dc.type;
           text += `- **${label}** on ${dcName}${dcSource}\n`;
+          text += `  ID: ${dc.id}\n`;
           if (dc.url) text += `  Page: ${dc.url}\n`;
           text += `  Selector: \`${dc.selector}\`\n`;
           if (dc.type === "reorder" && dc.before.siblingIndex !== undefined) {

@@ -9,15 +9,17 @@ The user has submitted UI feedback changes via the iterate overlay. Your job is 
 
 Use the MCP tools below. If MCP tools are not available (e.g. the server isn't connected), fall back to the daemon's REST API at `http://localhost:4000`:
 
-| MCP tool                     | REST equivalent                                  |
-|------------------------------|--------------------------------------------------|
-| `iterate_get_pending_batch`  | `GET /api/changes/pending`                       |
-| `iterate_start_change`       | `PATCH /api/changes/{id}/start`                  |
-| `iterate_implement_change`   | `PATCH /api/changes/{id}/implement`              |
-| `iterate_list_iterations`    | `GET /api/iterations`                            |
+| MCP tool                          | REST equivalent                                  |
+|-----------------------------------|--------------------------------------------------|
+| `iterate_get_pending_batch`       | `GET /api/changes/pending`                       |
+| `iterate_start_change`            | `PATCH /api/changes/{id}/start`                  |
+| `iterate_implement_change`        | `PATCH /api/changes/{id}/implement`              |
+| `iterate_implement_dom_change`    | `DELETE /api/dom-changes/{id}`                   |
+| `iterate_list_iterations`         | `GET /api/iterations`                            |
 
 - **Start**: `PATCH /api/changes/{id}/start` — no body needed
-- **Implement**: `PATCH /api/changes/{id}/implement` — body: `{ "summary": "what you changed" }`
+- **Implement change**: `PATCH /api/changes/{id}/implement` — body: `{ "summary": "what you changed" }`
+- **Implement DOM change**: `DELETE /api/dom-changes/{id}` — no body needed
 
 ## Steps
 
@@ -44,10 +46,9 @@ Use the MCP tools below. If MCP tools are not available (e.g. the server isn't c
      - **`move`** — the user repositioned an element visually. The `before.rect` and `after.rect` give bounding box coordinates. Translate the delta into CSS/layout changes (margin, position, transform, etc.).
    - DOM changes include `componentName` and `sourceLocation` to help locate the source code, plus `selector` and `parentSelector` to identify the elements.
 
-6. **Resolve each change.** After implementing a change, you **must** mark it as resolved by calling `iterate_implement_change` with:
-   - `annotationId` — the change's `id`
-   - `reply` — a brief summary of what you changed (this shows in the overlay UI)
+6. **Resolve each change.** After implementing a change, you **must** mark it as resolved so it's removed from the pending queue. **Do not skip this step** — unresolved changes will remain in the overlay as pending. Resolve each change immediately after implementing it, not in a batch at the end.
 
-   This removes the change from the pending queue. **Do not skip this step** — unresolved changes will remain in the overlay as pending. Resolve each change immediately after implementing it, not in a batch at the end.
+   - **Regular changes**: Call `iterate_implement_change` with `annotationId` (the change's `id`) and `reply` (a brief summary shown in the overlay UI).
+   - **DOM changes**: Call `iterate_implement_dom_change` with `id` (the DOM change's `id`) and optionally `reply`. DOM changes have their own IDs shown in the pending batch output — they are resolved separately from regular changes.
 
 7. **Summarize.** After resolving all changes, give the user a brief summary of what you changed. The dev server will hot-reload automatically so they can see the results immediately in the browser.
