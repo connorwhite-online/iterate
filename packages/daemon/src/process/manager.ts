@@ -43,12 +43,14 @@ export class ProcessManager {
 
     const child = execa(cmd!, args, {
       cwd,
-      env: (() => {
-        const env = { ...process.env, PORT: String(port), ITERATE_ITERATION_NAME: name };
-        // Remove Turbopack env so --webpack flag doesn't conflict
-        delete env.TURBOPACK;
-        return env;
-      })(),
+      env: {
+        PORT: String(port),
+        ITERATE_ITERATION_NAME: name,
+        // Clear TURBOPACK env so --webpack flag doesn't conflict.
+        // Must be set explicitly because execa merges with process.env by default,
+        // and the parent Next.js process sets TURBOPACK=auto.
+        TURBOPACK: "",
+      },
       stdout: "pipe",
       stderr: "pipe",
     });
