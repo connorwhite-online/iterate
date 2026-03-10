@@ -128,22 +128,9 @@ export default function InstallationPage() {
         This detects your package manager and dev command, then creates <code>.iterate/config.json</code>.
       </p>
 
-      <h3 style={{ marginTop: "1rem" }}>Next.js 14–15 (webpack)</h3>
+      <h3 style={{ marginTop: "1rem" }}>Next.js</h3>
       <p style={{ marginBottom: "0.5rem" }}>
-        Wrap your existing config with <code>withIterate</code>. The overlay auto-injects via webpack:
-      </p>
-      <CodeBlock
-        lang="javascript"
-        filename="next.config.mjs"
-        code={`import { withIterate } from 'iterate-ui-next'
-
-export default withIterate(nextConfig)`}
-      />
-
-      <h3 style={{ marginTop: "1rem" }}>Next.js 16+ (Turbopack)</h3>
-      <p style={{ marginBottom: "0.5rem" }}>
-        Next.js 16 defaults to Turbopack, which doesn&apos;t support webpack entry injection.
-        Wrap your config the same way, then add the devtools component to your root layout:
+        Wrap your config with <code>withIterate</code> and add the <code>&lt;Iterate /&gt;</code> component to your root layout:
       </p>
       <CodeBlock
         lang="javascript"
@@ -155,24 +142,19 @@ export default withIterate(nextConfig)`}
       <CodeBlock
         lang="tsx"
         filename="app/layout.tsx"
-        code={`import { IterateDevTools } from "iterate-ui-next/devtools"
+        code={`import { Iterate } from "iterate-ui-next/devtools"
 
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body>
         {children}
-        <IterateDevTools />
+        <Iterate />
       </body>
     </html>
   )
 }`}
       />
-      <Callout>
-        <p>
-          Alternatively, you can run <code>next dev --webpack</code> to use webpack instead of Turbopack, which allows the overlay to auto-inject without the manual component.
-        </p>
-      </Callout>
 
       <h3 style={{ marginTop: "1rem" }}>Vite</h3>
       <p style={{ marginBottom: "0.5rem" }}>
@@ -190,7 +172,7 @@ export default defineConfig({
 
       <Callout>
         <p>
-          Both plugins auto-inject the overlay and start the daemon in development mode only.
+          Both frameworks start the daemon and inject the overlay in development mode only.
           There is no production impact.
         </p>
       </Callout>

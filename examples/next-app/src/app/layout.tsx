@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { IterateDevTools } from "iterate-ui-next/devtools";
+import { Iterate } from "iterate-ui-next/devtools";
 
 export const metadata: Metadata = {
   title: "iterate — Example App",
@@ -15,7 +15,7 @@ export default function RootLayout({
     <html lang="en">
       <body style={{ margin: 0 }}>
         {children}
-        <IterateDevTools />
+        <Iterate />
       </body>
     </html>
   );

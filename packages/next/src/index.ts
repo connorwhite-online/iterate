@@ -77,7 +77,7 @@ let daemonStarting = false;
  * Automatically:
  * 1. Starts the iterate daemon when `next dev` runs
  * 2. Proxies /__iterate__/* and iterate API routes to the daemon via rewrites
- * 3. Injects the overlay script via webpack entry
+ * 3. Injects component name attributes via babel plugin
  * 4. Cleans up daemon on exit
  */
 export function withIterate(
@@ -114,32 +114,29 @@ export function withIterate(
     });
   }
 
-  // Resolve the overlay bundle path at config time
+  // Resolve paths at config time
   // Use createRequire for CJS compatibility (Next.js loads config via CJS)
   const _require = typeof require !== "undefined" ? require : createRequire(import.meta.url);
-  let overlayBundlePath: string | undefined;
   let babelPluginPath: string | undefined;
   try {
-    overlayBundlePath = resolvePackageEntry("iterate-ui-overlay/standalone", _require);
     if (!options.disableBabelPlugin) {
       babelPluginPath = resolvePackageEntry("iterate-ui-babel-plugin", _require);
     }
   } catch {
-    console.warn("[iterate] Could not resolve overlay bundle or babel plugin");
+    console.warn("[iterate] Could not resolve babel plugin");
   }
 
   const turbopack = isTurbopackMode();
 
-  if (turbopack) {
-    console.warn(
-      "\x1b[33m[iterate]\x1b[0m Turbopack detected — overlay must be loaded manually.\n" +
-      '  Add to your root layout:  import { IterateDevTools } from "iterate-ui-next/devtools"\n' +
-      "  Then render <IterateDevTools /> inside <body>.\n"
-    );
-  }
-
   const result: NextConfig = {
     ...nextConfig,
+
+    // Expose iteration name and daemon port to the client-side <Iterate /> component
+    env: {
+      ...nextConfig.env,
+      NEXT_PUBLIC_ITERATE_ITERATION_NAME: process.env.ITERATE_ITERATION_NAME ?? "__original__",
+      NEXT_PUBLIC_ITERATE_DAEMON_PORT: String(daemonPort),
+    },
 
     // Add rewrites to proxy to the daemon
     async rewrites() {
@@ -224,30 +221,6 @@ export function withIterate(
         });
       }
 
-      // Overlay injection is client-side only
-      if (!context.isServer) {
-        const originalEntry = config.entry;
-        config.entry = async () => {
-          const entries = await (typeof originalEntry === "function"
-            ? originalEntry()
-            : originalEntry);
-
-          // Add our injector to the main client entry
-          const injectorPath = createIterateInjector(overlayBundlePath, daemonPort);
-          if (injectorPath && entries["main-app"]) {
-            if (Array.isArray(entries["main-app"])) {
-              entries["main-app"].push(injectorPath);
-            }
-          } else if (injectorPath && entries["main"]) {
-            if (Array.isArray(entries["main"])) {
-              entries["main"].push(injectorPath);
-            }
-          }
-
-          return entries;
-        };
-      }
-
       return nextConfig.webpack?.(config, context) ?? config;
     };
   }
@@ -311,30 +284,6 @@ export function withIterate(
   return result;
 }
 
-/**
- * Create a temporary JS module that injects the overlay script tag.
- * Returns the path to write the injector, or writes it inline via data URI.
- */
-function createIterateInjector(
-  _overlayPath: string | undefined,
-  daemonPort: number
-): string | null {
-  // Use a data URI as a virtual module — webpack supports this.
-  // ITERATE_ITERATION_NAME is set by the daemon's process manager when starting
-  // iteration dev servers — this lets the overlay know which iteration it's in.
-  const iterationName = process.env.ITERATE_ITERATION_NAME ?? "__original__";
-  const code = `
-    if (typeof window !== 'undefined') {
-      window.__iterate_shell__ = { activeTool: 'browse', activeIteration: ${JSON.stringify(iterationName)}, daemonPort: ${daemonPort} };
-      var s = document.createElement('script');
-      s.src = '/__iterate__/overlay.js';
-      s.defer = true;
-      document.head.appendChild(s);
-    }
-  `;
-  // Encode as a data URI that webpack can consume
-  return `data:text/javascript;base64,${Buffer.from(code).toString("base64")}`;
-}
 
 function isPortInUse(port: number): Promise<boolean> {
   return new Promise((resolve) => {

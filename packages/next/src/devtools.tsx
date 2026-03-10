@@ -3,32 +3,34 @@
 import { useEffect } from "react";
 
 /**
- * Drop-in overlay loader for Turbopack or any environment where the
- * webpack entry-point injection doesn't run.
+ * Drop-in overlay loader. Add this component to your root layout to
+ * enable the iterate toolbar in development.
  *
  * Usage (root layout):
  * ```tsx
- * import { IterateDevTools } from "iterate-ui-next/devtools";
+ * import { Iterate } from "iterate-ui-next/devtools";
  *
  * export default function RootLayout({ children }) {
  *   return (
  *     <html><body>
  *       {children}
- *       <IterateDevTools />
+ *       <Iterate />
  *     </body></html>
  *   );
  * }
  * ```
  */
-export function IterateDevTools({ port = 4000 }: { port?: number }) {
+export function Iterate({ port }: { port?: number } = {}) {
+  const resolvedPort = port ?? (Number(process.env.NEXT_PUBLIC_ITERATE_DAEMON_PORT) || 4000);
+
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
 
     if (!(window as any).__iterate_shell__) {
       (window as any).__iterate_shell__ = {
         activeTool: "browse",
-        activeIteration: "__original__",
-        daemonPort: port,
+        activeIteration: process.env.NEXT_PUBLIC_ITERATE_ITERATION_NAME ?? "__original__",
+        daemonPort: resolvedPort,
       };
     }
 
@@ -38,9 +40,12 @@ export function IterateDevTools({ port = 4000 }: { port?: number }) {
       script.src = "/__iterate__/overlay.js";
       document.body.appendChild(script);
     }
-  }, [port]);
+  }, [resolvedPort]);
 
   return null;
 }
 
-export default IterateDevTools;
+/** @deprecated Use `Iterate` instead */
+export const IterateDevTools = Iterate;
+
+export default Iterate;

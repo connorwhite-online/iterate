@@ -31,22 +31,9 @@ npm i iterate-ui
 npx iterate init
 ```
 
-#### Next.js 14–15 (Webpack)
+#### Next.js
 
-Wrap your existing config:
-
-```js
-// next.config.mjs
-import { withIterate } from 'iterate-ui-next'
-
-export default withIterate(nextConfig)
-```
-
-The overlay auto-injects through webpack — no additional setup needed.
-
-#### Next.js 16+ (Turbopack)
-
-Next.js 16 defaults to Turbopack, which doesn't support webpack injection. Use the same config wrapper, then add the DevTools component to your root layout:
+Wrap your config and add the `<Iterate />` component to your root layout:
 
 ```js
 // next.config.mjs
@@ -57,21 +44,18 @@ export default withIterate(nextConfig)
 
 ```tsx
 // app/layout.tsx
-import { IterateDevTools } from "iterate-ui-next/devtools"
+import { Iterate } from "iterate-ui-next/devtools"
 
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body>
         {children}
-        <IterateDevTools />
+        <Iterate />
       </body>
     </html>
   )
 }
-```
-
-Alternatively, run `next dev --webpack` to use webpack instead, enabling auto-injection without the manual component.
 
 #### Vite
 
