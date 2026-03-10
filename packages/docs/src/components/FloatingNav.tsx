@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { navigation } from "@/lib/navigation";
@@ -106,6 +106,16 @@ function MenuIcon({ open }: { open: boolean }) {
 export function MobileNav() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const innerRef = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState(0);
+
+  useEffect(() => {
+    if (open && innerRef.current) {
+      setHeight(innerRef.current.scrollHeight);
+    } else {
+      setHeight(0);
+    }
+  }, [open]);
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/" || pathname === "";
@@ -126,8 +136,8 @@ export function MobileNav() {
           <MenuIcon open={open} />
         </button>
       </div>
-      <div className={`${styles.mobileBody} ${open ? styles.mobileBodyOpen : ""}`}>
-        <div className={styles.mobileBodyInner}>
+      <div className={styles.mobileBody} style={{ height }}>
+        <div className={styles.mobileBodyInner} ref={innerRef}>
           <nav className={styles.navLinks}>
             {navigation.flatMap((section) =>
               section.links.map((link) => (
@@ -153,11 +163,31 @@ export function MobileNav() {
 
 export function FloatingNav() {
   const pathname = usePathname();
+  const navRef = useRef<HTMLElement>(null);
+  const [indicator, setIndicator] = useState<{ top: number; height: number } | null>(null);
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/" || pathname === "";
     return pathname.startsWith(href);
   };
+
+  const updateIndicator = useCallback(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+    const activeLink = nav.querySelector(`.${styles.linkActive}`) as HTMLElement | null;
+    if (activeLink) {
+      const navRect = nav.getBoundingClientRect();
+      const linkRect = activeLink.getBoundingClientRect();
+      setIndicator({
+        top: linkRect.top - navRect.top,
+        height: linkRect.height,
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    updateIndicator();
+  }, [pathname, updateIndicator]);
 
   return (
     <aside className={styles.floatingNav}>
@@ -169,7 +199,16 @@ export function FloatingNav() {
       </div>
 
       {/* Nav links */}
-      <nav className={styles.navLinks}>
+      <nav className={styles.navLinks} ref={navRef}>
+        {indicator && (
+          <div
+            className={styles.activeIndicator}
+            style={{
+              transform: `translateY(${indicator.top}px)`,
+              height: indicator.height,
+            }}
+          />
+        )}
         {navigation.flatMap((section) =>
           section.links.map((link) => (
             <Link

@@ -36,6 +36,7 @@
 
 /* Nav links container */
 .navLinks {
+  position: relative;
   background: var(--color-bg-nav-inner);
   border: 1px solid var(--color-border-nav);
   border-radius: 12px;
@@ -45,13 +46,28 @@
   gap: 1px;
 }
 
+/* Sliding active indicator */
+.activeIndicator {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  top: 0;
+  border-radius: 6px;
+  background: var(--color-bg-nav);
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), height 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+  z-index: 0;
+}
+
 .link {
+  position: relative;
+  z-index: 1;
   display: block;
   padding: 4px 10px;
   font-size: 12px;
   color: var(--color-text-secondary);
   border-radius: 6px;
-  transition: color 0.15s, background 0.15s;
+  transition: color 0.15s;
   text-decoration: none;
 }
 
@@ -62,6 +78,10 @@
 
 .linkActive {
   color: var(--color-text);
+}
+
+/* Mobile links keep their own background since they don't use the sliding indicator */
+.mobileLink.linkActive {
   background: var(--color-bg-nav);
 }
 
@@ -157,17 +177,15 @@
 }
 
 .mobileBody {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-.mobileBodyOpen {
-  grid-template-rows: 1fr;
+  overflow: hidden;
+  height: 0;
+  display: flex;
+  align-items: flex-end;
+  transition: height 0.4s cubic-bezier(0.34, 1.4, 0.64, 1);
 }
 
 .mobileBodyInner {
-  overflow: hidden;
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: 4px;
