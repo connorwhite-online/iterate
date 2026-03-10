@@ -5,6 +5,24 @@ import { join, dirname } from "node:path";
 import { readFileSync } from "node:fs";
 
 /**
+ * Get the installed Next.js major version, or null if undetectable.
+ * Resolves from the app's cwd since `next` is a peer dependency and
+ * may not be resolvable from this package's own module context (e.g. pnpm).
+ */
+let _nextMajorVersion: number | null | undefined;
+function getNextMajorVersion(): number | null {
+  if (_nextMajorVersion !== undefined) return _nextMajorVersion;
+  try {
+    const appRequire = createRequire(join(process.cwd(), "noop.js"));
+    const nextPkg = JSON.parse(readFileSync(appRequire.resolve("next/package.json"), "utf-8"));
+    _nextMajorVersion = parseInt(nextPkg.version.split(".")[0], 10);
+  } catch {
+    _nextMajorVersion = null;
+  }
+  return _nextMajorVersion;
+}
+
+/**
  * Detect whether Turbopack is active.
  * Next.js 16+ defaults to Turbopack unless --webpack is passed.
  */
@@ -12,12 +30,8 @@ function isTurbopackMode(): boolean {
   if (process.env.TURBOPACK === "1") return true;
   if (process.argv.some((a) => a === "--turbo" || a === "--turbopack")) return true;
   // Next.js 16+ defaults to turbopack — detect by reading next/package.json
-  try {
-    const _req = typeof require !== "undefined" ? require : createRequire(import.meta.url);
-    const nextPkg = JSON.parse(readFileSync(_req.resolve("next/package.json"), "utf-8"));
-    const major = parseInt(nextPkg.version.split(".")[0], 10);
-    if (major >= 16 && !process.argv.includes("--webpack")) return true;
-  } catch {}
+  const major = getNextMajorVersion();
+  if (major !== null && major >= 16 && !process.argv.includes("--webpack")) return true;
   return false;
 }
 
@@ -118,11 +132,9 @@ export function withIterate(
 
   if (turbopack) {
     console.warn(
-      "\x1b[33m[iterate]\x1b[0m Turbopack detected — webpack entry injection is disabled.\n" +
-      "  The overlay will not auto-inject. To fix, choose one of:\n" +
-      "  1. Run with webpack:  next dev --webpack\n" +
-      '  2. Add to your root layout:  import { IterateDevTools } from "iterate-ui-next/devtools"\n' +
-      "     Then render <IterateDevTools /> inside <body>.\n"
+      "\x1b[33m[iterate]\x1b[0m Turbopack detected — overlay must be loaded manually.\n" +
+      '  Add to your root layout:  import { IterateDevTools } from "iterate-ui-next/devtools"\n' +
+      "  Then render <IterateDevTools /> inside <body>.\n"
     );
   }
 
@@ -238,6 +250,50 @@ export function withIterate(
 
       return nextConfig.webpack?.(config, context) ?? config;
     };
+  }
+
+  // For Turbopack (Next 16+): inject babel plugin via turbopack.rules
+  // so server components get data-iterate-component attributes.
+  // The condition API requires Next 16+ (turbopack.rules.*.condition).
+  const nextMajor = getNextMajorVersion();
+  if (turbopack && babelLoaderPath && babelPluginPath && nextMajor !== null && nextMajor >= 16) {
+    const iterateLoader = {
+      loader: babelLoaderPath,
+      options: {
+        plugins: [babelPluginPath],
+        parserOpts: { plugins: ["jsx", "typescript"] },
+        configFile: false,
+        babelrc: false,
+      },
+    };
+
+    const iterateRule = {
+      condition: { all: [{ not: "foreign" }, "development"] },
+      loaders: [iterateLoader],
+    };
+
+    result.turbopack = {
+      ...nextConfig.turbopack,
+      rules: {
+        ...nextConfig.turbopack?.rules,
+        "*.tsx": iterateRule,
+        "*.ts": iterateRule,
+        "*.jsx": iterateRule,
+        "*.js": iterateRule,
+      },
+    };
+
+    // Silence the "manual configuration of babel-loader" warning
+    result.experimental = {
+      ...nextConfig.experimental,
+      turbopackUseBuiltinBabel: true,
+    };
+  }
+
+  // Safety net: if we added a webpack config on Next 16+, ensure a turbopack
+  // config also exists to prevent the "webpack without turbopack" error.
+  if (result.webpack && !result.turbopack && nextMajor !== null && nextMajor >= 16) {
+    result.turbopack = nextConfig.turbopack ?? {};
   }
 
   return result;

@@ -219,6 +219,20 @@ export function getComponentInfo(element: Element): {
   source: string | null;
   isComponentRoot: boolean;
 } {
+  // Strategy 0: Check if this element itself has a data-iterate-component
+  // attribute (injected by the babel plugin). This takes priority because
+  // it's an exact match — the element IS the component root. Without this
+  // check, server component elements get overshadowed by Strategy 1 finding
+  // a client component ancestor via the fiber tree.
+  const directComponent = element.getAttribute("data-iterate-component");
+  if (directComponent) {
+    return {
+      component: directComponent,
+      source: element.getAttribute("data-iterate-source"),
+      isComponentRoot: true,
+    };
+  }
+
   // Strategy 1: Walk the React fiber tree to nearest user component
   const fiber = getReactFiber(element);
   if (fiber) {
