@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Analytics } from "@vercel/analytics/react";
+import { IterateDevTools } from "iterate-ui-next/devtools";
 import { FloatingNav, MobileNav } from "@/components/FloatingNav";
 import { PageContent } from "@/components/PageContent";
 import "./globals.css";
@@ -43,6 +44,7 @@ export default function RootLayout({
         <FloatingNav />
         <PageContent>{children}</PageContent>
         <Analytics />
+        <IterateDevTools />
       </body>
     </html>
   );
