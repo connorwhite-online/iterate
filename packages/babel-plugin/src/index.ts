@@ -123,21 +123,17 @@ function findReturnedJSXElements(
   // Arrow function with expression body: () => <div>...</div>
   if (t.isArrowFunctionExpression(fnPath.node) && !t.isBlockStatement(fnPath.node.body)) {
     const body = fnPath.get("body");
-    if (t.isJSXElement(body.node) || t.isJSXFragment(body.node)) {
-      if (t.isJSXElement(body.node)) {
-        jsxElements.push(body);
-      }
-      // For fragments, find the first child JSX element
-      if (t.isJSXFragment(body.node)) {
-        body.traverse({
-          JSXElement(innerPath: any) {
-            jsxElements.push(innerPath);
-            innerPath.stop();
-          },
-        });
-      }
+    // Only inject on single-root elements, not fragments.
+    // A fragment has no single root element, so no child can
+    // meaningfully be labeled as "the component root."
+    if (t.isJSXElement(body.node)) {
+      jsxElements.push(body);
+    } else if (t.isConditionalExpression(body.node)) {
+      const consequent = body.get("consequent");
+      const alternate = body.get("alternate");
+      if (t.isJSXElement(consequent.node)) jsxElements.push(consequent);
+      if (t.isJSXElement(alternate.node)) jsxElements.push(alternate);
     }
-    // Wrapped in parens — same node, babel strips parens
     return jsxElements;
   }
 
@@ -153,13 +149,7 @@ function findReturnedJSXElements(
       if (t.isJSXElement(arg.node)) {
         jsxElements.push(arg);
       } else if (t.isJSXFragment(arg.node)) {
-        // Find first child JSX element in fragment
-        arg.traverse({
-          JSXElement(innerPath: any) {
-            jsxElements.push(innerPath);
-            innerPath.stop();
-          },
-        });
+        // Fragment — no single root element, skip injection.
       } else if (t.isConditionalExpression(arg.node)) {
         // Handle ternary: condition ? <A/> : <B/>
         const consequent = arg.get("consequent");

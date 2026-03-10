@@ -92,10 +92,10 @@ describe("iterate babel plugin", () => {
       expect(output).toContain('"data-iterate-component": "Page"');
     });
 
-    it("handles fragment return — injects on first child element", () => {
+    it("skips fragment return — no single root element", () => {
       const code = `function List() { return <><div>A</div><div>B</div></>; }`;
       const output = transform(code);
-      expect(output).toContain('"data-iterate-component": "List"');
+      expect(output).not.toContain("data-iterate-component");
     });
 
     it("handles ternary — injects on both branches", () => {
