@@ -136,15 +136,19 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
       return info;
     } catch (err) {
       const errorMessage = (err as Error).message;
+      const recentOutput = processManager.getRecentOutput(name);
+      const detail = recentOutput.length > 0
+        ? `${errorMessage}\n\nDev server output:\n${recentOutput.join("\n")}`
+        : errorMessage;
       const info = store.getIteration(name);
       if (info) {
         info.status = "error";
-        info.error = errorMessage;
+        info.error = detail;
         store.setIteration(name, info);
-        wsHub.broadcast({ type: "iteration:status", payload: { name, status: "error", error: errorMessage } });
+        wsHub.broadcast({ type: "iteration:status", payload: { name, status: "error", error: detail } });
       }
       return reply.status(500).send({
-        message: `Failed to create iteration: ${errorMessage}`,
+        message: `Failed to create iteration: ${detail}`,
       });
     }
   });
@@ -403,11 +407,15 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
             wsHub.broadcast({ type: "iteration:created", payload: info });
           } catch (err) {
             const errorMessage = (err as Error).message;
+            const recentOutput = processManager.getRecentOutput(name);
+            const detail = recentOutput.length > 0
+              ? `${errorMessage}\n\nDev server output:\n${recentOutput.join("\n")}`
+              : errorMessage;
             console.error(`[iterate] Failed to create iteration "${name}":`, errorMessage);
             info.status = "error";
-            info.error = errorMessage;
+            info.error = detail;
             store.setIteration(name, info);
-            wsHub.broadcast({ type: "iteration:status", payload: { name, status: "error", error: errorMessage } });
+            wsHub.broadcast({ type: "iteration:status", payload: { name, status: "error", error: detail } });
           }
         })();
       } catch (err) {
@@ -637,11 +645,15 @@ async function discoverAndRegisterWorktrees(
         wsHub.broadcast({ type: "iteration:created", payload: info });
       } catch (err) {
         const errorMessage = (err as Error).message;
+        const recentOutput = processManager.getRecentOutput(name);
+        const detail = recentOutput.length > 0
+          ? `${errorMessage}\n\nDev server output:\n${recentOutput.join("\n")}`
+          : errorMessage;
         console.error(`[iterate] Failed to start external worktree "${name}":`, errorMessage);
         info.status = "error";
-        info.error = errorMessage;
+        info.error = detail;
         store.setIteration(name, info);
-        wsHub.broadcast({ type: "iteration:status", payload: { name, status: "error", error: errorMessage } });
+        wsHub.broadcast({ type: "iteration:status", payload: { name, status: "error", error: detail } });
       } finally {
         pendingPaths.delete(wt.path);
       }
@@ -672,13 +684,7 @@ function getInstallCommand(pm: IterateConfig["packageManager"]): string {
 }
 
 function buildDevCommand(baseCommand: string, port: number): string {
-  if (baseCommand.includes("next")) {
-    // Force webpack for iteration dev servers — Turbopack panics in git
-    // worktrees inside monorepos due to a path resolution bug.
-    // The --webpack flag is available in Next 15.3+ and required for Next 16+
-    // (which defaults to Turbopack). The main dev server still uses Turbopack.
-    return `${baseCommand} --webpack -p ${port}`;
-  }
+  if (baseCommand.includes("next")) return `${baseCommand} -p ${port}`;
   if (baseCommand.includes("vite")) return `${baseCommand} --port ${port}`;
   return baseCommand;
 }

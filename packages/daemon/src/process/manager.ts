@@ -1,11 +1,16 @@
 import { execa, type ResultPromise } from "execa";
 import { createServer, createConnection } from "node:net";
 
+/** Max lines of stdout/stderr to retain per process for error reporting */
+const MAX_LOG_LINES = 30;
+
 interface ManagedProcess {
   name: string;
   port: number;
   process: ResultPromise;
   pid: number | undefined;
+  /** Rolling buffer of recent output lines (stdout + stderr) */
+  recentOutput: string[];
 }
 
 export class ProcessManager {
@@ -41,30 +46,38 @@ export class ProcessManager {
   ): Promise<{ pid: number | undefined }> {
     const [cmd, ...args] = command.split(" ");
 
+    const env: Record<string, string | undefined> = { ...process.env, PORT: String(port), ITERATE_ITERATION_NAME: name };
+    // Remove TURBOPACK env inherited from the parent Next.js 16 process
+    // so it doesn't conflict with --webpack in monorepo iterations.
+    delete env.TURBOPACK;
+
     const child = execa(cmd!, args, {
       cwd,
-      env: {
-        PORT: String(port),
-        ITERATE_ITERATION_NAME: name,
-        // Clear TURBOPACK env so --webpack flag doesn't conflict.
-        // Must be set explicitly because execa merges with process.env by default,
-        // and the parent Next.js process sets TURBOPACK=auto.
-        TURBOPACK: "",
-      },
+      env,
+      extendEnv: false,
       stdout: "pipe",
       stderr: "pipe",
     });
 
-    // Log dev server output with prefix
+    const recentOutput: string[] = [];
+
+    const pushLine = (line: string) => {
+      recentOutput.push(line);
+      if (recentOutput.length > MAX_LOG_LINES) recentOutput.shift();
+    };
+
+    // Log dev server output with prefix and capture for error reporting
     child.stdout?.on("data", (data: Buffer) => {
       for (const line of data.toString().split("\n").filter(Boolean)) {
         console.log(`[${name}] ${line}`);
+        pushLine(line);
       }
     });
 
     child.stderr?.on("data", (data: Buffer) => {
       for (const line of data.toString().split("\n").filter(Boolean)) {
         console.error(`[${name}] ${line}`);
+        pushLine(line);
       }
     });
 
@@ -79,6 +92,7 @@ export class ProcessManager {
       port,
       process: child,
       pid: child.pid,
+      recentOutput,
     });
 
     return { pid: child.pid };
@@ -120,6 +134,11 @@ export class ProcessManager {
   /** Get info about a running process */
   getProcess(name: string): ManagedProcess | undefined {
     return this.processes.get(name);
+  }
+
+  /** Get recent stdout/stderr output for a process (for error reporting) */
+  getRecentOutput(name: string): string[] {
+    return this.processes.get(name)?.recentOutput ?? [];
   }
 
   /**
