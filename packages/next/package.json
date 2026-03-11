@@ -1,6 +1,6 @@
 {
   "name": "iterate-ui-next",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "iterate Next.js plugin — auto-starts daemon and injects overlay",
   "license": "MIT",
   "repository": {
