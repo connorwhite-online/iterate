@@ -194,6 +194,12 @@ export function withIterate(
     }
   }
 
+  // Skip babel plugin injection for iteration dev servers — Turbopack's
+  // WebpackLoadersProcessedAsset panics with custom loaders in monorepo
+  // subdirectories. Iterations rely on the overlay's runtime fiber-based
+  // component detection instead.
+  const isIteration = process.env.ITERATE_ITERATION_NAME && process.env.ITERATE_ITERATION_NAME !== "__original__";
+
   // Only inject via webpack when NOT using Turbopack (avoids the
   // "webpack config present but no turbopack config" warning in Next 16+)
   if (!turbopack) {
@@ -204,7 +210,7 @@ export function withIterate(
 
       // Inject babel plugin as a pre-loader on both server and client builds
       // so that server components get data-iterate-component attributes
-      if (babelLoaderPath && babelPluginPath) {
+      if (babelLoaderPath && babelPluginPath && !isIteration) {
         config.module.rules.push({
           test: /\.(tsx?|jsx?)$/,
           exclude: /node_modules/,
@@ -229,9 +235,8 @@ export function withIterate(
   // so server components get data-iterate-component attributes.
   // The condition API requires Next 16+ (turbopack.rules.*.condition).
   const nextMajor = getNextMajorVersion();
-  const isIteration = process.env.ITERATE_ITERATION_NAME && process.env.ITERATE_ITERATION_NAME !== "__original__";
 
-  if (turbopack && babelLoaderPath && babelPluginPath && nextMajor !== null && nextMajor >= 16) {
+  if (turbopack && babelLoaderPath && babelPluginPath && nextMajor !== null && nextMajor >= 16 && !isIteration) {
     const iterateLoader = {
       loader: babelLoaderPath,
       options: {
@@ -265,15 +270,6 @@ export function withIterate(
     };
   }
 
-  // In iteration worktrees, pin turbopack.root to process.cwd() so Turbopack
-  // doesn't walk up and find the parent repo's lockfile, which causes it to
-  // resolve the wrong workspace root.
-  if (isIteration && turbopack) {
-    result.turbopack = {
-      ...result.turbopack,
-      root: process.cwd(),
-    };
-  }
 
   // Safety net: if we added a webpack config on Next 16+, ensure a turbopack
   // config also exists to prevent the "webpack without turbopack" error.

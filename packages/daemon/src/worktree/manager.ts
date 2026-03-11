@@ -1,5 +1,5 @@
 import { simpleGit, type SimpleGit } from "simple-git";
-import { join } from "node:path";
+import { join, basename, resolve } from "node:path";
 
 export interface DiscoveredWorktree {
   path: string;
@@ -12,10 +12,16 @@ export interface DiscoveredWorktree {
 export class WorktreeManager {
   private git: SimpleGit;
   private cwd: string;
+  /** Base directory for iterate worktrees: <parent>/.iterate/<project>/ */
+  private worktreeBase: string;
 
   constructor(cwd: string) {
     this.cwd = cwd;
     this.git = simpleGit(cwd);
+    // Place worktrees outside the project tree so Next.js 16's findRootDir
+    // doesn't walk up and find the parent project's lockfile.
+    const projectName = basename(resolve(cwd));
+    this.worktreeBase = join(resolve(cwd), "..", ".iterate", projectName);
   }
 
   /** Get the git repository root (the main worktree path) */
@@ -46,7 +52,7 @@ export class WorktreeManager {
     }
 
     const branch = `iterate/${name}`;
-    const worktreePath = join(this.cwd, ".iterate", "worktrees", name);
+    const worktreePath = join(this.worktreeBase, name);
 
     // Clean up stale branch/worktree from a previous run
     try {
@@ -73,7 +79,7 @@ export class WorktreeManager {
 
   /** Remove a worktree and optionally delete its branch */
   async remove(name: string, deleteBranch = true): Promise<void> {
-    const worktreePath = join(this.cwd, ".iterate", "worktrees", name);
+    const worktreePath = join(this.worktreeBase, name);
 
     await this.git.raw(["worktree", "remove", "--force", worktreePath]);
 

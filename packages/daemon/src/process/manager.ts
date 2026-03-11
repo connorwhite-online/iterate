@@ -11,6 +11,10 @@ interface ManagedProcess {
   pid: number | undefined;
   /** Rolling buffer of recent output lines (stdout + stderr) */
   recentOutput: string[];
+  /** Set to true once the child process exits (success or failure) */
+  exited: boolean;
+  /** Exit code of the child process (null while running) */
+  exitCode: number | null;
 }
 
 export class ProcessManager {
@@ -42,11 +46,12 @@ export class ProcessManager {
     name: string,
     cwd: string,
     command: string,
-    port: number
+    port: number,
+    extraEnv?: Record<string, string>
   ): Promise<{ pid: number | undefined }> {
     const [cmd, ...args] = command.split(" ");
 
-    const env: Record<string, string | undefined> = { ...process.env, PORT: String(port), ITERATE_ITERATION_NAME: name };
+    const env: Record<string, string | undefined> = { ...process.env, PORT: String(port), ITERATE_ITERATION_NAME: name, ...extraEnv };
     // Remove TURBOPACK env inherited from the parent Next.js 16 process
     // so it doesn't conflict with --webpack in monorepo iterations.
     delete env.TURBOPACK;
@@ -81,19 +86,24 @@ export class ProcessManager {
       }
     });
 
-    // Clean up map entry if process exits unexpectedly
-    child.then(
-      () => this.processes.delete(name),
-      () => this.processes.delete(name)
-    );
-
-    this.processes.set(name, {
+    const managed: ManagedProcess = {
       name,
       port,
       process: child,
       pid: child.pid,
       recentOutput,
-    });
+      exited: false,
+      exitCode: null,
+    };
+
+    // Mark as exited but keep the entry so recentOutput survives for error reporting.
+    // Callers (stop, waitForReady) check `exited` and clean up the map themselves.
+    child.then(
+      (result) => { managed.exited = true; managed.exitCode = result.exitCode ?? 0; },
+      (err) => { managed.exited = true; managed.exitCode = err.exitCode ?? 1; }
+    );
+
+    this.processes.set(name, managed);
 
     return { pid: child.pid };
   }
@@ -103,22 +113,24 @@ export class ProcessManager {
     const managed = this.processes.get(name);
     if (!managed) return;
 
-    managed.process.kill("SIGTERM");
+    if (!managed.exited) {
+      managed.process.kill("SIGTERM");
 
-    try {
-      // Wait up to 5s for graceful shutdown
-      await Promise.race([
-        managed.process.catch(() => {}),
-        new Promise<void>((_, reject) =>
-          setTimeout(() => reject(new Error("timeout")), 5000)
-        ),
-      ]);
-    } catch {
-      // Force kill if it didn't shut down
       try {
-        managed.process.kill("SIGKILL");
+        // Wait up to 5s for graceful shutdown
+        await Promise.race([
+          managed.process.catch(() => {}),
+          new Promise<void>((_, reject) =>
+            setTimeout(() => reject(new Error("timeout")), 5000)
+          ),
+        ]);
       } catch {
-        // Already dead
+        // Force kill if it didn't shut down
+        try {
+          managed.process.kill("SIGKILL");
+        } catch {
+          // Already dead
+        }
       }
     }
 
@@ -143,13 +155,24 @@ export class ProcessManager {
 
   /**
    * Wait for a dev server to start accepting connections.
-   * Polls the port with TCP connect attempts until it responds or timeout.
+   * Polls the port with TCP connect attempts until it responds, the process
+   * exits, or the timeout is reached.
    */
-  async waitForReady(port: number, timeoutMs = 120000): Promise<void> {
+  async waitForReady(name: string, port: number, timeoutMs = 120000): Promise<void> {
     const start = Date.now();
     const interval = 500;
 
     while (Date.now() - start < timeoutMs) {
+      // Fail fast if the process has already exited
+      const managed = this.processes.get(name);
+      if (managed?.exited) {
+        const output = managed.recentOutput.join("\n");
+        throw new Error(
+          `Dev server exited with code ${managed.exitCode} before becoming ready` +
+          (output ? `\n\nDev server output:\n${output}` : "")
+        );
+      }
+
       const listening = await this.isPortListening(port);
       if (listening) return;
       await new Promise((r) => setTimeout(r, interval));

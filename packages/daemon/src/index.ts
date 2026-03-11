@@ -122,11 +122,11 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
       info.port = allocatedPort;
 
       const devCommand = buildDevCommand(config.devCommand, allocatedPort);
-      const { pid } = await processManager.start(name, devCwd, devCommand, allocatedPort);
+      const { pid } = await processManager.start(name, devCwd, devCommand, allocatedPort, { ITERATE_WORKTREE_ROOT: worktreePath });
       info.pid = pid ?? null;
 
       // Wait for the dev server to actually accept connections before marking ready
-      await processManager.waitForReady(allocatedPort);
+      await processManager.waitForReady(name, allocatedPort);
 
       info.status = "ready";
       store.setIteration(name, info);
@@ -405,11 +405,11 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
             info.port = allocatedPort;
 
             const devCommand = buildDevCommand(config.devCommand, allocatedPort);
-            const { pid } = await processManager.start(name, devCwd, devCommand, allocatedPort);
+            const { pid } = await processManager.start(name, devCwd, devCommand, allocatedPort, { ITERATE_WORKTREE_ROOT: worktreePath });
             info.pid = pid ?? null;
 
             // Wait for the dev server to actually accept connections before marking ready
-            await processManager.waitForReady(allocatedPort);
+            await processManager.waitForReady(name, allocatedPort);
 
             info.status = "ready";
             store.setIteration(name, info);
@@ -644,10 +644,10 @@ async function discoverAndRegisterWorktrees(
         info.port = allocatedPort;
 
         const devCommand = buildDevCommand(config.devCommand, allocatedPort);
-        const { pid } = await processManager.start(name, devCwd, devCommand, allocatedPort);
+        const { pid } = await processManager.start(name, devCwd, devCommand, allocatedPort, { ITERATE_WORKTREE_ROOT: wt.path });
         info.pid = pid ?? null;
 
-        await processManager.waitForReady(allocatedPort);
+        await processManager.waitForReady(name, allocatedPort);
 
         info.status = "ready";
         store.setIteration(name, info);
