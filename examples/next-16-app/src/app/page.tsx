@@ -114,7 +114,7 @@ function PlaceholderE() {
 function Footer() {
   return (
     <footer style={styles.footer}>
-      <p>iterate example app (Next.js)</p>
+      <p>iterate example app (Next.js 16)</p>
     </footer>
   );
 }

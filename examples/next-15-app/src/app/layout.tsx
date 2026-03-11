@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Iterate } from "iterate-ui-next/devtools";
 
 export const metadata: Metadata = {
-  title: "iterate — Example App",
+  title: "iterate — Next 15 Example",
   description: "Test app for visual iteration with git worktrees",
 };
 
