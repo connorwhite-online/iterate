@@ -194,16 +194,16 @@ export function FloatingPanel({
   const pageStillLoading = wasCreatingRef.current && hasIterations && !allIframesReady && !pickLoading && !discardLoading;
   const suspenseActive = forkLoading || isCreating || pickLoading || discardLoading || pageStillLoading;
   const suspenseMessage = pickLoading
-    ? "Merging preferred changes\u2026"
+    ? "Merging preferred changes…"
     : discardLoading
-      ? "Removing iteration worktrees\u2026"
+      ? "Removing iteration worktrees…"
       : pageStillLoading && !isCreating && !forkLoading
-        ? "Loading page\u2026"
+        ? "Loading page…"
         : creatingPhase === "installing"
-          ? "Installing dependencies\u2026"
+          ? "Installing dependencies…"
           : creatingPhase === "starting"
-            ? "Starting dev server\u2026"
-            : "Creating iteration branches\u2026";
+            ? "Starting dev server…"
+            : "Creating iteration branches…";
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -586,7 +586,7 @@ export function FloatingPanel({
             {pickLoading && (
               <IconButton
                 icon={<SpinnerIcon size={ICON_SIZE} />}
-                label="Merging\u2026"
+                label="Merging…"
                 onClick={() => {}}
               />
             )}
@@ -609,7 +609,7 @@ export function FloatingPanel({
             {discardLoading && (
               <IconButton
                 icon={<SpinnerIcon size={ICON_SIZE} />}
-                label="Removing iteration worktrees\u2026"
+                label="Removing iteration worktrees…"
                 onClick={() => {}}
               />
             )}
