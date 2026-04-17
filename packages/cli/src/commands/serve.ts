@@ -3,12 +3,13 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { loadConfig, readLockfile, isDaemonAlive } from "iterate-ui-core/node";
+import { resolveRepoRoot } from "../fetch-with-timeout.js";
 
 export const serveCommand = new Command("serve")
   .description("Start the iterate daemon (control server + proxy)")
   .option("--port <port>", "Override daemon port (skips auto-pick)")
   .action(async (opts) => {
-    const cwd = process.cwd();
+    const cwd = resolveRepoRoot();
     const config = loadConfig(cwd);
     if (!config) {
       console.error("Error: iterate not initialized. Run `iterate init` first.");

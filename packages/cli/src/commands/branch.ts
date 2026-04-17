@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { loadConfig, resolveDaemonPort } from "iterate-ui-core/node";
-import { fetchWithTimeout, parseJsonSafe } from "../fetch-with-timeout.js";
+import { fetchWithTimeout, parseJsonSafe, resolveRepoRoot } from "../fetch-with-timeout.js";
 
 export const branchCommand = new Command("branch")
   .description("Create a new iteration from the current branch")
@@ -8,7 +8,7 @@ export const branchCommand = new Command("branch")
   .option("--from <branch>", "Base branch to fork from (default: current branch)")
   .option("--app <name>", "Registered app this iteration targets (required when multiple apps are configured)")
   .action(async (name: string, opts) => {
-    const cwd = process.cwd();
+    const cwd = resolveRepoRoot();
     const config = loadConfig(cwd);
     if (!config) {
       console.error("Error: iterate not initialized. Run `iterate init` first.");

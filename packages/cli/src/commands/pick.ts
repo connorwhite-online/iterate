@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { loadConfig, resolveDaemonPort } from "iterate-ui-core/node";
-import { fetchWithTimeout, parseJsonSafe } from "../fetch-with-timeout.js";
+import { fetchWithTimeout, parseJsonSafe, resolveRepoRoot } from "../fetch-with-timeout.js";
 
 export const pickCommand = new Command("pick")
   .description(
@@ -13,7 +13,7 @@ export const pickCommand = new Command("pick")
     "merge"
   )
   .action(async (name: string, opts) => {
-    const cwd = process.cwd();
+    const cwd = resolveRepoRoot();
     const config = loadConfig(cwd);
     if (!config) {
       console.error("Error: iterate not initialized. Run `iterate init` first.");

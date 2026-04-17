@@ -1,3 +1,23 @@
+import { execSync } from "node:child_process";
+
+/**
+ * Resolve the git repo root from any directory inside the repo, so CLI
+ * commands can run from subdirectories and still find `.iterate/config.json`
+ * at the repo root. Falls back to the invocation cwd if we're outside a
+ * git repo — callers will then fail with a clean "iterate not initialized"
+ * message.
+ */
+export function resolveRepoRoot(invocationCwd: string = process.cwd()): string {
+  try {
+    return execSync("git rev-parse --show-toplevel", {
+      cwd: invocationCwd,
+      encoding: "utf-8",
+    }).trim();
+  } catch {
+    return invocationCwd;
+  }
+}
+
 /**
  * fetch() helper with an AbortController timeout. Without this, CLI commands
  * that hit a half-dead daemon (e.g. hung on an iteration startup) would wait

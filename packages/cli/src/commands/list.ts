@@ -1,12 +1,12 @@
 import { Command } from "commander";
 import type { IterationInfo } from "iterate-ui-core";
 import { loadConfig, resolveDaemonPort } from "iterate-ui-core/node";
-import { fetchWithTimeout, parseJsonSafe } from "../fetch-with-timeout.js";
+import { fetchWithTimeout, parseJsonSafe, resolveRepoRoot } from "../fetch-with-timeout.js";
 
 export const listCommand = new Command("list")
   .description("List all active iterations")
   .action(async () => {
-    const cwd = process.cwd();
+    const cwd = resolveRepoRoot();
     const config = loadConfig(cwd);
     if (!config) {
       console.error("Error: iterate not initialized. Run `iterate init` first.");

@@ -10,6 +10,7 @@ import {
   parseDotenv,
 } from "iterate-ui-core/node";
 import type { AppConfig, IterateConfig } from "iterate-ui-core";
+import { resolveRepoRoot } from "../fetch-with-timeout.js";
 
 export type DoctorStatus = "ok" | "warn" | "fail";
 
@@ -374,7 +375,7 @@ export const doctorCommand = new Command("doctor")
   .description("Preflight checks for iterate — verify config, ports, env files, and dev scripts")
   .option("--app <name>", "Only check this app (default: all configured apps)")
   .action(async (opts) => {
-    const results = await runDoctor({ cwd: process.cwd(), app: opts.app });
+    const results = await runDoctor({ cwd: resolveRepoRoot(), app: opts.app });
     const { output, hasFail } = formatResults(results);
     console.log(output);
     if (hasFail) process.exit(1);
