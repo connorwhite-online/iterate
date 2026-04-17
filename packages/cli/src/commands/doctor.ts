@@ -77,6 +77,22 @@ export async function runDoctor(opts: RunDoctorOptions): Promise<DoctorCheck[]> 
     label: `Registered apps (${config.apps.length}): ${config.apps.map((a) => a.name).join(", ")}`,
   });
 
+  // Duplicate app names would silently lose the earlier entry in findApp/getApp
+  // lookups — flag it loudly before it causes surprise at runtime.
+  const nameCounts = new Map<string, number>();
+  for (const a of config.apps) {
+    nameCounts.set(a.name, (nameCounts.get(a.name) ?? 0) + 1);
+  }
+  for (const [name, count] of nameCounts) {
+    if (count > 1) {
+      results.push({
+        status: "fail",
+        label: `Duplicate app name "${name}" (appears ${count} times in apps[])`,
+        detail: "Each entry in apps[] must have a unique name.",
+      });
+    }
+  }
+
   // --- Daemon / port check ---
   const lock = readLockfile(cwd);
   if (lock) {

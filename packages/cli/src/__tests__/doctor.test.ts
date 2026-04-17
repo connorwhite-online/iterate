@@ -105,6 +105,22 @@ describe("runDoctor — top-level flow", () => {
     expectLabel(results, /docker-compose detected/, true, "warn");
   });
 
+  it("fails when apps[] contains duplicate names", async () => {
+    saveConfig(tmp, {
+      ...baseConfig,
+      apps: [
+        { name: "web", devCommand: "next dev" },
+        { name: "web", devCommand: "next dev --turbo" },
+      ],
+    });
+    const results = await runDoctor({ cwd: tmp, isPackageManagerInstalled: () => true });
+    expect(
+      results.some(
+        (r) => r.status === "fail" && r.label.includes('Duplicate app name "web"')
+      )
+    ).toBe(true);
+  });
+
   it("--app filter narrows to one app and fails if the name is unknown", async () => {
     saveConfig(tmp, {
       ...baseConfig,

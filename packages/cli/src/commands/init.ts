@@ -31,7 +31,18 @@ export const initCommand = new Command("init")
     }
 
     const iterateDir = join(cwd, ".iterate");
-    const existing = loadConfig(cwd);
+    let existing;
+    try {
+      existing = loadConfig(cwd);
+    } catch (err) {
+      console.error(
+        `Error: failed to parse existing .iterate/config.json — ${(err as Error).message}`
+      );
+      console.error(
+        "Fix or delete the file, then re-run `iterate init`."
+      );
+      process.exit(1);
+    }
 
     // Detect package manager
     const packageManager = detectPackageManager(cwd);

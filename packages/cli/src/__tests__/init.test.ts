@@ -196,4 +196,30 @@ describe("iterate init — failure modes", () => {
       rmSync(noGit, { recursive: true, force: true });
     }
   });
+
+  it("fails clearly when an existing .iterate/config.json is malformed", () => {
+    // tmp already has `git init`. Add a broken config.
+    mkdirSync(join(tmp, ".iterate"));
+    writeFileSync(join(tmp, ".iterate", "config.json"), "{ this is not json ");
+    const { stdout, stderr, status } = (() => {
+      try {
+        const out = execFileSync("node", [CLI_BIN, "init"], {
+          cwd: tmp,
+          encoding: "utf-8",
+        });
+        return { stdout: out, stderr: "", status: 0 };
+      } catch (err) {
+        const e = err as { stdout?: string; stderr?: string; status?: number; message?: string };
+        return {
+          stdout: e.stdout ?? "",
+          stderr: e.stderr ?? e.message ?? "",
+          status: e.status ?? 1,
+        };
+      }
+    })();
+    expect(status).not.toBe(0);
+    const combined = stdout + stderr;
+    expect(combined).toMatch(/failed to parse/i);
+    expect(combined).toMatch(/\.iterate\/config\.json/);
+  });
 });
