@@ -73,6 +73,16 @@ type NextConfig = Record<string, any>;
 
 let daemon: ChildProcess | null = null;
 let daemonStarting = false;
+// Dedup warnings across multiple module loads (Next may load the config
+// through both the CJS and ESM entries in the same process).
+function warnOnce(key: string, message: string): void {
+  const g = globalThis as Record<string, unknown>;
+  const slot = (g.__iterateWarnedSet ?? new Set<string>()) as Set<string>;
+  g.__iterateWarnedSet = slot;
+  if (slot.has(key)) return;
+  slot.add(key);
+  console.warn(message);
+}
 
 /**
  * Module-level memo so multiple calls to the returned config function
@@ -135,6 +145,27 @@ export function withIterate(
   const envPort = process.env.ITERATE_DAEMON_PORT ? parseInt(process.env.ITERATE_DAEMON_PORT, 10) : undefined;
   const startingPort = options.daemonPort ?? envPort ?? fileConfig?.daemonPort ?? 47100;
 
+  // Resolve the babel plugin path once per Node process (Next may call the
+  // returned config function multiple times for different phases — we don't
+  // want duplicate warnings).
+  const _require = typeof require !== "undefined" ? require : createRequire(import.meta.url);
+  let babelPluginPath: string | undefined;
+  let babelLoaderPath: string | undefined;
+  if (isDev && !options.disableBabelPlugin) {
+    try {
+      babelPluginPath = resolvePackageEntry("iterate-ui-babel-plugin", _require);
+    } catch {
+      warnOnce("babel-plugin", "[iterate] Could not resolve babel plugin");
+    }
+    if (babelPluginPath) {
+      try {
+        babelLoaderPath = _require.resolve("babel-loader");
+      } catch {
+        warnOnce("babel-loader", "[iterate] Could not resolve babel-loader — component names will not be injected");
+      }
+    }
+  }
+
   return async function iterateNextConfig(): Promise<NextConfig> {
     if (!isDev) {
       // In production, don't modify anything
@@ -143,8 +174,12 @@ export function withIterate(
 
     const daemonPort = await resolveDaemonPort(repoRoot, startingPort, options.daemonPort ?? envPort);
 
+    // ITERATE_SKIP_DAEMON_START is used by tests to exercise config shape
+    // without spawning a real child process.
+    const skipDaemonStart = process.env.ITERATE_SKIP_DAEMON_START === "1";
+
     // Start the daemon when the config is loaded (dev only)
-    if (!daemon && !daemonStarting) {
+    if (!daemon && !daemonStarting && !skipDaemonStart) {
       daemonStarting = true;
       startDaemonIfNeeded(daemonPort, repoRoot).then((child) => {
         if (child) {
@@ -162,18 +197,6 @@ export function withIterate(
           process.on("exit", cleanup);
         }
       });
-    }
-
-    // Resolve paths at config time
-    // Use createRequire for CJS compatibility (Next.js loads config via CJS)
-    const _require = typeof require !== "undefined" ? require : createRequire(import.meta.url);
-    let babelPluginPath: string | undefined;
-    try {
-      if (!options.disableBabelPlugin) {
-        babelPluginPath = resolvePackageEntry("iterate-ui-babel-plugin", _require);
-      }
-    } catch {
-      console.warn("[iterate] Could not resolve babel plugin");
     }
 
     const turbopack = isTurbopackMode();
@@ -226,16 +249,6 @@ export function withIterate(
         };
       },
     };
-
-    // Resolve babel-loader for the component name injection pre-loader
-    let babelLoaderPath: string | undefined;
-    if (babelPluginPath) {
-      try {
-        babelLoaderPath = _require.resolve("babel-loader");
-      } catch {
-        console.warn("[iterate] Could not resolve babel-loader — component names will not be injected");
-      }
-    }
 
     // Skip babel plugin injection for iteration dev servers — Turbopack's
     // WebpackLoadersProcessedAsset panics with custom loaders in monorepo

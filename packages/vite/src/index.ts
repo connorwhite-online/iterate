@@ -2,6 +2,7 @@ import type { Plugin, ViteDevServer } from "vite";
 import { spawn, execSync, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import http from "node:http";
 import {
   findFreePort,
@@ -10,6 +11,21 @@ import {
   readLockfile,
   isDaemonAlive,
 } from "iterate-ui-core/node";
+
+/**
+ * Resolve a package's entry point via require.resolve, falling back to reading
+ * the package.json for ESM-only packages without a "require" export.
+ */
+function resolvePackageEntry(packageName: string, _require: NodeRequire): string {
+  try {
+    return _require.resolve(packageName);
+  } catch {
+    const pkgJsonPath = _require.resolve(`${packageName}/package.json`);
+    const pkg = JSON.parse(readFileSync(pkgJsonPath, "utf-8"));
+    const main = pkg.exports?.["."]?.import ?? pkg.main ?? "index.js";
+    return join(dirname(pkgJsonPath), main);
+  }
+}
 
 export interface IteratePluginOptions {
   /**
@@ -241,7 +257,8 @@ export function iterate(options: IteratePluginOptions = {}): Plugin[] {
   return plugins;
 }
 
-async function resolveDaemonPort(repoRoot: string, startingFrom: number, override?: number): Promise<number> {
+/** Exported for tests. Resolves the daemon port for a vite plugin invocation. */
+export async function resolveDaemonPort(repoRoot: string, startingFrom: number, override?: number): Promise<number> {
   if (override && Number.isFinite(override)) return override;
   const lock = readLockfile(repoRoot);
   if (lock && isDaemonAlive(lock)) return lock.port;
@@ -258,12 +275,20 @@ function getGitRoot(): string | null {
 }
 
 function startDaemon(port: number, cwd: string): ChildProcess {
+  // Resolve the daemon via this package's require so we can pass an absolute
+  // file:// URL to the child — avoids relying on the child's cwd or node_modules
+  // hoisting to find the daemon package (pnpm-unfriendly). The vite plugin is
+  // ESM-only, so we always go through createRequire.
+  const _req = createRequire(import.meta.url);
+  const daemonEntryPath = resolvePackageEntry("iterate-ui-daemon", _req);
+  const daemonPath = `file://${daemonEntryPath}`;
+
   const child = spawn(
     process.execPath,
     [
       "--input-type=module",
       "-e",
-      `import { startDaemon } from "iterate-ui-daemon"; startDaemon({ port: ${port}, cwd: ${JSON.stringify(cwd)} });`,
+      `import { startDaemon } from ${JSON.stringify(daemonPath)}; startDaemon({ port: ${port}, cwd: ${JSON.stringify(cwd)} });`,
     ],
     {
       cwd,

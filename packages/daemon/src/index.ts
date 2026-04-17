@@ -7,9 +7,6 @@ import { createRequire } from "node:module";
 import {
   DEFAULT_CONFIG,
   normalizeConfig,
-  findApp,
-  getDefaultApp,
-  type AppConfig,
   type IterateConfig,
   type IterationInfo,
 } from "iterate-ui-core";
@@ -26,7 +23,11 @@ import { ProcessManager } from "./process/manager.js";
 import { WebSocketHub } from "./websocket/hub.js";
 import { copyFilesToWorktree, copyUncommittedFiles } from "./worktree/copy-files.js";
 import { registerProxyRoutes } from "./proxy/router.js";
-import { runIterationPipeline } from "./iteration/pipeline.js";
+import {
+  runIterationPipeline,
+  resolveAppForRequest,
+  resolveAppForWorktreeBranch,
+} from "./iteration/pipeline.js";
 
 export interface DaemonOptions {
   port?: number;
@@ -682,37 +683,6 @@ async function discoverAndRegisterWorktrees(
     store.removeIteration(name);
     wsHub.broadcast({ type: "iteration:removed", payload: { name } });
   }
-}
-
-/**
- * Resolve which app to use for an incoming request, given an optional caller-supplied
- * app name. Returns undefined if the caller didn't specify one and the config has
- * multiple apps (so there's no unambiguous default).
- */
-function resolveAppForRequest(config: IterateConfig, appName: string | undefined): AppConfig | undefined {
-  if (appName) return findApp(config, appName);
-  return getDefaultApp(config);
-}
-
-/**
- * Resolve which app an externally-created worktree targets. We support two conventions:
- *  1. `iterate/<appName>/<rest>` — explicit; chooses the matching app.
- *  2. `iterate/<rest>` or any other branch — falls back to the sole configured app.
- * Returns undefined if the repo has multiple apps and the branch name doesn't
- * disambiguate — the worktree is left untracked rather than misconfigured.
- */
-function resolveAppForWorktreeBranch(config: IterateConfig, branch: string): AppConfig | undefined {
-  const iteratePrefix = "iterate/";
-  if (branch.startsWith(iteratePrefix)) {
-    const rest = branch.slice(iteratePrefix.length);
-    const firstSlash = rest.indexOf("/");
-    if (firstSlash !== -1) {
-      const candidate = rest.slice(0, firstSlash);
-      const matched = findApp(config, candidate);
-      if (matched) return matched;
-    }
-  }
-  return getDefaultApp(config);
 }
 
 /** Shell HTML for the control UI with command bar and updated toolbar. */

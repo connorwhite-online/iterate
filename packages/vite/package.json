@@ -24,7 +24,8 @@
     "prepublishOnly": "pnpm build",
     "build": "tsup src/index.ts --format esm --dts --external @babel/core",
     "dev": "tsup src/index.ts --format esm --dts --watch --external @babel/core",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "vitest run"
   },
   "dependencies": {
     "iterate-ui-babel-plugin": "workspace:*",
@@ -41,6 +42,7 @@
     "@types/node": "^22.0.0",
     "tsup": "^8.3.0",
     "typescript": "^5.7.0",
-    "vite": "^6.0.0"
+    "vite": "^6.0.0",
+    "vitest": "^4.0.18"
   }
 }

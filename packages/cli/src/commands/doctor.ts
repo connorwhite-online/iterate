@@ -7,128 +7,150 @@ import {
   readLockfile,
   isDaemonAlive,
   canBindPort,
-  isPortInUse,
   parseDotenv,
 } from "iterate-ui-core/node";
 import type { AppConfig, IterateConfig } from "iterate-ui-core";
 
-type Status = "ok" | "warn" | "fail";
+export type DoctorStatus = "ok" | "warn" | "fail";
 
-interface CheckResult {
-  status: Status;
+export interface DoctorCheck {
+  status: DoctorStatus;
   label: string;
   detail?: string;
 }
 
-const ICON: Record<Status, string> = { ok: "\x1b[32m✓\x1b[0m", warn: "\x1b[33m!\x1b[0m", fail: "\x1b[31m✗\x1b[0m" };
+export interface RunDoctorOptions {
+  cwd: string;
+  /** Optional: only check this registered app. */
+  app?: string;
+  /** Injectable for tests so we don't spawn real processes. */
+  isPackageManagerInstalled?: (pm: string) => boolean;
+}
 
-export const doctorCommand = new Command("doctor")
-  .description("Preflight checks for iterate — verify config, ports, env files, and dev scripts")
-  .option("--app <name>", "Only check this app (default: all configured apps)")
-  .action(async (opts) => {
-    const cwd = process.cwd();
-    const results: CheckResult[] = [];
+const ICON: Record<DoctorStatus, string> = {
+  ok: "\x1b[32m✓\x1b[0m",
+  warn: "\x1b[33m!\x1b[0m",
+  fail: "\x1b[31m✗\x1b[0m",
+};
 
-    // --- Git repo check ---
-    try {
-      execSync("git rev-parse --is-inside-work-tree", { cwd, stdio: "ignore" });
-      results.push({ status: "ok", label: "Inside a git repository" });
-    } catch {
-      results.push({ status: "fail", label: "Not inside a git repository" });
-    }
+/**
+ * Run doctor checks and return the ordered list. Does NOT call process.exit —
+ * callers decide what to do with the results.
+ */
+export async function runDoctor(opts: RunDoctorOptions): Promise<DoctorCheck[]> {
+  const { cwd, app: appFilter } = opts;
+  const isPmInstalled =
+    opts.isPackageManagerInstalled ?? ((pm: string) => probePackageManager(pm));
 
-    // --- Config check ---
-    const config = loadConfig(cwd);
-    if (!config) {
-      results.push({
-        status: "fail",
-        label: ".iterate/config.json not found",
-        detail: "Run `iterate init` to create it.",
-      });
-      printAndExit(results);
-      return;
-    }
-    results.push({ status: "ok", label: "Loaded .iterate/config.json" });
+  const results: DoctorCheck[] = [];
 
-    if (config.apps.length === 0) {
-      results.push({
-        status: "fail",
-        label: "No apps registered",
-        detail: "Run `iterate init` (optionally with --app-name, --app-dir) to register one.",
-      });
-      printAndExit(results);
-      return;
-    }
+  // --- Git repo check ---
+  try {
+    execSync("git rev-parse --is-inside-work-tree", { cwd, stdio: "ignore" });
+    results.push({ status: "ok", label: "Inside a git repository" });
+  } catch {
+    results.push({ status: "fail", label: "Not inside a git repository" });
+  }
+
+  // --- Config check ---
+  const config = loadConfig(cwd);
+  if (!config) {
     results.push({
-      status: "ok",
-      label: `Registered apps (${config.apps.length}): ${config.apps.map((a) => a.name).join(", ")}`,
+      status: "fail",
+      label: ".iterate/config.json not found",
+      detail: "Run `iterate init` to create it.",
     });
+    return results;
+  }
+  results.push({ status: "ok", label: "Loaded .iterate/config.json" });
 
-    // --- Daemon / port check ---
-    const lock = readLockfile(cwd);
-    if (lock) {
-      if (isDaemonAlive(lock)) {
-        results.push({
-          status: "ok",
-          label: `Daemon running on port ${lock.port} (pid ${lock.pid})`,
-        });
-      } else {
-        results.push({
-          status: "warn",
-          label: "Stale daemon lockfile",
-          detail: `PID ${lock.pid} is not alive. Run \`iterate stop\` to clean up, or start fresh with \`iterate serve\`.`,
-        });
-      }
-    } else {
-      const startingFree = await canBindPort(config.daemonPort);
-      if (startingFree) {
-        results.push({
-          status: "ok",
-          label: `Starting daemon port ${config.daemonPort} is available`,
-        });
-      } else {
-        results.push({
-          status: "warn",
-          label: `Starting daemon port ${config.daemonPort} is in use`,
-          detail: "iterate will auto-pick the next free port above it when the daemon starts.",
-        });
-      }
-    }
-
-    // --- Per-app checks ---
-    const apps = opts.app
-      ? config.apps.filter((a) => a.name === opts.app)
-      : config.apps;
-
-    if (opts.app && apps.length === 0) {
-      results.push({
-        status: "fail",
-        label: `No app named "${opts.app}" in config`,
-      });
-      printAndExit(results);
-      return;
-    }
-
-    for (const app of apps) {
-      results.push({ status: "ok", label: `— App: ${app.name} —` });
-      await checkApp(cwd, config, app, results);
-    }
-
-    // --- docker-compose hint (informational only) ---
-    if (existsSync(join(cwd, "docker-compose.yaml")) || existsSync(join(cwd, "docker-compose.yml"))) {
-      results.push({
-        status: "warn",
-        label: "docker-compose detected at repo root",
-        detail: "iterate doesn't manage these services — make sure they're running if your app depends on them.",
-      });
-    }
-
-    printAndExit(results);
+  if (config.apps.length === 0) {
+    results.push({
+      status: "fail",
+      label: "No apps registered",
+      detail: "Run `iterate init` (optionally with --app-name, --app-dir) to register one.",
+    });
+    return results;
+  }
+  results.push({
+    status: "ok",
+    label: `Registered apps (${config.apps.length}): ${config.apps.map((a) => a.name).join(", ")}`,
   });
 
-async function checkApp(cwd: string, config: IterateConfig, app: AppConfig, results: CheckResult[]): Promise<void> {
+  // --- Daemon / port check ---
+  const lock = readLockfile(cwd);
+  if (lock) {
+    if (isDaemonAlive(lock)) {
+      results.push({
+        status: "ok",
+        label: `Daemon running on port ${lock.port} (pid ${lock.pid})`,
+      });
+    } else {
+      results.push({
+        status: "warn",
+        label: "Stale daemon lockfile",
+        detail: `PID ${lock.pid} is not alive. Run \`iterate stop\` to clean up, or start fresh with \`iterate serve\`.`,
+      });
+    }
+  } else {
+    const startingFree = await canBindPort(config.daemonPort);
+    if (startingFree) {
+      results.push({
+        status: "ok",
+        label: `Starting daemon port ${config.daemonPort} is available`,
+      });
+    } else {
+      results.push({
+        status: "warn",
+        label: `Starting daemon port ${config.daemonPort} is in use`,
+        detail: "iterate will auto-pick the next free port above it when the daemon starts.",
+      });
+    }
+  }
+
+  // --- Per-app checks ---
+  const apps = appFilter
+    ? config.apps.filter((a) => a.name === appFilter)
+    : config.apps;
+
+  if (appFilter && apps.length === 0) {
+    results.push({
+      status: "fail",
+      label: `No app named "${appFilter}" in config`,
+    });
+    return results;
+  }
+
+  for (const a of apps) {
+    results.push({ status: "ok", label: `— App: ${a.name} —` });
+    checkApp(cwd, config, a, results, isPmInstalled);
+  }
+
+  // --- docker-compose hint (informational) ---
+  if (existsSync(join(cwd, "docker-compose.yaml")) || existsSync(join(cwd, "docker-compose.yml"))) {
+    results.push({
+      status: "warn",
+      label: "docker-compose detected at repo root",
+      detail: "iterate doesn't manage these services — make sure they're running if your app depends on them.",
+    });
+  }
+
+  return results;
+}
+
+export function checkApp(
+  cwd: string,
+  config: IterateConfig,
+  app: AppConfig,
+  results: DoctorCheck[],
+  isPmInstalled: (pm: string) => boolean = probePackageManager
+): void {
   // appDir exists
-  const appRoot = app.appDir ? (isAbsolute(app.appDir) ? app.appDir : resolve(cwd, app.appDir)) : cwd;
+  const appRoot = app.appDir
+    ? isAbsolute(app.appDir)
+      ? app.appDir
+      : resolve(cwd, app.appDir)
+    : cwd;
   if (!existsSync(appRoot)) {
     results.push({
       status: "fail",
@@ -155,14 +177,11 @@ async function checkApp(cwd: string, config: IterateConfig, app: AppConfig, resu
 
   // portEnvVar sanity
   if (app.portEnvVar) {
-    // If the dev command doesn't reference this var, iterate's port won't reach the script.
     const referenced =
       app.devCommand.includes(`$${app.portEnvVar}`) ||
       app.devCommand.includes(`\${${app.portEnvVar}}`) ||
       app.devCommand.includes(`%${app.portEnvVar}%`);
     if (!referenced) {
-      // This is informational — some wrappers (env-cmd, dotenv-cli) read the var
-      // internally rather than referencing it in the command string.
       results.push({
         status: "warn",
         label: `  portEnvVar "${app.portEnvVar}" not referenced inline in devCommand`,
@@ -241,13 +260,12 @@ async function checkApp(cwd: string, config: IterateConfig, app: AppConfig, resu
     });
   }
 
-  // Package manager: verify the configured one (or app override) resolves
+  // Package manager
   const pm = app.packageManager ?? config.packageManager;
   if (pm) {
-    try {
-      execSync(`${pm} --version`, { stdio: "ignore" });
+    if (isPmInstalled(pm)) {
       results.push({ status: "ok", label: `  package manager "${pm}" is installed` });
-    } catch {
+    } else {
       results.push({
         status: "fail",
         label: `  package manager "${pm}" not found in PATH`,
@@ -256,30 +274,42 @@ async function checkApp(cwd: string, config: IterateConfig, app: AppConfig, resu
   }
 }
 
-function printAndExit(results: CheckResult[]): void {
-  console.log("iterate doctor:\n");
-  let hasFail = false;
-  for (const r of results) {
-    console.log(`  ${ICON[r.status]} ${r.label}`);
-    if (r.detail) console.log(`      ${r.detail}`);
-    if (r.status === "fail") hasFail = true;
-  }
-  console.log();
-  if (hasFail) {
-    console.log("\x1b[31mFailed.\x1b[0m Fix the ✗ items above and rerun `iterate doctor`.");
-    process.exit(1);
-  }
-  const warnCount = results.filter((r) => r.status === "warn").length;
-  if (warnCount > 0) {
-    console.log(`\x1b[33mOK with ${warnCount} warning(s).\x1b[0m`);
-  } else {
-    console.log("\x1b[32mAll checks passed.\x1b[0m");
+function probePackageManager(pm: string): boolean {
+  try {
+    execSync(`${pm} --version`, { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
   }
 }
 
-// Also export for testing
-export const __internal = { checkApp };
+export function formatResults(results: DoctorCheck[]): { output: string; hasFail: boolean; warnCount: number } {
+  const lines: string[] = ["iterate doctor:\n"];
+  let hasFail = false;
+  let warnCount = 0;
+  for (const r of results) {
+    lines.push(`  ${ICON[r.status]} ${r.label}`);
+    if (r.detail) lines.push(`      ${r.detail}`);
+    if (r.status === "fail") hasFail = true;
+    if (r.status === "warn") warnCount++;
+  }
+  lines.push("");
+  if (hasFail) {
+    lines.push("\x1b[31mFailed.\x1b[0m Fix the ✗ items above and rerun `iterate doctor`.");
+  } else if (warnCount > 0) {
+    lines.push(`\x1b[33mOK with ${warnCount} warning(s).\x1b[0m`);
+  } else {
+    lines.push("\x1b[32mAll checks passed.\x1b[0m");
+  }
+  return { output: lines.join("\n"), hasFail, warnCount };
+}
 
-// Guard against isPortInUse being "unused" in the import — some checks may
-// opt into it later (e.g. hostname-based reverse proxy probing).
-void isPortInUse;
+export const doctorCommand = new Command("doctor")
+  .description("Preflight checks for iterate — verify config, ports, env files, and dev scripts")
+  .option("--app <name>", "Only check this app (default: all configured apps)")
+  .action(async (opts) => {
+    const results = await runDoctor({ cwd: process.cwd(), app: opts.app });
+    const { output, hasFail } = formatResults(results);
+    console.log(output);
+    if (hasFail) process.exit(1);
+  });

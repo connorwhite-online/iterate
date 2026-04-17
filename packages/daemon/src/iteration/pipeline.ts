@@ -1,11 +1,48 @@
 import { join, isAbsolute, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { execa } from "execa";
-import type { AppConfig, IterateConfig, IterationInfo } from "iterate-ui-core";
+import {
+  findApp,
+  getDefaultApp,
+  type AppConfig,
+  type IterateConfig,
+  type IterationInfo,
+} from "iterate-ui-core";
 import { loadEnvFiles } from "iterate-ui-core/node";
 import type { ProcessManager } from "../process/manager.js";
 import type { StateStore } from "../state/store.js";
 import type { WebSocketHub } from "../websocket/hub.js";
+
+/**
+ * Resolve which app to use for an incoming request, given an optional caller-supplied
+ * app name. Returns undefined if the caller didn't specify one and the config has
+ * multiple apps (so there's no unambiguous default).
+ */
+export function resolveAppForRequest(config: IterateConfig, appName: string | undefined): AppConfig | undefined {
+  if (appName) return findApp(config, appName);
+  return getDefaultApp(config);
+}
+
+/**
+ * Resolve which app an externally-created worktree targets. Supported conventions:
+ *   1. `iterate/<appName>/<rest>` — explicit; chooses the matching app.
+ *   2. `iterate/<rest>` or any other branch — falls back to the sole configured app.
+ * Returns undefined if the repo has multiple apps and the branch name doesn't
+ * disambiguate — the worktree is left untracked rather than misconfigured.
+ */
+export function resolveAppForWorktreeBranch(config: IterateConfig, branch: string): AppConfig | undefined {
+  const iteratePrefix = "iterate/";
+  if (branch.startsWith(iteratePrefix)) {
+    const rest = branch.slice(iteratePrefix.length);
+    const firstSlash = rest.indexOf("/");
+    if (firstSlash !== -1) {
+      const candidate = rest.slice(0, firstSlash);
+      const matched = findApp(config, candidate);
+      if (matched) return matched;
+    }
+  }
+  return getDefaultApp(config);
+}
 
 /**
  * Resolve the working directory for an app, handling optional appDir.
