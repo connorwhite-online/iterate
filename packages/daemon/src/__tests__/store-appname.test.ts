@@ -22,6 +22,43 @@ function mockIter(overrides: Partial<IterationInfo> = {}): IterationInfo {
   };
 }
 
+describe("StateStore — command context eviction", () => {
+  it("caps the command context map to prevent unbounded growth", () => {
+    const store = new StateStore({ ...DEFAULT_CONFIG });
+    // Add 200 command contexts — well above the 50-entry cap.
+    for (let i = 0; i < 200; i++) {
+      store.setCommandContext(`cmd-${i}`, `prompt ${i}`, [`iter-${i}`]);
+    }
+    const all = store.getAllCommands();
+    // Cap is 50. The oldest entries should have been evicted.
+    expect(all.length).toBeLessThanOrEqual(50);
+    // The most recent one survives.
+    expect(store.getCommandContext("cmd-199")).toBeDefined();
+    // The oldest is evicted.
+    expect(store.getCommandContext("cmd-0")).toBeUndefined();
+    // getLatestCommand returns the most recent of what's retained.
+    expect(store.getLatestCommand()?.commandId).toBe("cmd-199");
+  });
+
+  it("doesn't evict entries when under the cap", () => {
+    const store = new StateStore({ ...DEFAULT_CONFIG });
+    for (let i = 0; i < 10; i++) {
+      store.setCommandContext(`cmd-${i}`, "prompt", ["iter"]);
+    }
+    expect(store.getAllCommands()).toHaveLength(10);
+    expect(store.getCommandContext("cmd-0")).toBeDefined();
+  });
+
+  it("refreshing a command context updates it without re-adding", () => {
+    const store = new StateStore({ ...DEFAULT_CONFIG });
+    store.setCommandContext("cmd-1", "first", ["iter-1"]);
+    store.setCommandContext("cmd-1", "updated", ["iter-1", "iter-2"]);
+    expect(store.getAllCommands()).toHaveLength(1);
+    expect(store.getCommandContext("cmd-1")?.prompt).toBe("updated");
+    expect(store.getCommandContext("cmd-1")?.iterations).toEqual(["iter-1", "iter-2"]);
+  });
+});
+
 describe("StateStore — appName field", () => {
   it("round-trips appName through set/get", () => {
     const store = new StateStore({ ...DEFAULT_CONFIG });
