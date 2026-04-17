@@ -5,8 +5,24 @@ import { DaemonClient } from "./connection/daemon-client.js";
 import { formatBatchPrompt } from "iterate-ui-core";
 import { formatIterationList } from "./format.js";
 import { loadConfig, resolveDaemonPort } from "iterate-ui-core/node";
+import { execSync } from "node:child_process";
 
-const CWD = process.env.ITERATE_CWD ?? process.cwd();
+// If the MCP server is launched from a subdirectory of a git repo, walk up
+// to the repo root so we find the config and lockfile. ITERATE_CWD (if set
+// by the caller, e.g. Claude Code) always wins.
+function resolveCwd(): string {
+  if (process.env.ITERATE_CWD) return process.env.ITERATE_CWD;
+  try {
+    return execSync("git rev-parse --show-toplevel", {
+      cwd: process.cwd(),
+      encoding: "utf-8",
+    }).trim();
+  } catch {
+    return process.cwd();
+  }
+}
+
+const CWD = resolveCwd();
 // Resolution order: explicit env var → lockfile → config → default.
 const DAEMON_PORT = (() => {
   if (process.env.ITERATE_DAEMON_PORT) {
