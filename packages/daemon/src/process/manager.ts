@@ -27,17 +27,22 @@ export class ProcessManager {
     this.maxPort = basePort + 99;
   }
 
-  /** Find an available port starting from the next in range */
+  /**
+   * Find an available port starting from the next in range.
+   *
+   * Race-safe against concurrent callers: we bump `nextPort` BEFORE the
+   * async port probe so a second caller that enters the loop mid-await
+   * sees a different starting port. Without this, two iterations created
+   * back-to-back via /api/command would both pick up the same port.
+   */
   async allocatePort(): Promise<number> {
-    for (let port = this.nextPort; port <= this.maxPort; port++) {
-      const available = await this.isPortAvailable(port);
-      if (available) {
-        this.nextPort = port + 1;
-        return port;
-      }
+    while (this.nextPort <= this.maxPort) {
+      const port = this.nextPort;
+      this.nextPort = port + 1; // reserve eagerly
+      if (await this.isPortAvailable(port)) return port;
     }
     throw new Error(
-      `No available ports in range ${this.nextPort - 99}-${this.maxPort}`
+      `No available ports in range ${this.nextPort - 100}-${this.maxPort}`
     );
   }
 
