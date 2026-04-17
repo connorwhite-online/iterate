@@ -528,13 +528,23 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
 
     clearInterval(scanInterval);
     console.log("\nShutting down iterate daemon...");
+
+    // Remove the lockfile immediately so CLI/plugins can see the daemon is
+    // going away. Do this before we await any potentially-hanging work.
+    removeLockfile(cwd);
+
+    // Hard upper bound: even if processManager.stopAll() or Fastify's app.close()
+    // hangs on keep-alive sockets, we exit within 2s to avoid leaking the process.
+    const forceExit = setTimeout(() => process.exit(0), 2000);
+    // Don't block Node from exiting naturally if cleanup finishes first.
+    forceExit.unref();
+
     try {
       await processManager.stopAll();
       await app.close();
     } catch (err) {
       console.error("Error during cleanup:", err);
     }
-    removeLockfile(cwd);
     process.exit(0);
   };
 
