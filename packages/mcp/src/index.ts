@@ -90,12 +90,14 @@ async function main() {
       }
 
       const text = entries
-        .map(
-          (it) =>
-            `- **${it.name}** (branch: \`${it.branch}\`, port: ${it.port}, status: ${it.status})` +
+        .map((it) => {
+          const app = it.appName ? `, app: ${it.appName}` : "";
+          return (
+            `- **${it.name}** (branch: \`${it.branch}\`${app}, port: ${it.port}, status: ${it.status})` +
             (it.commandPrompt ? `\n  Command: "${it.commandPrompt}"` : "") +
             (it.commandId ? ` [command: ${it.commandId}]` : "")
-        )
+          );
+        })
         .join("\n");
 
       return { content: [{ type: "text", text }] };
