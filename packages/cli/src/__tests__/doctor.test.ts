@@ -219,6 +219,55 @@ describe("checkApp — per-app checks", () => {
     ).toBe(true);
   });
 
+  it("warns when devCommand hardcodes a numeric -p port and portEnvVar isn't set", () => {
+    const results: DoctorCheck[] = [];
+    writeFileSync(join(tmp, "package.json"), "{}");
+    checkApp(
+      tmp,
+      baseConfig,
+      { name: "x", devCommand: "next dev -p 3000" },
+      results,
+      () => true
+    );
+    expect(
+      results.some((r) => r.status === "warn" && r.label.includes("hardcodes a numeric port"))
+    ).toBe(true);
+  });
+
+  it("warns when devCommand hardcodes a --port=N port", () => {
+    const results: DoctorCheck[] = [];
+    writeFileSync(join(tmp, "package.json"), "{}");
+    checkApp(
+      tmp,
+      baseConfig,
+      { name: "x", devCommand: "vite --port=5000" },
+      results,
+      () => true
+    );
+    expect(
+      results.some((r) => r.status === "warn" && r.label.includes("hardcodes a numeric port"))
+    ).toBe(true);
+  });
+
+  it("does NOT warn when portEnvVar is set (wrapper script handles it)", () => {
+    const results: DoctorCheck[] = [];
+    writeFileSync(join(tmp, "package.json"), "{}");
+    checkApp(
+      tmp,
+      baseConfig,
+      {
+        name: "x",
+        devCommand: "PORT=4000 env-cmd -- next dev",
+        portEnvVar: "PORT",
+      },
+      results,
+      () => true
+    );
+    expect(
+      results.some((r) => r.status === "warn" && r.label.includes("hardcodes a numeric port"))
+    ).toBe(false);
+  });
+
   it("OKs portEnvVar when referenced as $FOO", () => {
     const results: DoctorCheck[] = [];
     writeFileSync(join(tmp, "package.json"), "{}");

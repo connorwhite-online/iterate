@@ -210,6 +210,25 @@ export function checkApp(
     results.push({ status: "fail", label: "  devCommand is empty" });
   } else {
     results.push({ status: "ok", label: `  devCommand: ${app.devCommand}` });
+
+    // If the devCommand hardcodes a numeric port (e.g. `next dev -p 3000`)
+    // and portEnvVar isn't set, iteration dev servers will all try to bind
+    // the same port and collide. This is a common gotcha when copy-pasting
+    // a package.json dev script.
+    if (!app.portEnvVar) {
+      const hardcoded =
+        /(?:^|\s)-p\s+\d+\b/.test(app.devCommand) ||
+        /(?:^|\s)--port[=\s]\d+\b/.test(app.devCommand) ||
+        /^PORT=\d+\s/.test(app.devCommand);
+      if (hardcoded) {
+        results.push({
+          status: "warn",
+          label: "  devCommand hardcodes a numeric port",
+          detail:
+            "Every iteration would try to bind the same port and collide. Either remove the port from devCommand (iterate will append one) or set portEnvVar and reference it, e.g. \"next dev -p $MY_PORT\".",
+        });
+      }
+    }
   }
 
   // portEnvVar sanity
