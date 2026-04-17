@@ -148,7 +148,12 @@ export function withIterate(
   // Resolve the babel plugin path once per Node process (Next may call the
   // returned config function multiple times for different phases — we don't
   // want duplicate warnings).
-  const _require = typeof require !== "undefined" ? require : createRequire(import.meta.url);
+  //
+  // In the ESM build, tsup rewrites `require` to a proxy (`__require`) that
+  // doesn't have `.resolve`. Detect that and fall through to `createRequire`.
+  const _require = (typeof require !== "undefined" && typeof (require as NodeRequire).resolve === "function")
+    ? require
+    : createRequire(import.meta.url);
   let babelPluginPath: string | undefined;
   let babelLoaderPath: string | undefined;
   if (isDev && !options.disableBabelPlugin) {
@@ -351,8 +356,12 @@ async function startDaemonIfNeeded(port: number, cwd: string): Promise<ChildProc
     return null;
   }
 
-  // Resolve iterate-ui-daemon from this package's location, not the app's cwd
-  const _req = typeof require !== "undefined" ? require : createRequire(import.meta.url);
+  // Resolve iterate-ui-daemon from this package's location, not the app's cwd.
+  // See note on line ~151 — tsup's ESM build turns `require` into a proxy
+  // without `.resolve`; detect and fall through to createRequire.
+  const _req = (typeof require !== "undefined" && typeof (require as NodeRequire).resolve === "function")
+    ? require
+    : createRequire(import.meta.url);
   const daemonEntryPath = resolvePackageEntry("iterate-ui-daemon", _req);
   // Convert to file:// URL for ESM import in the spawned child
   const daemonPath = `file://${daemonEntryPath}`;
