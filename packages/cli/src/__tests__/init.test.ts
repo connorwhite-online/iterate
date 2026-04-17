@@ -94,6 +94,46 @@ describe("iterate init — greenfield", () => {
     expect(mcp.mcpServers.iterate.env).toBeUndefined();
   });
 
+  it("adds the iterate server to an existing .mcp.json that doesn't have it", () => {
+    writeFileSync(
+      join(tmp, ".mcp.json"),
+      JSON.stringify({ mcpServers: { otherServer: { command: "foo" } } })
+    );
+    runIterate(["init"]);
+    const mcp = JSON.parse(readFileSync(join(tmp, ".mcp.json"), "utf-8"));
+    // Both servers present
+    expect(mcp.mcpServers.iterate).toBeDefined();
+    expect(mcp.mcpServers.otherServer).toBeDefined();
+    expect(mcp.mcpServers.iterate.env).toBeUndefined();
+  });
+
+  it("patches a stale .mcp.json that still pins ITERATE_DAEMON_PORT", () => {
+    writeFileSync(
+      join(tmp, ".mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          iterate: {
+            command: "npx",
+            args: ["iterate-ui-mcp"],
+            env: { ITERATE_DAEMON_PORT: "4000" },
+          },
+        },
+      })
+    );
+    runIterate(["init"]);
+    const mcp = JSON.parse(readFileSync(join(tmp, ".mcp.json"), "utf-8"));
+    // Stale env block gone; auto-discovery via lockfile takes over
+    expect(mcp.mcpServers.iterate.env).toBeUndefined();
+  });
+
+  it("leaves a correctly-configured .mcp.json untouched on re-init", () => {
+    runIterate(["init"]);
+    const firstMcp = readFileSync(join(tmp, ".mcp.json"), "utf-8");
+    runIterate(["init"]);
+    const secondMcp = readFileSync(join(tmp, ".mcp.json"), "utf-8");
+    expect(secondMcp).toBe(firstMcp);
+  });
+
   it("adds .iterate to .gitignore if missing", () => {
     runIterate(["init"]);
     const gi = readFileSync(join(tmp, ".gitignore"), "utf-8");

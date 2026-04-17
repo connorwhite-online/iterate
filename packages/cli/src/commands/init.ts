@@ -86,23 +86,43 @@ export const initCommand = new Command("init")
     mkdirSync(iterateDir, { recursive: true });
     saveConfig(cwd, config);
 
-    // Generate .mcp.json for Claude Code integration
+    // Generate / patch .mcp.json for Claude Code integration. The port is
+    // intentionally omitted — the MCP server auto-discovers via
+    // .iterate/daemon.lock, so the config stays correct when the daemon
+    // auto-picks a different port.
+    const iterateMcpEntry = {
+      command: "npx",
+      args: ["iterate-ui-mcp"],
+    };
     const mcpPath = join(cwd, ".mcp.json");
     if (!existsSync(mcpPath)) {
-      const mcpConfig = {
-        mcpServers: {
-          iterate: {
-            command: "npx",
-            args: ["iterate-ui-mcp"],
-            // Port omitted here — the MCP server auto-discovers via .iterate/daemon.lock,
-            // so it stays correct even when the daemon auto-picks a different port.
-          },
-        },
-      };
-      writeFileSync(mcpPath, JSON.stringify(mcpConfig, null, 2) + "\n");
+      writeFileSync(
+        mcpPath,
+        JSON.stringify({ mcpServers: { iterate: iterateMcpEntry } }, null, 2) + "\n"
+      );
       console.log("Created .mcp.json for Claude Code integration.");
     } else {
-      console.log("Note: .mcp.json already exists — add the iterate MCP server manually if needed.");
+      // Patch existing .mcp.json: add the iterate server if missing, or replace
+      // a stale entry (older versions pinned ITERATE_DAEMON_PORT: 4000, which
+      // breaks auto-port discovery).
+      try {
+        const raw = JSON.parse(readFileSync(mcpPath, "utf-8"));
+        const servers = (raw.mcpServers ?? {}) as Record<string, unknown>;
+        const existingIterate = servers.iterate as Record<string, unknown> | undefined;
+        const hasStaleEnv =
+          existingIterate && typeof existingIterate.env === "object" && existingIterate.env !== null;
+        if (!existingIterate || hasStaleEnv) {
+          raw.mcpServers = { ...servers, iterate: iterateMcpEntry };
+          writeFileSync(mcpPath, JSON.stringify(raw, null, 2) + "\n");
+          console.log(
+            existingIterate
+              ? "Patched .mcp.json: removed the hardcoded ITERATE_DAEMON_PORT (auto-discovery via lockfile)."
+              : "Patched .mcp.json: added the iterate MCP server entry."
+          );
+        }
+      } catch {
+        console.log("Note: .mcp.json exists but couldn't be parsed — add the iterate MCP server manually.");
+      }
     }
 
     // Register Claude Code plugin via .claude/settings.json
