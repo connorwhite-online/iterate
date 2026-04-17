@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, isAbsolute, resolve, relative } from "node:path";
 import {
   DEFAULT_CONFIG,
   normalizeConfig,
@@ -20,14 +20,39 @@ export const initCommand = new Command("init")
   .option("--base-path <path>", "App's basePath (Next) or base (Vite), e.g. /admin")
   .option("--port <port>", "Starting daemon port (auto-picks upward from here)")
   .action(async (opts) => {
-    const cwd = process.cwd();
+    const invocationCwd = process.cwd();
 
-    // Check we're in a git repo (supports monorepos where .git is in a parent)
+    // Resolve the git repo root so .iterate/config.json always lives at the
+    // top of the repo. Without this, running `iterate init` from a subdirectory
+    // (e.g. inside `apps/web`) would create a config the daemon never finds,
+    // because the daemon always runs from the git root.
+    let cwd: string;
     try {
-      execSync("git rev-parse --is-inside-work-tree", { cwd, stdio: "ignore" });
+      cwd = execSync("git rev-parse --show-toplevel", {
+        cwd: invocationCwd,
+        encoding: "utf-8",
+      }).trim();
     } catch {
       console.error("Error: not a git repository. Run `git init` first.");
       process.exit(1);
+    }
+
+    if (cwd !== invocationCwd) {
+      console.log(
+        `Note: running from a subdirectory. Writing config to the repo root: ${cwd}`
+      );
+      // Relocate --app-dir relative to the repo root so iterate's runtime
+      // (which always cwds to the repo root) can find the app.
+      if (opts.appDir) {
+        const absAppDir = isAbsolute(opts.appDir)
+          ? opts.appDir
+          : resolve(invocationCwd, opts.appDir);
+        const rewritten = relative(cwd, absAppDir);
+        if (rewritten !== opts.appDir) {
+          console.log(`Note: rewriting --app-dir "${opts.appDir}" → "${rewritten}" (relative to repo root).`);
+          opts.appDir = rewritten;
+        }
+      }
     }
 
     const iterateDir = join(cwd, ".iterate");

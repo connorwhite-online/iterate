@@ -239,6 +239,46 @@ describe("iterate init — failure modes", () => {
     }
   });
 
+  it("writes config to the repo root even when run from a subdirectory", () => {
+    mkdirSync(join(tmp, "apps", "web"), { recursive: true });
+    writeFileSync(
+      join(tmp, "apps", "web", "package.json"),
+      JSON.stringify({ scripts: { dev: "next dev" } })
+    );
+    // Run iterate from the subdirectory.
+    const subdir = join(tmp, "apps", "web");
+    const { status, stdout } = (() => {
+      const res = spawnSync("node", [CLI_BIN, "init"], {
+        cwd: subdir,
+        encoding: "utf-8",
+      });
+      return { status: res.status ?? 1, stdout: res.stdout ?? "" };
+    })();
+    expect(status).toBe(0);
+    expect(stdout).toMatch(/writing config to the repo root/i);
+    // Config lives at the repo root, not the subdirectory.
+    expect(existsSync(join(tmp, ".iterate", "config.json"))).toBe(true);
+    expect(existsSync(join(subdir, ".iterate", "config.json"))).toBe(false);
+  });
+
+  it("rewrites --app-dir relative to the repo root when run from a subdirectory", () => {
+    mkdirSync(join(tmp, "apps", "web"), { recursive: true });
+    writeFileSync(
+      join(tmp, "apps", "web", "package.json"),
+      JSON.stringify({ scripts: { dev: "next dev" } })
+    );
+    const subdir = join(tmp, "apps", "web");
+    // Run from the app subdir with --app-dir "." (meaning "here")
+    const res = spawnSync("node", [CLI_BIN, "init", "--app-name", "web", "--app-dir", "."], {
+      cwd: subdir,
+      encoding: "utf-8",
+    });
+    expect(res.status).toBe(0);
+    const config = JSON.parse(readFileSync(join(tmp, ".iterate", "config.json"), "utf-8"));
+    // The "." should have been rewritten to "apps/web"
+    expect(config.apps[0].appDir).toBe("apps/web");
+  });
+
   it("fails when --app-name contains invalid characters", () => {
     const { stdout, stderr, status } = runIterate(["init", "--app-name", "has spaces"]);
     expect(status).not.toBe(0);
