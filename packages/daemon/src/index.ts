@@ -790,11 +790,20 @@ function getShellHTML(): string {
     function renderTabs() {
       const bar = document.getElementById('tab-bar'); bar.innerHTML = '';
       const names = Object.keys(state.iterations);
+      // Only show app badges if the repo actually has multiple registered apps.
+      const configuredApps = (state.config && Array.isArray(state.config.apps)) ? state.config.apps : [];
+      const showAppBadges = configuredApps.length > 1;
       for (const name of names) {
         const info = state.iterations[name]; const tab = document.createElement('div');
         tab.className = 'tab' + (name === activeIteration ? ' active' : '');
         const dot = document.createElement('span'); dot.className = 'status-dot ' + (info.status || 'stopped');
         tab.appendChild(dot); tab.appendChild(document.createTextNode(name));
+        if (showAppBadges && info.appName) {
+          const appBadge = document.createElement('span');
+          appBadge.style.cssText = 'font-size:9px;color:#888;margin-left:4px;padding:1px 5px;border-radius:3px;background:#222;';
+          appBadge.textContent = info.appName;
+          tab.appendChild(appBadge);
+        }
         if (info.source === 'external') { const badge = document.createElement('span'); badge.style.cssText = 'font-size:9px;color:#666;margin-left:4px;'; badge.textContent = '(ext)'; tab.appendChild(badge); }
         if (info.commandPrompt) tab.title = info.commandPrompt;
         tab.addEventListener('click', () => switchIteration(name)); bar.appendChild(tab);
