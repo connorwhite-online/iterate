@@ -1,12 +1,10 @@
 import Fastify from "fastify";
 import fastifyWebsocket from "@fastify/websocket";
 import fastifyReplyFrom from "@fastify/reply-from";
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import {
   DEFAULT_CONFIG,
-  normalizeConfig,
   type IterateConfig,
   type IterationInfo,
 } from "iterate-ui-core";
@@ -16,6 +14,7 @@ import {
   removeLockfile,
   readLockfile,
   isDaemonAlive,
+  loadConfig,
 } from "iterate-ui-core/node";
 import { StateStore } from "./state/store.js";
 import { WorktreeManager } from "./worktree/manager.js";
@@ -37,11 +36,9 @@ export interface DaemonOptions {
 export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   const cwd = opts.cwd ?? process.env.ITERATE_CWD ?? process.cwd();
 
-  // Load config (normalized — legacy flat configs become apps[])
-  const configPath = join(cwd, ".iterate", "config.json");
-  const config: IterateConfig = existsSync(configPath)
-    ? normalizeConfig(JSON.parse(readFileSync(configPath, "utf-8")))
-    : { ...DEFAULT_CONFIG };
+  // Load config (normalizeConfig applied inside loadConfig — legacy flat
+  // configs become apps[])
+  const config: IterateConfig = loadConfig(cwd) ?? { ...DEFAULT_CONFIG };
 
   // Resolve daemon port:
   //   explicit opt.port → ITERATE_PORT env → auto-pick starting from config.daemonPort.

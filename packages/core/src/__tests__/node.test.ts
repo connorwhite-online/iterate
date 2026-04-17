@@ -77,6 +77,36 @@ describe("config file IO", () => {
     expect(loaded?.apps[0].devCommand).toBe("pnpm dev");
     expect(loaded?.apps[0].appDir).toBe("apps/web");
   });
+
+  it("loadConfig throws on malformed JSON (fail loud, don't silently lose user config)", () => {
+    mkdirSync(join(tmp, ".iterate"), { recursive: true });
+    writeFileSync(configPath(tmp), "{ this is not valid json ");
+    expect(() => loadConfig(tmp)).toThrow();
+  });
+
+  it("loadConfig handles an empty JSON object (fills in defaults via normalizeConfig)", () => {
+    mkdirSync(join(tmp, ".iterate"), { recursive: true });
+    writeFileSync(configPath(tmp), "{}");
+    const loaded = loadConfig(tmp);
+    expect(loaded?.apps).toEqual([]);
+    expect(loaded?.daemonPort).toBeGreaterThan(0);
+  });
+
+  it("loadConfig handles partial configs with missing optional fields", () => {
+    mkdirSync(join(tmp, ".iterate"), { recursive: true });
+    writeFileSync(
+      configPath(tmp),
+      JSON.stringify({
+        apps: [{ name: "web", devCommand: "next dev" }],
+      })
+    );
+    const loaded = loadConfig(tmp);
+    expect(loaded?.apps[0].name).toBe("web");
+    // Missing fields inherit from DEFAULT_CONFIG
+    expect(loaded?.basePort).toBeGreaterThan(0);
+    expect(loaded?.daemonPort).toBeGreaterThan(0);
+    expect(loaded?.maxIterations).toBeGreaterThan(0);
+  });
 });
 
 describe("lockfile", () => {

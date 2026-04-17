@@ -333,6 +333,56 @@ describe("buildDevCommand — additional coverage", () => {
   });
 });
 
+describe("buildChildEnv — safety + edge cases", () => {
+  it("passthrough for an unset var adds nothing (doesn't inject an empty string)", () => {
+    delete process.env.UNUSED_VAR_SHOULD_NOT_EXIST;
+    const app: AppConfig = { name: "x", devCommand: "y" };
+    const env = buildChildEnv(
+      "/tmp",
+      { ...baseConfig, envPassthrough: ["UNUSED_VAR_SHOULD_NOT_EXIST"] },
+      app,
+      {}
+    );
+    // Not present (vs. present with "")
+    expect("UNUSED_VAR_SHOULD_NOT_EXIST" in env).toBe(false);
+  });
+
+  it("envFiles are evaluated in order (later wins for the same key)", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "iterate-env-order-"));
+    try {
+      writeFileSync(join(tmp, "1.env"), "K=first\n");
+      writeFileSync(join(tmp, "2.env"), "K=second\n");
+      writeFileSync(join(tmp, "3.env"), "K=third\n");
+      const env = buildChildEnv(
+        tmp,
+        baseConfig,
+        { name: "x", devCommand: "y", envFiles: ["1.env", "2.env", "3.env"] },
+        {}
+      );
+      expect(env.K).toBe("third");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("doesn't explode on malformed envFiles — skips unparseable lines", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "iterate-env-bad-"));
+    try {
+      writeFileSync(join(tmp, "bad.env"), "not an assignment\nGOOD=value\n=also bad\n123BAD=x\n");
+      const env = buildChildEnv(
+        tmp,
+        baseConfig,
+        { name: "x", devCommand: "y", envFiles: ["bad.env"] },
+        {}
+      );
+      expect(env.GOOD).toBe("value");
+      expect(Object.keys(env)).not.toContain("not an assignment");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("buildChildEnv — precedence matrix", () => {
   it("file values come through when nothing else overrides", () => {
     const tmp = mkdtempSync(join(tmpdir(), "iterate-env-prec-"));

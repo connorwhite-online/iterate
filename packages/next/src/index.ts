@@ -95,13 +95,13 @@ async function resolveDaemonPort(repoRoot: string, startingFrom: number, overrid
   if (override && Number.isFinite(override)) return override;
   if (!portResolution) {
     portResolution = (async () => {
+      // Live daemon already running for this repo? Reuse its port.
+      // (A stale lockfile is silently ignored — the daemon itself cleans it
+      // up when it next starts.)
       const lock = readLockfile(repoRoot);
       if (lock && isDaemonAlive(lock)) return lock.port;
-      if (lock) {
-        // Stale lockfile — daemon crashed or was killed. Fall through to pick a new port.
-      }
-      // If the configured port is already listening, assume it's our daemon from a
-      // concurrent plugin invocation and reuse it. Otherwise auto-pick upward.
+      // If the starting port is already listening, assume it's our daemon from
+      // a concurrent plugin invocation and reuse it. Otherwise auto-pick upward.
       if (await isPortInUse(startingFrom)) return startingFrom;
       return await findFreePort(startingFrom);
     })();
