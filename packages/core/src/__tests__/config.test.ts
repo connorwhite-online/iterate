@@ -58,6 +58,31 @@ describe("normalizeConfig", () => {
     expect(out.maxIterations).toBe(DEFAULT_CONFIG.maxIterations);
   });
 
+  it("migrates legacy buildCommand into the synthesized app entry", () => {
+    const raw = {
+      devCommand: "pnpm run dev",
+      appDir: "apps/web",
+      buildCommand: "pnpm run build:shared",
+      packageManager: "pnpm" as const,
+    };
+    const out = normalizeConfig(raw);
+    expect(out.apps[0]).toMatchObject({
+      name: "app",
+      devCommand: "pnpm run dev",
+      appDir: "apps/web",
+      buildCommand: "pnpm run build:shared",
+    });
+  });
+
+  it("omits legacy fields from the synthesized app entry when they're absent", () => {
+    const raw = { devCommand: "vite" };
+    const out = normalizeConfig(raw);
+    expect(out.apps[0]).toEqual({ name: "app", devCommand: "vite" });
+    // appDir and buildCommand should NOT appear as `undefined` keys
+    expect("appDir" in out.apps[0]).toBe(false);
+    expect("buildCommand" in out.apps[0]).toBe(false);
+  });
+
   it("prefers apps[] over legacy fields when both are present", () => {
     const raw = {
       devCommand: "LEGACY",

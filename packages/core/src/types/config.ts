@@ -92,16 +92,14 @@ export function normalizeConfig(raw: Partial<IterateConfig> & Record<string, unk
   };
 
   // Legacy migration: if there are no apps but a top-level devCommand exists,
-  // synthesize a single app entry from the legacy fields.
+  // synthesize a single app entry from the legacy fields. Omit optional keys
+  // entirely when absent rather than setting them to undefined — keeps the
+  // round-tripped JSON clean and avoids surprising `"appDir" in app` checks.
   if (base.apps.length === 0 && typeof raw.devCommand === "string" && raw.devCommand.length > 0) {
-    base.apps = [
-      {
-        name: "app",
-        devCommand: raw.devCommand,
-        appDir: typeof raw.appDir === "string" ? raw.appDir : undefined,
-        buildCommand: typeof raw.buildCommand === "string" ? raw.buildCommand : undefined,
-      },
-    ];
+    const legacyApp: AppConfig = { name: "app", devCommand: raw.devCommand };
+    if (typeof raw.appDir === "string") legacyApp.appDir = raw.appDir;
+    if (typeof raw.buildCommand === "string") legacyApp.buildCommand = raw.buildCommand;
+    base.apps = [legacyApp];
   }
 
   return base;
