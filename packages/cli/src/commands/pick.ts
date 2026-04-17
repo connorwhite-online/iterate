@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { loadConfig, resolveDaemonPort } from "iterate-ui-core/node";
+import { fetchWithTimeout, parseJsonSafe } from "../fetch-with-timeout.js";
 
 export const pickCommand = new Command("pick")
   .description(
@@ -22,24 +23,28 @@ export const pickCommand = new Command("pick")
     const port = resolveDaemonPort(cwd, config);
 
     try {
-      const res = await fetch(`http://localhost:${port}/api/iterations/pick`, {
+      // Picking triggers a merge + worktree cleanup; can take a bit on large repos.
+      const res = await fetchWithTimeout(`http://localhost:${port}/api/iterations/pick`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, strategy: opts.strategy }),
+        timeoutMs: 60_000,
       });
 
       if (!res.ok) {
-        const err = (await res.json().catch(() => ({ message: "Unknown error" }))) as { message?: string };
+        const err = (await parseJsonSafe<{ message?: string }>(res)) ?? { message: "Unknown error" };
         console.error(`Error: ${err.message ?? "Unknown error"}`);
         process.exit(1);
       }
 
       console.log(`Picked iteration "${name}".`);
       console.log("  Branch merged to base, other iterations removed.");
-    } catch {
-      console.error(
-        "Error: cannot connect to iterate daemon. Run `iterate serve` first."
-      );
+    } catch (err) {
+      const timedOut = (err as Error).name === "AbortError";
+      const prefix = timedOut
+        ? `Error: request to iterate daemon on port ${port} timed out.`
+        : `Error: cannot connect to iterate daemon on port ${port}.`;
+      console.error(`${prefix} Run \`iterate serve\` first.`);
       process.exit(1);
     }
   });

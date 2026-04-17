@@ -195,6 +195,16 @@ describe("port probing", () => {
     expect(free).toBeGreaterThanOrEqual(busyPort);
     expect(free).not.toBe(busyPort);
   });
+
+  it("findFreePort throws when the range is exhausted", async () => {
+    // Zero attempts guarantees exhaustion without occupying any real ports.
+    await expect(findFreePort(busyPort, 0)).rejects.toThrow(/No free port in range/);
+  });
+
+  it("findFreePort stops climbing past 65535", async () => {
+    // Even with many attempts, don't probe beyond valid port range.
+    await expect(findFreePort(65535, 10)).resolves.toBeLessThanOrEqual(65535);
+  });
 });
 
 describe("parseDotenv", () => {

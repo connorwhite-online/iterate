@@ -7,7 +7,7 @@ The user has submitted UI feedback changes via the iterate overlay. Your job is 
 
 ## Tools
 
-Use the MCP tools below. If MCP tools are not available (e.g. the server isn't connected), fall back to the daemon's REST API at `http://localhost:4000`:
+Use the MCP tools below. If MCP tools are not available (e.g. the server isn't connected), fall back to the daemon's REST API at `http://localhost:<port>`, where `<port>` is read from `.iterate/daemon.lock` in the repo root (JSON with a `port` field):
 
 | MCP tool                          | REST equivalent                                  |
 |-----------------------------------|--------------------------------------------------|

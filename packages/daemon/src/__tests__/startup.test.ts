@@ -9,6 +9,7 @@ import {
   writeLockfile,
   removeLockfile,
   saveConfig,
+  type DaemonLockfile,
 } from "iterate-ui-core/node";
 
 /**
@@ -98,7 +99,7 @@ async function waitForLockfile(
   cwd: string,
   timeoutMs = 8000,
   expectedPid?: number
-): Promise<{ port: number; pid: number }> {
+): Promise<DaemonLockfile> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const lock = readLockfile(cwd);

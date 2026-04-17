@@ -26,7 +26,7 @@ describe("WebSocketHub", () => {
 
   beforeEach(() => {
     uuidCounter = 0;
-    vi.spyOn(crypto, "randomUUID").mockImplementation(() => `uuid-${++uuidCounter}`);
+    vi.spyOn(crypto, "randomUUID").mockImplementation(() => `uuid-${++uuidCounter}` as `${string}-${string}-${string}-${string}-${string}`);
     vi.spyOn(Date, "now").mockReturnValue(1700000000000);
   });
 

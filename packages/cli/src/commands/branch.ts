@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { loadConfig, resolveDaemonPort } from "iterate-ui-core/node";
+import { fetchWithTimeout, parseJsonSafe } from "../fetch-with-timeout.js";
 
 export const branchCommand = new Command("branch")
   .description("Create a new iteration from the current branch")
@@ -29,28 +30,39 @@ export const branchCommand = new Command("branch")
     const daemonUrl = `http://localhost:${port}`;
 
     try {
-      const res = await fetch(`${daemonUrl}/api/iterations`, {
+      // Creating an iteration triggers pnpm install + dev server startup,
+      // which can easily take a minute in a big monorepo. Use a generous
+      // timeout rather than the default.
+      const res = await fetchWithTimeout(`${daemonUrl}/api/iterations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, baseBranch: opts.from, appName: opts.app }),
+        timeoutMs: 300_000,
       });
 
       if (!res.ok) {
-        const err = (await res.json().catch(() => ({ message: "Unknown error" }))) as { message?: string };
+        const err = (await parseJsonSafe<{ message?: string }>(res)) ?? { message: "Unknown error" };
         console.error(`Error: ${err.message ?? "Unknown error"}`);
         process.exit(1);
       }
 
-      const iteration = await res.json();
+      const iteration = (await parseJsonSafe<{
+        branch?: string;
+        appName?: string;
+        port?: number;
+        worktreePath?: string;
+      }>(res)) ?? {};
       console.log(`Created iteration "${name}":`);
-      console.log(`  Branch: ${iteration.branch}`);
+      console.log(`  Branch: ${iteration.branch ?? "(unknown)"}`);
       console.log(`  App: ${iteration.appName ?? "(default)"}`);
-      console.log(`  Port: ${iteration.port}`);
-      console.log(`  Worktree: ${iteration.worktreePath}`);
-    } catch {
-      console.error(
-        "Error: cannot connect to iterate daemon. Run `iterate serve` first."
-      );
+      console.log(`  Port: ${iteration.port ?? "(pending)"}`);
+      console.log(`  Worktree: ${iteration.worktreePath ?? "(pending)"}`);
+    } catch (err) {
+      const timedOut = (err as Error).name === "AbortError";
+      const prefix = timedOut
+        ? `Error: request to iterate daemon on port ${port} timed out.`
+        : `Error: cannot connect to iterate daemon on port ${port}.`;
+      console.error(`${prefix} Run \`iterate serve\` first.`);
       process.exit(1);
     }
   });

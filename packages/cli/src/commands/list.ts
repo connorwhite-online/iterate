@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import type { IterationInfo } from "iterate-ui-core";
 import { loadConfig, resolveDaemonPort } from "iterate-ui-core/node";
+import { fetchWithTimeout, parseJsonSafe } from "../fetch-with-timeout.js";
 
 export const listCommand = new Command("list")
   .description("List all active iterations")
@@ -14,8 +15,8 @@ export const listCommand = new Command("list")
     const port = resolveDaemonPort(cwd, config);
 
     try {
-      const res = await fetch(`http://localhost:${port}/api/iterations`);
-      const iterations: Record<string, IterationInfo> = await res.json();
+      const res = await fetchWithTimeout(`http://localhost:${port}/api/iterations`);
+      const iterations = (await parseJsonSafe<Record<string, IterationInfo>>(res)) ?? {};
       const entries = Object.values(iterations);
 
       if (entries.length === 0) {
@@ -32,10 +33,12 @@ export const listCommand = new Command("list")
           `  ${status} ${it.name} (branch: ${it.branch},${app} port: ${it.port}, status: ${it.status})`
         );
       }
-    } catch {
-      console.error(
-        "Error: cannot connect to iterate daemon. Run `iterate serve` first."
-      );
+    } catch (err) {
+      const timedOut = (err as Error).name === "AbortError";
+      const prefix = timedOut
+        ? `Error: request to iterate daemon on port ${port} timed out.`
+        : `Error: cannot connect to iterate daemon on port ${port}.`;
+      console.error(`${prefix} Run \`iterate serve\` first.`);
       process.exit(1);
     }
   });

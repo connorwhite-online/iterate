@@ -85,9 +85,12 @@ function StandaloneOverlay() {
   const isDaemonShell = typeof document !== "undefined" && !!document.getElementById("viewport");
   const isEmbedded = typeof window !== "undefined" && window.self !== window.top;
 
-  // In framework plugin mode, connect directly to the daemon port
+  // In framework plugin mode, connect directly to the daemon port. The
+  // framework plugin injects the resolved port into __iterate_shell__; the
+  // 47100 fallback is only reached if the overlay is loaded standalone
+  // without a shell and matches iterate's default starting port.
   const shell = (window as any).__iterate_shell__;
-  const daemonPort = shell?.daemonPort ?? 4000;
+  const daemonPort = shell?.daemonPort ?? 47100;
   const wsUrl = !isDaemonShell && shell?.daemonPort
     ? `ws://${window.location.hostname}:${shell.daemonPort}/ws`
     : undefined;

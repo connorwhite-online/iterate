@@ -20,14 +20,24 @@ const baseConfig: IterateConfig = {
   idleTimeout: 0,
 };
 
+type StartArgs = [
+  name: string,
+  cwd: string,
+  command: string,
+  port: number,
+  env: Record<string, string>,
+];
+
 function mockProcessManager() {
+  // Explicit parameter types so tests can read `.mock.calls[0][i]` without
+  // hitting "tuple has no element at index i".
   return {
-    allocatePort: vi.fn(async () => 3101),
-    start: vi.fn(async () => ({ pid: 99999 })),
-    waitForReady: vi.fn(async () => {}),
-    getRecentOutput: vi.fn(() => []),
-    stop: vi.fn(async () => {}),
-    stopAll: vi.fn(async () => {}),
+    allocatePort: vi.fn(async (): Promise<number> => 3101),
+    start: vi.fn(async (..._args: StartArgs): Promise<{ pid: number }> => ({ pid: 99999 })),
+    waitForReady: vi.fn(async (_name: string, _port: number): Promise<void> => {}),
+    getRecentOutput: vi.fn((_name: string): string[] => []),
+    stop: vi.fn(async (_name: string): Promise<void> => {}),
+    stopAll: vi.fn(async (): Promise<void> => {}),
   };
 }
 

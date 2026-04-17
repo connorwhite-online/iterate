@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { loadConfig, resolveDaemonPort, removeLockfile } from "iterate-ui-core/node";
+import { fetchWithTimeout } from "../fetch-with-timeout.js";
 
 export const stopCommand = new Command("stop")
   .description("Stop the iterate daemon and all dev servers")
@@ -13,7 +14,10 @@ export const stopCommand = new Command("stop")
     const port = resolveDaemonPort(cwd, config);
 
     try {
-      const res = await fetch(`http://localhost:${port}/api/shutdown`, { method: "POST" });
+      const res = await fetchWithTimeout(`http://localhost:${port}/api/shutdown`, {
+        method: "POST",
+        timeoutMs: 5000,
+      });
 
       if (res.ok) {
         console.log("iterate daemon stopped. All dev servers terminated.");

@@ -21,7 +21,11 @@ import { useEffect } from "react";
  * ```
  */
 export function Iterate({ port }: { port?: number } = {}) {
-  const resolvedPort = port ?? (Number(process.env.NEXT_PUBLIC_ITERATE_DAEMON_PORT) || 4000);
+  // Resolution order: explicit prop → NEXT_PUBLIC_ITERATE_DAEMON_PORT injected
+  // by the withIterate wrapper → 47100 default (matches iterate's default
+  // starting daemon port).
+  const resolvedPort = port ?? (Number(process.env.NEXT_PUBLIC_ITERATE_DAEMON_PORT) || 47100);
+  const basePath = process.env.NEXT_PUBLIC_ITERATE_BASE_PATH ?? "";
 
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
@@ -31,16 +35,19 @@ export function Iterate({ port }: { port?: number } = {}) {
         activeTool: "browse",
         activeIteration: process.env.NEXT_PUBLIC_ITERATE_ITERATION_NAME ?? "__original__",
         daemonPort: resolvedPort,
+        basePath,
       };
     }
 
     if (!document.getElementById("iterate-overlay-script")) {
       const script = document.createElement("script");
       script.id = "iterate-overlay-script";
-      script.src = "/__iterate__/overlay.js";
+      // Honor basePath so the overlay script resolves under subpath-mounted
+      // apps (e.g. basePath: "/admin").
+      script.src = `${basePath}/__iterate__/overlay.js`;
       document.body.appendChild(script);
     }
-  }, [resolvedPort]);
+  }, [resolvedPort, basePath]);
 
   return null;
 }
