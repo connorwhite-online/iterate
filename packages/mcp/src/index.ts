@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { DaemonClient } from "./connection/daemon-client.js";
 import { formatBatchPrompt } from "iterate-ui-core";
+import { formatIterationList } from "./format.js";
 import { loadConfig, resolveDaemonPort } from "iterate-ui-core/node";
 
 const CWD = process.env.ITERATE_CWD ?? process.cwd();
@@ -78,28 +79,7 @@ async function main() {
     "List all active iterate iterations (worktrees with dev servers)",
     {},
     async () => {
-      const iterations = client.getIterations();
-      const entries = Object.values(iterations);
-
-      if (entries.length === 0) {
-        return {
-          content: [
-            { type: "text", text: "No active iterations." },
-          ],
-        };
-      }
-
-      const text = entries
-        .map((it) => {
-          const app = it.appName ? `, app: ${it.appName}` : "";
-          return (
-            `- **${it.name}** (branch: \`${it.branch}\`${app}, port: ${it.port}, status: ${it.status})` +
-            (it.commandPrompt ? `\n  Command: "${it.commandPrompt}"` : "") +
-            (it.commandId ? ` [command: ${it.commandId}]` : "")
-          );
-        })
-        .join("\n");
-
+      const text = formatIterationList(Object.values(client.getIterations()));
       return { content: [{ type: "text", text }] };
     }
   );
