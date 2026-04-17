@@ -237,17 +237,27 @@ export function checkApp(
       app.devCommand.includes(`$${app.portEnvVar}`) ||
       app.devCommand.includes(`\${${app.portEnvVar}}`) ||
       app.devCommand.includes(`%${app.portEnvVar}%`);
-    if (!referenced) {
+    // Known env-loader wrappers read the var from process.env, so a missing
+    // inline reference is expected behavior — not worth warning about.
+    const knownWrapperRegex = /\b(?:env-cmd|env-cmd\.ts|dotenv(?:-cli)?|doppler run|op run|direnv)\b/;
+    const isKnownWrapper = knownWrapperRegex.test(app.devCommand);
+
+    if (referenced) {
+      results.push({
+        status: "ok",
+        label: `  portEnvVar "${app.portEnvVar}" is set and referenced in devCommand`,
+      });
+    } else if (isKnownWrapper) {
+      results.push({
+        status: "ok",
+        label: `  portEnvVar "${app.portEnvVar}" set (env-loader wrapper picks it up)`,
+      });
+    } else {
       results.push({
         status: "warn",
         label: `  portEnvVar "${app.portEnvVar}" not referenced inline in devCommand`,
         detail:
           "Make sure your dev-script wrapper reads it from the environment (env-cmd/dotenv-cli/direnv are fine).",
-      });
-    } else {
-      results.push({
-        status: "ok",
-        label: `  portEnvVar "${app.portEnvVar}" is set and referenced in devCommand`,
       });
     }
   }

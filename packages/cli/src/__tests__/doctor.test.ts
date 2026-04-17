@@ -198,7 +198,10 @@ describe("checkApp — per-app checks", () => {
     ).toBe(true);
   });
 
-  it("warns when portEnvVar is set but not referenced inline in devCommand", () => {
+  it("does not warn when portEnvVar is not inline but the command uses a known env-loader wrapper", () => {
+    // env-cmd, dotenv-cli, doppler run, op run, direnv all pick up vars
+    // from process.env without inline references. Warning here would be
+    // noise (we'd be asking the user to break their wrapper).
     const results: DoctorCheck[] = [];
     writeFileSync(join(tmp, "package.json"), "{}");
     checkApp(
@@ -206,7 +209,27 @@ describe("checkApp — per-app checks", () => {
       baseConfig,
       {
         name: "x",
-        devCommand: "env-cmd --dev -- pnpm next dev", // no $FOO substitution
+        devCommand: "env-cmd --dev -- pnpm next dev",
+        portEnvVar: "CUSTOM_PORT",
+      },
+      results,
+      () => true
+    );
+    // "not referenced" warn is suppressed; an "OK (wrapper picks it up)" row appears
+    const portRow = results.find((r) => r.label.includes("CUSTOM_PORT"));
+    expect(portRow?.status).toBe("ok");
+    expect(portRow?.label).toMatch(/wrapper/i);
+  });
+
+  it("warns when portEnvVar is not inline and the command has no known wrapper", () => {
+    const results: DoctorCheck[] = [];
+    writeFileSync(join(tmp, "package.json"), "{}");
+    checkApp(
+      tmp,
+      baseConfig,
+      {
+        name: "x",
+        devCommand: "custom-script.sh dev", // unknown wrapper
         portEnvVar: "CUSTOM_PORT",
       },
       results,
@@ -217,6 +240,24 @@ describe("checkApp — per-app checks", () => {
         (r) => r.status === "warn" && r.label.includes("CUSTOM_PORT") && r.label.includes("not referenced")
       )
     ).toBe(true);
+  });
+
+  it("recognizes doppler run as a known wrapper", () => {
+    const results: DoctorCheck[] = [];
+    writeFileSync(join(tmp, "package.json"), "{}");
+    checkApp(
+      tmp,
+      baseConfig,
+      {
+        name: "x",
+        devCommand: "doppler run -- next dev",
+        portEnvVar: "MY_PORT",
+      },
+      results,
+      () => true
+    );
+    const portRow = results.find((r) => r.label.includes("MY_PORT"));
+    expect(portRow?.status).toBe("ok");
   });
 
   it("warns when devCommand hardcodes a numeric -p port and portEnvVar isn't set", () => {
