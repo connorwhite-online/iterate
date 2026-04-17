@@ -34,6 +34,53 @@ describe("WebSocketHub", () => {
     vi.restoreAllMocks();
   });
 
+  describe("state broadcasts with appName", () => {
+    it("state:sync includes the appName field on iterations", () => {
+      const { store } = createHub();
+      store.setIteration("v1", {
+        name: "v1",
+        branch: "iterate/v1",
+        worktreePath: "/tmp/v1",
+        port: 3100,
+        pid: null,
+        status: "ready",
+        createdAt: "2025-01-01",
+        appName: "brand-admin",
+      });
+
+      const state = store.getState();
+      expect(state.iterations.v1.appName).toBe("brand-admin");
+    });
+
+    it("getIterations returns iterations with appName intact", () => {
+      const { store } = createHub();
+      store.setIteration("a", {
+        name: "a",
+        branch: "iterate/a",
+        worktreePath: "/tmp/a",
+        port: 3101,
+        pid: null,
+        status: "ready",
+        createdAt: "2025-01-01",
+        appName: "web",
+      });
+      store.setIteration("b", {
+        name: "b",
+        branch: "iterate/b",
+        worktreePath: "/tmp/b",
+        port: 3102,
+        pid: null,
+        status: "ready",
+        createdAt: "2025-01-01",
+        appName: "admin",
+      });
+
+      const all = store.getIterations();
+      expect(all.a.appName).toBe("web");
+      expect(all.b.appName).toBe("admin");
+    });
+  });
+
   describe("change:create", () => {
     it("stores change with generated id, timestamp, and queued status", () => {
       const { hub, store } = createHub();

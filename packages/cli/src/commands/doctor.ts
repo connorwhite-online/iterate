@@ -151,6 +151,27 @@ export function checkApp(
       ? app.appDir
       : resolve(cwd, app.appDir)
     : cwd;
+
+  // Flag appDir paths that resolve outside the repo — a sign of a typo or
+  // a malicious/unexpected config. Absolute paths are allowed but worth
+  // calling out since they bypass worktree isolation.
+  if (app.appDir) {
+    if (isAbsolute(app.appDir)) {
+      results.push({
+        status: "warn",
+        label: `  appDir "${app.appDir}" is absolute — iteration worktrees won't include it`,
+        detail: "Absolute appDir paths always point at the same files regardless of which worktree is active, which breaks iteration isolation. Prefer a path relative to the repo root.",
+      });
+    } else if (!appRoot.startsWith(cwd)) {
+      results.push({
+        status: "fail",
+        label: `  appDir "${app.appDir}" resolves outside the repo (${appRoot})`,
+        detail: "Paths with \"..\" segments that escape the repo root aren't supported — iterate can't create a worktree for them.",
+      });
+      return;
+    }
+  }
+
   if (!existsSync(appRoot)) {
     results.push({
       status: "fail",

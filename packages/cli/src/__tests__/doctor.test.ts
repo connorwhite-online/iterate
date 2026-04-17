@@ -124,6 +124,34 @@ describe("runDoctor — top-level flow", () => {
 });
 
 describe("checkApp — per-app checks", () => {
+  it("warns when appDir is an absolute path (breaks worktree isolation)", () => {
+    const results: DoctorCheck[] = [];
+    checkApp(
+      tmp,
+      baseConfig,
+      { name: "abs", devCommand: "next dev", appDir: "/etc" },
+      results,
+      () => true
+    );
+    expect(
+      results.some((r) => r.status === "warn" && r.label.includes("is absolute"))
+    ).toBe(true);
+  });
+
+  it("fails when appDir escapes the repo via ..", () => {
+    const results: DoctorCheck[] = [];
+    checkApp(
+      tmp,
+      baseConfig,
+      { name: "escape", devCommand: "next dev", appDir: "../../etc" },
+      results,
+      () => true
+    );
+    expect(
+      results.some((r) => r.status === "fail" && r.label.includes("outside the repo"))
+    ).toBe(true);
+  });
+
   it("fails when appDir does not exist", () => {
     saveConfig(tmp, baseConfig);
     const results: DoctorCheck[] = [];

@@ -158,3 +158,39 @@ describe("GET /api/iterations", () => {
     expect(json).toEqual({});
   });
 });
+
+describe("POST /api/command — multi-app validation", () => {
+  it("rejects with appName guidance when multiple apps are configured and none supplied", async () => {
+    await bootDaemonWith([
+      { name: "web", devCommand: "next dev" },
+      { name: "admin", devCommand: "next dev" },
+    ]);
+    const { status, json } = await post("/api/command", {
+      command: "iterate",
+      prompt: "do a thing",
+      count: 1,
+    });
+    expect(status).toBe(400);
+    expect(json.message).toMatch(/appName/);
+  });
+
+  it("rejects unknown appName", async () => {
+    await bootDaemonWith([{ name: "web", devCommand: "next dev" }]);
+    const { status, json } = await post("/api/command", {
+      command: "iterate",
+      prompt: "x",
+      appName: "nope",
+    });
+    expect(status).toBe(400);
+    expect(json.message).toMatch(/not registered/i);
+  });
+
+  it("rejects unknown command", async () => {
+    await bootDaemonWith([{ name: "web", devCommand: "next dev" }]);
+    const { status, json } = await post("/api/command", {
+      command: "bogus",
+    });
+    expect(status).toBe(400);
+    expect(json.message).toMatch(/unknown command/i);
+  });
+});
