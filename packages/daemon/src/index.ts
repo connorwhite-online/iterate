@@ -692,8 +692,10 @@ async function discoverAndRegisterWorktrees(
   }
 }
 
-/** Shell HTML for the control UI with command bar and updated toolbar. */
-function getShellHTML(): string {
+/** Shell HTML for the control UI with command bar and updated toolbar.
+ *  Exported only for tests (see __tests__/shell-html.test.ts) — regular
+ *  callers should use the GET "/" route. */
+export function getShellHTML(): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -814,7 +816,7 @@ function getShellHTML(): string {
         if (info.status && info.status !== 'ready') tooltipParts.push('Status: ' + info.status);
         if (info.commandPrompt) tooltipParts.push('Prompt: ' + info.commandPrompt);
         if (info.error) tooltipParts.push('Error: ' + info.error);
-        if (tooltipParts.length > 0) tab.title = tooltipParts.join('\n');
+        if (tooltipParts.length > 0) tab.title = tooltipParts.join('\\n');
         // Close (×) button. Calls DELETE /api/iterations/<name>. We stop
         // propagation so clicking × doesn't ALSO switch to that tab.
         const close = document.createElement('span');
