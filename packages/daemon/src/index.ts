@@ -704,15 +704,22 @@ function getShellHTML(): string {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #fafafa; height: 100vh; display: flex; flex-direction: column; }
     #tab-bar { display: flex; gap: 2px; padding: 8px 12px; background: #141414; border-bottom: 1px solid #2a2a2a; align-items: center; }
-    .tab { padding: 6px 16px; border-radius: 6px 6px 0 0; background: #1a1a1a; color: #888; cursor: pointer; font-size: 13px; border: 1px solid transparent; transition: all 0.15s; user-select: none; }
+    .tab { position: relative; padding: 6px 28px 6px 16px; border-radius: 6px 6px 0 0; background: #1a1a1a; color: #888; cursor: pointer; font-size: 13px; border: 1px solid transparent; transition: all 0.15s; user-select: none; display: flex; align-items: center; gap: 2px; }
     .tab:hover { color: #ccc; background: #222; }
+    .tab:hover .tab-close { opacity: 1; }
     .tab.active { color: #fff; background: #0a0a0a; border-color: #2a2a2a; border-bottom-color: #0a0a0a; }
-    .tab.add { color: #555; font-size: 16px; }
-    .tab .status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; }
+    .tab.active .tab-close { opacity: 0.6; }
+    .tab.add { color: #555; font-size: 16px; padding: 6px 16px; }
+    .tab .status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; flex-shrink: 0; }
     .tab .status-dot.ready { background: #22c55e; }
-    .tab .status-dot.creating, .tab .status-dot.installing, .tab .status-dot.starting { background: #eab308; }
+    .tab .status-dot.creating, .tab .status-dot.installing, .tab .status-dot.starting { background: #eab308; animation: pulse 1.5s ease-in-out infinite; }
     .tab .status-dot.error { background: #ef4444; }
     .tab .status-dot.stopped { background: #666; }
+    .tab .status-label { font-size: 10px; color: #666; margin-left: 6px; font-style: italic; }
+    .tab.active .status-label { color: #888; }
+    .tab .tab-close { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; border-radius: 3px; color: #888; opacity: 0; transition: opacity 0.15s, background 0.15s; font-size: 16px; line-height: 1; }
+    .tab .tab-close:hover { background: #2a2a2a; color: #fff; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
     #command-bar { display: flex; align-items: center; padding: 6px 12px; background: #111; border-bottom: 1px solid #2a2a2a; }
     #command-input { flex: 1; background: #0a0a1a; border: 1px solid #2a2a4a; border-radius: 6px; color: #fafafa; padding: 6px 12px; font-size: 13px; font-family: monospace; outline: none; }
     #command-input:focus { border-color: #2563eb; }
@@ -723,10 +730,6 @@ function getShellHTML(): string {
     .tool-btn.active { color: #fff; background: #2563eb; border-color: #2563eb; }
     #viewport { flex: 1; position: relative; overflow: hidden; }
     #viewport iframe { width: 100%; height: 100%; border: none; }
-    .iframe-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #0a0a0a; color: #555; font-size: 14px; z-index: 10; transition: opacity 0.3s; }
-    .iframe-loading.hidden { opacity: 0; pointer-events: none; }
-    .iframe-loading .spinner { width: 20px; height: 20px; border: 2px solid #333; border-top-color: #22c55e; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 10px; }
-    @keyframes spin { to { transform: rotate(360deg); } }
     .empty-state { display: flex; align-items: center; justify-content: center; height: 100%; color: #555; font-size: 14px; flex-direction: column; gap: 8px; }
     .empty-state code { background: #1a1a1a; padding: 4px 8px; border-radius: 4px; font-size: 13px; }
     #status-bar { padding: 4px 12px; background: #111; border-top: 1px solid #2a2a2a; font-size: 11px; color: #555; display: flex; justify-content: space-between; }
@@ -805,7 +808,35 @@ function getShellHTML(): string {
           tab.appendChild(appBadge);
         }
         if (info.source === 'external') { const badge = document.createElement('span'); badge.style.cssText = 'font-size:9px;color:#666;margin-left:4px;'; badge.textContent = '(ext)'; tab.appendChild(badge); }
-        if (info.commandPrompt) tab.title = info.commandPrompt;
+        // Tiny italic status label next to the name for non-ready iterations —
+        // lets users distinguish "installing" from "starting" at a glance
+        // without having to click the tab.
+        if (info.status && info.status !== 'ready') {
+          const statusLabel = document.createElement('span');
+          statusLabel.className = 'status-label';
+          statusLabel.textContent = info.status;
+          tab.appendChild(statusLabel);
+        }
+        // Tooltip combines the /iterate prompt (if any) and the error message
+        // (if any), so hovering a red tab tells you both what was attempted
+        // and why it failed.
+        const tooltipParts = [info.commandPrompt, info.error].filter(Boolean);
+        if (tooltipParts.length > 0) tab.title = tooltipParts.join(' — ');
+        // Close (×) button. Calls DELETE /api/iterations/<name>. We stop
+        // propagation so clicking × doesn't ALSO switch to that tab.
+        const close = document.createElement('span');
+        close.className = 'tab-close';
+        close.textContent = '×';
+        close.title = 'Remove this iteration';
+        close.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (!confirm('Remove iteration "' + name + '"? This deletes the worktree and branch.')) return;
+          try {
+            const res = await fetch('/api/iterations/' + encodeURIComponent(name), { method: 'DELETE' });
+            if (!res.ok) { const err = await res.json().catch(() => ({})); alert('Remove failed: ' + (err.message || res.status)); }
+          } catch (err) { alert('Remove failed: ' + err.message); }
+        });
+        tab.appendChild(close);
         tab.addEventListener('click', () => switchIteration(name)); bar.appendChild(tab);
       }
       const addTab = document.createElement('div'); addTab.className = 'tab add'; addTab.textContent = '+';
@@ -822,7 +853,7 @@ function getShellHTML(): string {
       // Hide all iframes, show only the active one
       viewport.querySelectorAll('iframe').forEach(f => f.style.display = 'none');
       // Remove stale overlays and empty states
-      viewport.querySelectorAll('.iframe-loading, .empty-state').forEach(el => el.remove());
+      viewport.querySelectorAll('.empty-state').forEach(el => el.remove());
       if (info.status === 'ready') {
         let iframe = iframeCache[activeIteration];
         if (!iframe) { iframe = document.createElement('iframe'); iframe.src = '/' + encodeURIComponent(activeIteration) + '/'; iframe.dataset.iteration = activeIteration; viewport.appendChild(iframe); iframeCache[activeIteration] = iframe; }
