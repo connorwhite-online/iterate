@@ -715,8 +715,6 @@ function getShellHTML(): string {
     .tab .status-dot.creating, .tab .status-dot.installing, .tab .status-dot.starting { background: #eab308; animation: pulse 1.5s ease-in-out infinite; }
     .tab .status-dot.error { background: #ef4444; }
     .tab .status-dot.stopped { background: #666; }
-    .tab .status-label { font-size: 10px; color: #666; margin-left: 6px; font-style: italic; }
-    .tab.active .status-label { color: #888; }
     .tab .tab-close { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; border-radius: 3px; color: #888; opacity: 0; transition: opacity 0.15s, background 0.15s; font-size: 16px; line-height: 1; }
     .tab .tab-close:hover { background: #2a2a2a; color: #fff; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
@@ -808,20 +806,15 @@ function getShellHTML(): string {
           tab.appendChild(appBadge);
         }
         if (info.source === 'external') { const badge = document.createElement('span'); badge.style.cssText = 'font-size:9px;color:#666;margin-left:4px;'; badge.textContent = '(ext)'; tab.appendChild(badge); }
-        // Tiny italic status label next to the name for non-ready iterations —
-        // lets users distinguish "installing" from "starting" at a glance
-        // without having to click the tab.
-        if (info.status && info.status !== 'ready') {
-          const statusLabel = document.createElement('span');
-          statusLabel.className = 'status-label';
-          statusLabel.textContent = info.status;
-          tab.appendChild(statusLabel);
-        }
-        // Tooltip combines the /iterate prompt (if any) and the error message
-        // (if any), so hovering a red tab tells you both what was attempted
-        // and why it failed.
-        const tooltipParts = [info.commandPrompt, info.error].filter(Boolean);
-        if (tooltipParts.length > 0) tab.title = tooltipParts.join(' — ');
+        // Tooltip surfaces the stuff that doesn't fit on the tab: current
+        // status (when not-ready), the /iterate prompt that spawned it (if
+        // any), and the error message (if any). Hover a yellow/red tab to
+        // see why.
+        const tooltipParts = [];
+        if (info.status && info.status !== 'ready') tooltipParts.push('Status: ' + info.status);
+        if (info.commandPrompt) tooltipParts.push('Prompt: ' + info.commandPrompt);
+        if (info.error) tooltipParts.push('Error: ' + info.error);
+        if (tooltipParts.length > 0) tab.title = tooltipParts.join('\n');
         // Close (×) button. Calls DELETE /api/iterations/<name>. We stop
         // propagation so clicking × doesn't ALSO switch to that tab.
         const close = document.createElement('span');
