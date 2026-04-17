@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { resolveBasePath, injectOverlayScript } from "../proxy/router.js";
-import type { IterateConfig, IterationInfo } from "iterate-ui-core";
+import {
+  resolveBasePath,
+  injectOverlayScript,
+  resolveIterationFromReferer,
+} from "../proxy/router.js";
+import { StateStore } from "../state/store.js";
+import { DEFAULT_CONFIG, type IterateConfig, type IterationInfo } from "iterate-ui-core";
+import type { FastifyRequest } from "fastify";
 
 const cfgWithTwoApps: IterateConfig = {
   apps: [
@@ -101,5 +107,82 @@ describe("injectOverlayScript", () => {
     const out = injectOverlayScript(html, 47100, nastyName, "");
     // The unsafe chars should be escaped, not present literally in the overlay tag
     expect(out).not.toContain(`activeIteration:"v1"/><script>`);
+  });
+});
+
+describe("resolveIterationFromReferer", () => {
+  function fakeRequest(referer?: string): FastifyRequest {
+    return { headers: referer ? { referer } : {} } as unknown as FastifyRequest;
+  }
+
+  function storeWith(iterationName: string, status: IterationInfo["status"] = "ready"): StateStore {
+    const store = new StateStore({ ...DEFAULT_CONFIG });
+    store.setIteration(iterationName, {
+      name: iterationName,
+      branch: `iterate/${iterationName}`,
+      worktreePath: `/tmp/${iterationName}`,
+      port: 3100,
+      pid: 1234,
+      status,
+      createdAt: new Date().toISOString(),
+    });
+    return store;
+  }
+
+  it("returns null when Referer header is missing", () => {
+    const store = storeWith("v1");
+    expect(resolveIterationFromReferer(fakeRequest(), store)).toBeNull();
+  });
+
+  it("extracts the first path segment and looks up the iteration", () => {
+    const store = storeWith("v1-cards");
+    const res = resolveIterationFromReferer(
+      fakeRequest("http://localhost:47100/v1-cards/"),
+      store
+    );
+    expect(res?.name).toBe("v1-cards");
+  });
+
+  it("returns null if the referring iteration isn't 'ready'", () => {
+    const store = storeWith("v1", "installing");
+    expect(
+      resolveIterationFromReferer(
+        fakeRequest("http://localhost:47100/v1/some-page"),
+        store
+      )
+    ).toBeNull();
+  });
+
+  it("returns null when the first segment doesn't match any iteration", () => {
+    const store = storeWith("v1");
+    expect(
+      resolveIterationFromReferer(
+        fakeRequest("http://localhost:47100/nonexistent/x"),
+        store
+      )
+    ).toBeNull();
+  });
+
+  it("returns null when pathname is '/'", () => {
+    const store = storeWith("v1");
+    expect(
+      resolveIterationFromReferer(fakeRequest("http://localhost:47100/"), store)
+    ).toBeNull();
+  });
+
+  it("returns null on malformed URL without crashing", () => {
+    const store = storeWith("v1");
+    expect(
+      resolveIterationFromReferer(fakeRequest("not a url"), store)
+    ).toBeNull();
+  });
+
+  it("handles nested paths (only the first segment matters)", () => {
+    const store = storeWith("v1");
+    const res = resolveIterationFromReferer(
+      fakeRequest("http://localhost:47100/v1/nested/deep/path?a=1"),
+      store
+    );
+    expect(res?.name).toBe("v1");
   });
 });

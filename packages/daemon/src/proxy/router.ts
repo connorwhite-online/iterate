@@ -88,10 +88,11 @@ export function resolveBasePath(config: IterateConfig, info: IterationInfo): str
 /**
  * Extract the iteration name from the Referer header.
  * When an iframe at /v1-cards/ requests /_next/static/main.js, the browser
- * sends Referer: http://localhost:4000/v1-cards/. We extract "v1-cards"
- * and look it up in the store.
+ * sends Referer: http://localhost:<daemon-port>/v1-cards/. We extract
+ * "v1-cards" and look it up in the store.
+ * Exported for tests.
  */
-function resolveIterationFromReferer(
+export function resolveIterationFromReferer(
   request: FastifyRequest,
   store: StateStore
 ): IterationInfo | null {
