@@ -10,7 +10,7 @@ import {
   parseDotenv,
 } from "iterate-ui-core/node";
 import type { AppConfig, IterateConfig } from "iterate-ui-core";
-import { resolveRepoRoot } from "../fetch-with-timeout.js";
+import { resolveRepoRoot } from "../http-utils.js";
 
 export type DoctorStatus = "ok" | "warn" | "fail";
 

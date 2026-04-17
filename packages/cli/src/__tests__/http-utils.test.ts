@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { fetchWithTimeout, parseJsonSafe } from "../fetch-with-timeout.js";
+import { fetchWithTimeout, parseJsonSafe } from "../http-utils.js";
 
 let server: Server;
 let baseUrl: string;

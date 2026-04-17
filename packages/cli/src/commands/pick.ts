@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { loadConfig, resolveDaemonPort } from "iterate-ui-core/node";
-import { fetchWithTimeout, parseJsonSafe, resolveRepoRoot } from "../fetch-with-timeout.js";
+import { fetchWithTimeout, parseJsonSafe, resolveRepoRoot } from "../http-utils.js";
 
 export const pickCommand = new Command("pick")
   .description(

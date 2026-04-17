@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import type { IterationInfo } from "iterate-ui-core";
 import { loadConfig, resolveDaemonPort } from "iterate-ui-core/node";
-import { fetchWithTimeout, parseJsonSafe, resolveRepoRoot } from "../fetch-with-timeout.js";
+import { fetchWithTimeout, parseJsonSafe, resolveRepoRoot } from "../http-utils.js";
 
 export const listCommand = new Command("list")
   .description("List all active iterations")

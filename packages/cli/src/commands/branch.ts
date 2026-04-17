@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { loadConfig, resolveDaemonPort } from "iterate-ui-core/node";
-import { fetchWithTimeout, parseJsonSafe, resolveRepoRoot } from "../fetch-with-timeout.js";
+import { fetchWithTimeout, parseJsonSafe, resolveRepoRoot } from "../http-utils.js";
 
 export const branchCommand = new Command("branch")
   .description("Create a new iteration from the current branch")

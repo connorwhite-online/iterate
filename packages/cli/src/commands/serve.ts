@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { loadConfig, readLockfile, isDaemonAlive } from "iterate-ui-core/node";
-import { resolveRepoRoot } from "../fetch-with-timeout.js";
+import { resolveRepoRoot } from "../http-utils.js";
 
 export const serveCommand = new Command("serve")
   .description("Start the iterate daemon (control server + proxy)")

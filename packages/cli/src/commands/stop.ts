@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { loadConfig, resolveDaemonPort, removeLockfile } from "iterate-ui-core/node";
-import { fetchWithTimeout, resolveRepoRoot } from "../fetch-with-timeout.js";
+import { fetchWithTimeout, resolveRepoRoot } from "../http-utils.js";
 
 export const stopCommand = new Command("stop")
   .description("Stop the iterate daemon and all dev servers")

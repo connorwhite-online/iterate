@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
-import { resolveRepoRoot } from "../fetch-with-timeout.js";
+import { resolveRepoRoot } from "../http-utils.js";
 
 let tmp: string;
 
