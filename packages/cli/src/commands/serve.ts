@@ -1,35 +1,52 @@
 import { Command } from "commander";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import type { IterateConfig } from "iterate-ui-core";
+import { loadConfig, readLockfile, isDaemonAlive } from "iterate-ui-core/node";
 
 export const serveCommand = new Command("serve")
   .description("Start the iterate daemon (control server + proxy)")
-  .option("--port <port>", "Override daemon port")
+  .option("--port <port>", "Override daemon port (skips auto-pick)")
   .action(async (opts) => {
     const cwd = process.cwd();
     const config = loadConfig(cwd);
-    if (!config) return;
+    if (!config) {
+      console.error("Error: iterate not initialized. Run `iterate init` first.");
+      process.exit(1);
+    }
 
-    const port = opts.port ? parseInt(opts.port, 10) : config.daemonPort;
+    // If a daemon is already running in this repo, short-circuit with a useful message.
+    const existingLock = readLockfile(cwd);
+    if (existingLock && isDaemonAlive(existingLock)) {
+      console.log(
+        `iterate daemon already running on port ${existingLock.port} (pid ${existingLock.pid}). ` +
+          `Run \`iterate stop\` first to restart.`
+      );
+      return;
+    }
 
-    console.log(`Starting iterate daemon on port ${port}...`);
-    console.log(`Open http://localhost:${port} in your browser.\n`);
+    const env: Record<string, string> = {
+      ...(process.env as Record<string, string>),
+      ITERATE_CWD: cwd,
+    };
+    // Explicit --port overrides auto-pick. Otherwise the daemon auto-picks starting
+    // from config.daemonPort and writes the resolved port to .iterate/daemon.lock.
+    if (opts.port) {
+      env.ITERATE_PORT = String(parseInt(opts.port, 10));
+      console.log(`Starting iterate daemon on port ${opts.port}...\n`);
+    } else {
+      console.log(
+        `Starting iterate daemon (auto-picking port from ${config.daemonPort})...\n`
+      );
+    }
 
     // Spawn the daemon process
-    // In development, we run the daemon directly via tsx
-    // In production, this would run the built daemon binary
     const daemonBin = join(cwd, "node_modules", "iterate-ui-daemon", "dist", "index.js");
 
     if (existsSync(daemonBin)) {
       const child = spawn("node", [daemonBin], {
         cwd,
-        env: {
-          ...process.env,
-          ITERATE_PORT: String(port),
-          ITERATE_CWD: cwd,
-        },
+        env,
         stdio: "inherit",
       });
 
@@ -42,7 +59,10 @@ export const serveCommand = new Command("serve")
       try {
         // @ts-expect-error — optional peer; only resolved when installed alongside daemon
         const { startDaemon } = await import("iterate-ui-daemon");
-        await startDaemon({ port, cwd });
+        await startDaemon({
+          cwd,
+          port: opts.port ? parseInt(opts.port, 10) : undefined,
+        });
       } catch {
         console.error(
           "Error: iterate-ui-daemon not found. Run `pnpm install` first."
@@ -51,12 +71,3 @@ export const serveCommand = new Command("serve")
       }
     }
   });
-
-function loadConfig(cwd: string): IterateConfig | null {
-  const configPath = join(cwd, ".iterate", "config.json");
-  if (!existsSync(configPath)) {
-    console.error("Error: iterate not initialized. Run `iterate init` first.");
-    process.exit(1);
-  }
-  return JSON.parse(readFileSync(configPath, "utf-8"));
-}

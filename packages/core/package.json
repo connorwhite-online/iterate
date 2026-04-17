@@ -9,25 +9,41 @@
     "directory": "packages/core"
   },
   "homepage": "https://iterate-ui.com",
-  "keywords": ["iterate", "ui", "types", "protocol"],
+  "keywords": [
+    "iterate",
+    "ui",
+    "types",
+    "protocol"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.js",
+      "require": "./dist/node.cjs"
     }
   },
   "scripts": {
     "prepublishOnly": "pnpm build",
-    "build": "tsup src/index.ts --format esm --dts",
-    "dev": "tsup src/index.ts --format esm --dts --watch",
-    "clean": "rm -rf dist"
+    "build": "tsup src/index.ts src/node.ts --format esm,cjs --dts",
+    "dev": "tsup src/index.ts src/node.ts --format esm,cjs --dts --watch",
+    "clean": "rm -rf dist",
+    "test": "vitest run"
   },
   "devDependencies": {
+    "@types/node": "^22.19.11",
     "tsup": "^8.3.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^4.0.18"
   }
 }

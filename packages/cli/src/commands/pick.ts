@@ -1,7 +1,5 @@
 import { Command } from "commander";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import type { IterateConfig } from "iterate-ui-core";
+import { loadConfig, resolveDaemonPort } from "iterate-ui-core/node";
 
 export const pickCommand = new Command("pick")
   .description(
@@ -16,21 +14,23 @@ export const pickCommand = new Command("pick")
   .action(async (name: string, opts) => {
     const cwd = process.cwd();
     const config = loadConfig(cwd);
-    if (!config) return;
+    if (!config) {
+      console.error("Error: iterate not initialized. Run `iterate init` first.");
+      process.exit(1);
+    }
+
+    const port = resolveDaemonPort(cwd, config);
 
     try {
-      const res = await fetch(
-        `http://localhost:${config.daemonPort}/api/iterations/pick`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, strategy: opts.strategy }),
-        }
-      );
+      const res = await fetch(`http://localhost:${port}/api/iterations/pick`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, strategy: opts.strategy }),
+      });
 
       if (!res.ok) {
-        const err = await res.json();
-        console.error(`Error: ${err.message}`);
+        const err = (await res.json().catch(() => ({ message: "Unknown error" }))) as { message?: string };
+        console.error(`Error: ${err.message ?? "Unknown error"}`);
         process.exit(1);
       }
 
@@ -43,12 +43,3 @@ export const pickCommand = new Command("pick")
       process.exit(1);
     }
   });
-
-function loadConfig(cwd: string): IterateConfig | null {
-  const configPath = join(cwd, ".iterate", "config.json");
-  if (!existsSync(configPath)) {
-    console.error("Error: iterate not initialized. Run `iterate init` first.");
-    process.exit(1);
-  }
-  return JSON.parse(readFileSync(configPath, "utf-8"));
-}

@@ -46,6 +46,7 @@
     "@babel/core": "^7.24.0",
     "babel-loader": "^10.1.0",
     "iterate-ui-babel-plugin": "workspace:*",
+    "iterate-ui-core": "workspace:*",
     "iterate-ui-daemon": "workspace:*",
     "iterate-ui-overlay": "workspace:*"
   },

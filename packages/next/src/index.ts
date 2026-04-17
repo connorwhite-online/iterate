@@ -1,8 +1,14 @@
 import { spawn, execSync, type ChildProcess } from "node:child_process";
-import { createConnection } from "node:net";
 import { createRequire } from "node:module";
 import { join, dirname } from "node:path";
 import { readFileSync } from "node:fs";
+import {
+  findFreePort,
+  isPortInUse,
+  loadConfig,
+  readLockfile,
+  isDaemonAlive,
+} from "iterate-ui-core/node";
 
 /**
  * Get the installed Next.js major version, or null if undetectable.
@@ -51,7 +57,13 @@ function resolvePackageEntry(packageName: string, _require: NodeRequire): string
 }
 
 export interface IterateNextOptions {
-  /** Port for the iterate daemon (default: 4000) */
+  /**
+   * Port for the iterate daemon. If omitted, resolved in order:
+   *   1. NEXT_PUBLIC_ITERATE_DAEMON_PORT env var
+   *   2. An already-running daemon's port from .iterate/daemon.lock
+   *   3. `daemonPort` from .iterate/config.json
+   *   4. Auto-picked starting from the default (47100)
+   */
   daemonPort?: number;
   /** Disable the babel plugin that injects component names/source locations (default: false) */
   disableBabelPlugin?: boolean;
@@ -61,6 +73,31 @@ type NextConfig = Record<string, any>;
 
 let daemon: ChildProcess | null = null;
 let daemonStarting = false;
+
+/**
+ * Module-level memo so multiple calls to the returned config function
+ * (Next may call it for different phases — dev, build, etc.) all agree on
+ * the same daemon port and don't spawn multiple daemons.
+ */
+let portResolution: Promise<number> | null = null;
+
+async function resolveDaemonPort(repoRoot: string, startingFrom: number, override?: number): Promise<number> {
+  if (override && Number.isFinite(override)) return override;
+  if (!portResolution) {
+    portResolution = (async () => {
+      const lock = readLockfile(repoRoot);
+      if (lock && isDaemonAlive(lock)) return lock.port;
+      if (lock) {
+        // Stale lockfile — daemon crashed or was killed. Fall through to pick a new port.
+      }
+      // If the configured port is already listening, assume it's our daemon from a
+      // concurrent plugin invocation and reuse it. Otherwise auto-pick upward.
+      if (await isPortInUse(startingFrom)) return startingFrom;
+      return await findFreePort(startingFrom);
+    })();
+  }
+  return portResolution;
+}
 
 /**
  * Next.js config wrapper for iterate.
@@ -83,216 +120,209 @@ let daemonStarting = false;
 export function withIterate(
   nextConfig: NextConfig = {},
   options: IterateNextOptions = {}
-): NextConfig {
-  const daemonPort = options.daemonPort ?? 4000;
+): (phase?: string) => Promise<NextConfig> {
   const isDev = process.env.NODE_ENV !== "production";
-
-  if (!isDev) {
-    // In production, don't modify anything
-    return nextConfig;
-  }
-
-  // Start the daemon when the config is loaded (dev only)
-  if (!daemon && !daemonStarting) {
-    daemonStarting = true;
-    const repoRoot = getGitRoot() ?? process.cwd();
-    startDaemonIfNeeded(daemonPort, repoRoot).then((child) => {
-      if (child) {
-        daemon = child;
-
-        // Clean up on process exit
-        const cleanup = () => {
-          if (daemon) {
-            stopDaemon(daemon, daemonPort);
-            daemon = null;
-          }
-        };
-        process.on("SIGINT", cleanup);
-        process.on("SIGTERM", cleanup);
-        process.on("exit", cleanup);
-      }
-    });
-  }
-
-  // Resolve paths at config time
-  // Use createRequire for CJS compatibility (Next.js loads config via CJS)
-  const _require = typeof require !== "undefined" ? require : createRequire(import.meta.url);
-  let babelPluginPath: string | undefined;
-  try {
-    if (!options.disableBabelPlugin) {
-      babelPluginPath = resolvePackageEntry("iterate-ui-babel-plugin", _require);
-    }
-  } catch {
-    console.warn("[iterate] Could not resolve babel plugin");
-  }
-
-  const turbopack = isTurbopackMode();
-
-  const result: NextConfig = {
-    ...nextConfig,
-
-    // Expose iteration name and daemon port to the client-side <Iterate /> component
-    env: {
-      ...nextConfig.env,
-      NEXT_PUBLIC_ITERATE_ITERATION_NAME: process.env.ITERATE_ITERATION_NAME ?? "__original__",
-      NEXT_PUBLIC_ITERATE_DAEMON_PORT: String(daemonPort),
-    },
-
-    // Add rewrites to proxy to the daemon
-    async rewrites() {
-      const existingRewrites = await (nextConfig.rewrites?.() ?? []);
-
-      const iterateRewrites = [
-        {
-          source: "/__iterate__/:path*",
-          destination: `http://127.0.0.1:${daemonPort}/__iterate__/:path*`,
-        },
-        {
-          source: "/api/iterations/:path*",
-          destination: `http://127.0.0.1:${daemonPort}/api/iterations/:path*`,
-        },
-        {
-          source: "/api/annotations/:path*",
-          destination: `http://127.0.0.1:${daemonPort}/api/annotations/:path*`,
-        },
-        {
-          source: "/api/dom-changes",
-          destination: `http://127.0.0.1:${daemonPort}/api/dom-changes`,
-        },
-        {
-          source: "/api/command",
-          destination: `http://127.0.0.1:${daemonPort}/api/command`,
-        },
-        {
-          source: "/api/command-context/:path*",
-          destination: `http://127.0.0.1:${daemonPort}/api/command-context/:path*`,
-        },
-      ];
-
-      // Handle both array and object rewrite formats
-      if (Array.isArray(existingRewrites)) {
-        return [...iterateRewrites, ...existingRewrites];
-      }
-
-      return {
-        ...existingRewrites,
-        beforeFiles: [
-          ...iterateRewrites,
-          ...(existingRewrites.beforeFiles ?? []),
-        ],
-      };
-    },
-  };
-
-  // Resolve babel-loader for the component name injection pre-loader
-  let babelLoaderPath: string | undefined;
-  if (babelPluginPath) {
+  const repoRoot = getGitRoot() ?? process.cwd();
+  const fileConfig = (() => {
     try {
-      babelLoaderPath = _require.resolve("babel-loader");
+      return loadConfig(repoRoot);
     } catch {
-      console.warn("[iterate] Could not resolve babel-loader — component names will not be injected");
+      return null;
     }
-  }
+  })();
 
-  // Skip babel plugin injection for iteration dev servers — Turbopack's
-  // WebpackLoadersProcessedAsset panics with custom loaders in monorepo
-  // subdirectories. Iterations rely on the overlay's runtime fiber-based
-  // component detection instead.
-  const isIteration = process.env.ITERATE_ITERATION_NAME && process.env.ITERATE_ITERATION_NAME !== "__original__";
+  // Starting port: explicit option > env var > config file > default (47100)
+  const envPort = process.env.ITERATE_DAEMON_PORT ? parseInt(process.env.ITERATE_DAEMON_PORT, 10) : undefined;
+  const startingPort = options.daemonPort ?? envPort ?? fileConfig?.daemonPort ?? 47100;
 
-  // Only inject via webpack when NOT using Turbopack (avoids the
-  // "webpack config present but no turbopack config" warning in Next 16+)
-  if (!turbopack) {
-    result.webpack = function webpack(config: any, context: any) {
-      if (!context.dev) {
+  return async function iterateNextConfig(): Promise<NextConfig> {
+    if (!isDev) {
+      // In production, don't modify anything
+      return nextConfig;
+    }
+
+    const daemonPort = await resolveDaemonPort(repoRoot, startingPort, options.daemonPort ?? envPort);
+
+    // Start the daemon when the config is loaded (dev only)
+    if (!daemon && !daemonStarting) {
+      daemonStarting = true;
+      startDaemonIfNeeded(daemonPort, repoRoot).then((child) => {
+        if (child) {
+          daemon = child;
+
+          // Clean up on process exit
+          const cleanup = () => {
+            if (daemon) {
+              stopDaemon(daemon, daemonPort);
+              daemon = null;
+            }
+          };
+          process.on("SIGINT", cleanup);
+          process.on("SIGTERM", cleanup);
+          process.on("exit", cleanup);
+        }
+      });
+    }
+
+    // Resolve paths at config time
+    // Use createRequire for CJS compatibility (Next.js loads config via CJS)
+    const _require = typeof require !== "undefined" ? require : createRequire(import.meta.url);
+    let babelPluginPath: string | undefined;
+    try {
+      if (!options.disableBabelPlugin) {
+        babelPluginPath = resolvePackageEntry("iterate-ui-babel-plugin", _require);
+      }
+    } catch {
+      console.warn("[iterate] Could not resolve babel plugin");
+    }
+
+    const turbopack = isTurbopackMode();
+    // Honor Next.js basePath so /__iterate__ and /api/iterations are reachable
+    // under subpath-mounted apps (e.g. basePath: "/admin").
+    const basePath = typeof nextConfig.basePath === "string" ? nextConfig.basePath.replace(/\/+$/, "") : "";
+
+    const result: NextConfig = {
+      ...nextConfig,
+
+      // Expose iteration name and daemon port to the client-side <Iterate /> component
+      env: {
+        ...nextConfig.env,
+        NEXT_PUBLIC_ITERATE_ITERATION_NAME: process.env.ITERATE_ITERATION_NAME ?? "__original__",
+        NEXT_PUBLIC_ITERATE_DAEMON_PORT: String(daemonPort),
+        NEXT_PUBLIC_ITERATE_BASE_PATH: basePath,
+      },
+
+      // Add rewrites to proxy to the daemon
+      async rewrites() {
+        const existingRewrites = await (nextConfig.rewrites?.() ?? []);
+
+        const proxyPaths = [
+          "/__iterate__/:path*",
+          "/api/iterations/:path*",
+          "/api/annotations/:path*",
+          "/api/dom-changes",
+          "/api/command",
+          "/api/command-context/:path*",
+        ];
+
+        const iterateRewrites = proxyPaths.map((path) => ({
+          // With a basePath, Next strips the prefix before matching `source`, so
+          // the source stays unprefixed but the destination is the raw daemon URL.
+          source: path,
+          destination: `http://127.0.0.1:${daemonPort}${path.replace(":path*", ":path*")}`,
+        }));
+
+        // Handle both array and object rewrite formats
+        if (Array.isArray(existingRewrites)) {
+          return [...iterateRewrites, ...existingRewrites];
+        }
+
+        return {
+          ...existingRewrites,
+          beforeFiles: [
+            ...iterateRewrites,
+            ...(existingRewrites.beforeFiles ?? []),
+          ],
+        };
+      },
+    };
+
+    // Resolve babel-loader for the component name injection pre-loader
+    let babelLoaderPath: string | undefined;
+    if (babelPluginPath) {
+      try {
+        babelLoaderPath = _require.resolve("babel-loader");
+      } catch {
+        console.warn("[iterate] Could not resolve babel-loader — component names will not be injected");
+      }
+    }
+
+    // Skip babel plugin injection for iteration dev servers — Turbopack's
+    // WebpackLoadersProcessedAsset panics with custom loaders in monorepo
+    // subdirectories. Iterations rely on the overlay's runtime fiber-based
+    // component detection instead.
+    const isIteration = process.env.ITERATE_ITERATION_NAME && process.env.ITERATE_ITERATION_NAME !== "__original__";
+
+    // Only inject via webpack when NOT using Turbopack (avoids the
+    // "webpack config present but no turbopack config" warning in Next 16+)
+    if (!turbopack) {
+      result.webpack = function webpack(config: any, context: any) {
+        if (!context.dev) {
+          return nextConfig.webpack?.(config, context) ?? config;
+        }
+
+        // Inject babel plugin as a pre-loader on both server and client builds
+        // so that server components get data-iterate-component attributes
+        if (babelLoaderPath && babelPluginPath && !isIteration) {
+          config.module.rules.push({
+            test: /\.(tsx?|jsx?)$/,
+            exclude: /node_modules/,
+            enforce: "pre",
+            use: [{
+              loader: babelLoaderPath,
+              options: {
+                plugins: [babelPluginPath],
+                parserOpts: { plugins: ["jsx", "typescript"] },
+                configFile: false,
+                babelrc: false,
+              },
+            }],
+          });
+        }
+
         return nextConfig.webpack?.(config, context) ?? config;
-      }
+      };
+    }
 
-      // Inject babel plugin as a pre-loader on both server and client builds
-      // so that server components get data-iterate-component attributes
-      if (babelLoaderPath && babelPluginPath && !isIteration) {
-        config.module.rules.push({
-          test: /\.(tsx?|jsx?)$/,
-          exclude: /node_modules/,
-          enforce: "pre",
-          use: [{
-            loader: babelLoaderPath,
-            options: {
-              plugins: [babelPluginPath],
-              parserOpts: { plugins: ["jsx", "typescript"] },
-              configFile: false,
-              babelrc: false,
-            },
-          }],
-        });
-      }
+    // For Turbopack (Next 16+): inject babel plugin via turbopack.rules
+    // so server components get data-iterate-component attributes.
+    // The condition API requires Next 16+ (turbopack.rules.*.condition).
+    const nextMajor = getNextMajorVersion();
 
-      return nextConfig.webpack?.(config, context) ?? config;
-    };
-  }
+    if (turbopack && babelLoaderPath && babelPluginPath && nextMajor !== null && nextMajor >= 16 && !isIteration) {
+      const iterateLoader = {
+        loader: babelLoaderPath,
+        options: {
+          plugins: [babelPluginPath],
+          parserOpts: { plugins: ["jsx", "typescript"] },
+          configFile: false,
+          babelrc: false,
+        },
+      };
 
-  // For Turbopack (Next 16+): inject babel plugin via turbopack.rules
-  // so server components get data-iterate-component attributes.
-  // The condition API requires Next 16+ (turbopack.rules.*.condition).
-  const nextMajor = getNextMajorVersion();
+      const iterateRule = {
+        condition: { all: [{ not: "foreign" }, "development"] },
+        loaders: [iterateLoader],
+      };
 
-  if (turbopack && babelLoaderPath && babelPluginPath && nextMajor !== null && nextMajor >= 16 && !isIteration) {
-    const iterateLoader = {
-      loader: babelLoaderPath,
-      options: {
-        plugins: [babelPluginPath],
-        parserOpts: { plugins: ["jsx", "typescript"] },
-        configFile: false,
-        babelrc: false,
-      },
-    };
+      result.turbopack = {
+        ...nextConfig.turbopack,
+        rules: {
+          ...nextConfig.turbopack?.rules,
+          "*.tsx": iterateRule,
+          "*.ts": iterateRule,
+          "*.jsx": iterateRule,
+          "*.js": iterateRule,
+        },
+      };
 
-    const iterateRule = {
-      condition: { all: [{ not: "foreign" }, "development"] },
-      loaders: [iterateLoader],
-    };
+      // Silence the "manual configuration of babel-loader" warning
+      result.experimental = {
+        ...nextConfig.experimental,
+        turbopackUseBuiltinBabel: true,
+      };
+    }
 
-    result.turbopack = {
-      ...nextConfig.turbopack,
-      rules: {
-        ...nextConfig.turbopack?.rules,
-        "*.tsx": iterateRule,
-        "*.ts": iterateRule,
-        "*.jsx": iterateRule,
-        "*.js": iterateRule,
-      },
-    };
+    // Safety net: if we added a webpack config on Next 16+, ensure a turbopack
+    // config also exists to prevent the "webpack without turbopack" error.
+    if (result.webpack && !result.turbopack && nextMajor !== null && nextMajor >= 16) {
+      result.turbopack = nextConfig.turbopack ?? {};
+    }
 
-    // Silence the "manual configuration of babel-loader" warning
-    result.experimental = {
-      ...nextConfig.experimental,
-      turbopackUseBuiltinBabel: true,
-    };
-  }
-
-
-  // Safety net: if we added a webpack config on Next 16+, ensure a turbopack
-  // config also exists to prevent the "webpack without turbopack" error.
-  if (result.webpack && !result.turbopack && nextMajor !== null && nextMajor >= 16) {
-    result.turbopack = nextConfig.turbopack ?? {};
-  }
-
-  return result;
+    return result;
+  };
 }
 
-
-function isPortInUse(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = createConnection({ port, host: "127.0.0.1" });
-    socket.on("connect", () => {
-      socket.destroy();
-      resolve(true);
-    });
-    socket.on("error", () => {
-      resolve(false);
-    });
-  });
-}
 
 function getGitRoot(): string | null {
   try {

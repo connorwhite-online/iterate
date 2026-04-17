@@ -2,17 +2,31 @@ import Fastify from "fastify";
 import fastifyWebsocket from "@fastify/websocket";
 import fastifyReplyFrom from "@fastify/reply-from";
 import { readFileSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { createRequire } from "node:module";
-import { execa } from "execa";
-import { DEFAULT_CONFIG, type IterateConfig, type IterationInfo } from "iterate-ui-core";
+import {
+  DEFAULT_CONFIG,
+  normalizeConfig,
+  findApp,
+  getDefaultApp,
+  type AppConfig,
+  type IterateConfig,
+  type IterationInfo,
+} from "iterate-ui-core";
+import {
+  findFreePort,
+  writeLockfile,
+  removeLockfile,
+  readLockfile,
+  isDaemonAlive,
+} from "iterate-ui-core/node";
 import { StateStore } from "./state/store.js";
-import { WorktreeManager, type DiscoveredWorktree } from "./worktree/manager.js";
+import { WorktreeManager } from "./worktree/manager.js";
 import { ProcessManager } from "./process/manager.js";
 import { WebSocketHub } from "./websocket/hub.js";
 import { copyFilesToWorktree, copyUncommittedFiles } from "./worktree/copy-files.js";
 import { registerProxyRoutes } from "./proxy/router.js";
+import { runIterationPipeline } from "./iteration/pipeline.js";
 
 export interface DaemonOptions {
   port?: number;
@@ -21,14 +35,29 @@ export interface DaemonOptions {
 
 export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   const cwd = opts.cwd ?? process.env.ITERATE_CWD ?? process.cwd();
-  const port =
-    opts.port ?? parseInt(process.env.ITERATE_PORT ?? "4000", 10);
 
-  // Load config
+  // Load config (normalized — legacy flat configs become apps[])
   const configPath = join(cwd, ".iterate", "config.json");
   const config: IterateConfig = existsSync(configPath)
-    ? JSON.parse(readFileSync(configPath, "utf-8"))
-    : DEFAULT_CONFIG;
+    ? normalizeConfig(JSON.parse(readFileSync(configPath, "utf-8")))
+    : { ...DEFAULT_CONFIG };
+
+  // Resolve daemon port:
+  //   explicit opt.port → ITERATE_PORT env → auto-pick starting from config.daemonPort.
+  // If a prior lockfile points at an already-alive daemon for this cwd, we don't start
+  // a second one — the framework plugins will reach the existing daemon.
+  const existingLock = readLockfile(cwd);
+  if (existingLock && isDaemonAlive(existingLock) && !opts.port && !process.env.ITERATE_PORT) {
+    console.log(`[iterate] daemon already running on port ${existingLock.port} (pid ${existingLock.pid})`);
+    return;
+  }
+  // Stale lock — clean up.
+  if (existingLock && !isDaemonAlive(existingLock)) {
+    removeLockfile(cwd);
+  }
+
+  const requestedPort = opts.port ?? (process.env.ITERATE_PORT ? parseInt(process.env.ITERATE_PORT, 10) : undefined);
+  const port = requestedPort ?? (await findFreePort(config.daemonPort));
 
   // Initialize services
   const store = new StateStore(config);
@@ -52,9 +81,10 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   });
 
   app.post("/api/iterations", async (request, reply) => {
-    const { name, baseBranch } = request.body as {
+    const { name, baseBranch, appName } = request.body as {
       name: string;
       baseBranch?: string;
+      appName?: string;
     };
 
     if (!name || !/^[a-zA-Z0-9_-]+$/.test(name)) {
@@ -74,6 +104,15 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
       });
     }
 
+    const app = resolveAppForRequest(config, appName);
+    if (!app) {
+      return reply.status(400).send({
+        message: appName
+          ? `App "${appName}" not registered in .iterate/config.json.`
+          : `No app specified and config has ${config.apps.length} apps — pass "appName" in the request body.`,
+      });
+    }
+
     try {
       const info: IterationInfo = {
         name,
@@ -84,6 +123,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
         status: "creating",
         createdAt: new Date().toISOString(),
         source: "iterate",
+        appName: app.name,
       };
       store.setIteration(name, info);
       wsHub.broadcast({ type: "iteration:status", payload: { name, status: "creating" } });
@@ -96,40 +136,16 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
       copyFilesToWorktree(cwd, worktreePath, config.copyFiles ?? [".env*", ".npmrc"]);
       copyUncommittedFiles(cwd, worktreePath);
 
-      // Install dependencies (always at worktree root)
-      info.status = "installing";
-      store.setIteration(name, info);
-      wsHub.broadcast({ type: "iteration:status", payload: { name, status: "installing" } });
-
-      const installCmd = getInstallCommand(config.packageManager);
-      const [cmd, ...args] = installCmd.split(" ");
-      await execa(cmd!, args, { cwd: worktreePath });
-
-      // Run optional build command (e.g., for monorepo workspace deps)
-      if (config.buildCommand) {
-        const [buildCmd, ...buildArgs] = config.buildCommand.split(" ");
-        await execa(buildCmd!, buildArgs, { cwd: worktreePath });
-      }
-
-      // Start dev server (in appDir subdirectory if configured, for monorepos)
-      const devCwd = config.appDir ? join(worktreePath, config.appDir) : worktreePath;
-
-      info.status = "starting";
-      store.setIteration(name, info);
-      wsHub.broadcast({ type: "iteration:status", payload: { name, status: "starting" } });
-
-      const allocatedPort = await processManager.allocatePort();
-      info.port = allocatedPort;
-
-      const devCommand = buildDevCommand(config.devCommand, allocatedPort);
-      const { pid } = await processManager.start(name, devCwd, devCommand, allocatedPort, { ITERATE_WORKTREE_ROOT: worktreePath });
-      info.pid = pid ?? null;
-
-      // Wait for the dev server to actually accept connections before marking ready
-      await processManager.waitForReady(name, allocatedPort);
-
-      info.status = "ready";
-      store.setIteration(name, info);
+      await runIterationPipeline({
+        repoRoot: cwd,
+        worktreeRoot: worktreePath,
+        app,
+        info,
+        config,
+        processManager,
+        store,
+        wsHub,
+      });
 
       wsHub.broadcast({ type: "iteration:created", payload: info });
 
@@ -321,14 +337,24 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
 
   /** Submit a command (e.g. /iterate prompt) to create multiple iterations */
   app.post("/api/command", async (request, reply) => {
-    const { command, prompt, count = 3 } = request.body as {
+    const { command, prompt, count = 3, appName } = request.body as {
       command: string;
       prompt?: string;
       count?: number;
+      appName?: string;
     };
 
     if (command !== "iterate") {
       return reply.status(400).send({ message: `Unknown command: ${command}` });
+    }
+
+    const app = resolveAppForRequest(config, appName);
+    if (!app) {
+      return reply.status(400).send({
+        message: appName
+          ? `App "${appName}" not registered in .iterate/config.json.`
+          : `Config has ${config.apps.length} apps — pass "appName" in the request body.`,
+      });
     }
 
     const commandId = crypto.randomUUID();
@@ -360,6 +386,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
           commandPrompt: prompt?.trim() ?? "",
           commandId,
           source: "iterate",
+          appName: app.name,
         };
         store.setIteration(name, info);
         // Broadcast as iteration:created so overlay tracks all iterations immediately
@@ -380,39 +407,17 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
             copyFilesToWorktree(cwd, worktreePath, config.copyFiles ?? [".env*", ".npmrc"]);
             copyUncommittedFiles(cwd, worktreePath);
 
-            info.status = "installing";
-            store.setIteration(name, info);
-            wsHub.broadcast({ type: "iteration:status", payload: { name, status: "installing" } });
+            await runIterationPipeline({
+              repoRoot: cwd,
+              worktreeRoot: worktreePath,
+              app,
+              info,
+              config,
+              processManager,
+              store,
+              wsHub,
+            });
 
-            const installCmd = getInstallCommand(config.packageManager);
-            const [cmd, ...args] = installCmd.split(" ");
-            await execa(cmd!, args, { cwd: worktreePath });
-
-            // Run optional build command (e.g., for monorepo workspace deps)
-            if (config.buildCommand) {
-              const [buildCmd, ...buildArgs] = config.buildCommand.split(" ");
-              await execa(buildCmd!, buildArgs, { cwd: worktreePath });
-            }
-
-            // Start dev server (in appDir subdirectory if configured, for monorepos)
-            const devCwd = config.appDir ? join(worktreePath, config.appDir) : worktreePath;
-
-            info.status = "starting";
-            store.setIteration(name, info);
-            wsHub.broadcast({ type: "iteration:status", payload: { name, status: "starting" } });
-
-            const allocatedPort = await processManager.allocatePort();
-            info.port = allocatedPort;
-
-            const devCommand = buildDevCommand(config.devCommand, allocatedPort);
-            const { pid } = await processManager.start(name, devCwd, devCommand, allocatedPort, { ITERATE_WORKTREE_ROOT: worktreePath });
-            info.pid = pid ?? null;
-
-            // Wait for the dev server to actually accept connections before marking ready
-            await processManager.waitForReady(name, allocatedPort);
-
-            info.status = "ready";
-            store.setIteration(name, info);
             wsHub.broadcast({ type: "iteration:created", payload: info });
           } catch (err) {
             const errorMessage = (err as Error).message;
@@ -446,6 +451,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
 
   app.post("/api/shutdown", async (_request, reply) => {
     await processManager.stopAll();
+    removeLockfile(cwd);
     await reply.send({ ok: true });
     setTimeout(() => process.exit(0), 500);
   });
@@ -469,7 +475,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   });
 
   // Proxy routes (registered last — wildcard catch-all)
-  await registerProxyRoutes(app, store, port);
+  await registerProxyRoutes(app, store, port, config);
 
   // Root route: control UI shell
   app.get("/", async (_request, reply) => {
@@ -480,6 +486,12 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   try {
     await app.listen({ port, host: "0.0.0.0" });
     console.log(`iterate daemon running on http://localhost:${port}`);
+    writeLockfile(cwd, {
+      pid: process.pid,
+      port,
+      cwd,
+      startedAt: new Date().toISOString(),
+    });
   } catch (err) {
     console.error("Failed to start daemon:", err);
     process.exit(1);
@@ -521,6 +533,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     } catch (err) {
       console.error("Error during cleanup:", err);
     }
+    removeLockfile(cwd);
     process.exit(0);
   };
 
@@ -596,7 +609,17 @@ async function discoverAndRegisterWorktrees(
     const iterationCount = Object.keys(store.getIterations()).length + pendingPaths.size;
     if (iterationCount >= config.maxIterations) break;
 
-    // This is a new, untracked worktree — register it
+    // This is a new, untracked worktree — register it.
+    // Resolve which app this worktree targets:
+    //  - Branch convention "iterate/<appName>/<rest>" wins if <appName> matches a registered app.
+    //  - Otherwise fall back to the sole configured app (getDefaultApp).
+    //  - If neither works in a multi-app repo, skip the worktree (can't infer intent).
+    const app = resolveAppForWorktreeBranch(config, wt.branch);
+    if (!app) {
+      // Can't infer app; leave as untracked rather than starting with wrong config
+      continue;
+    }
+
     pendingPaths.add(wt.path);
     const baseName = deriveIterationName(wt.branch);
     const name = uniqueName(baseName, store);
@@ -610,6 +633,7 @@ async function discoverAndRegisterWorktrees(
       status: "creating",
       createdAt: new Date().toISOString(),
       source: "external",
+      appName: app.name,
     };
 
     store.setIteration(name, info);
@@ -618,39 +642,16 @@ async function discoverAndRegisterWorktrees(
     // Fire off the startup pipeline asynchronously
     (async () => {
       try {
-        info.status = "installing";
-        store.setIteration(name, info);
-        wsHub.broadcast({ type: "iteration:status", payload: { name, status: "installing" } });
-
-        const installCmd = getInstallCommand(config.packageManager);
-        const [cmd, ...args] = installCmd.split(" ");
-        await execa(cmd!, args, { cwd: wt.path });
-
-        if (config.buildCommand) {
-          const [buildCmd, ...buildArgs] = config.buildCommand.split(" ");
-          await execa(buildCmd!, buildArgs, { cwd: wt.path });
-        }
-
-        // Start dev server (in appDir subdirectory if configured)
-        const devCwd = config.appDir
-          ? (existsSync(join(wt.path, config.appDir)) ? join(wt.path, config.appDir) : wt.path)
-          : wt.path;
-
-        info.status = "starting";
-        store.setIteration(name, info);
-        wsHub.broadcast({ type: "iteration:status", payload: { name, status: "starting" } });
-
-        const allocatedPort = await processManager.allocatePort();
-        info.port = allocatedPort;
-
-        const devCommand = buildDevCommand(config.devCommand, allocatedPort);
-        const { pid } = await processManager.start(name, devCwd, devCommand, allocatedPort, { ITERATE_WORKTREE_ROOT: wt.path });
-        info.pid = pid ?? null;
-
-        await processManager.waitForReady(name, allocatedPort);
-
-        info.status = "ready";
-        store.setIteration(name, info);
+        await runIterationPipeline({
+          repoRoot,
+          worktreeRoot: wt.path,
+          app,
+          info,
+          config,
+          processManager,
+          store,
+          wsHub,
+        });
         wsHub.broadcast({ type: "iteration:created", payload: info });
       } catch (err) {
         const errorMessage = (err as Error).message;
@@ -683,19 +684,35 @@ async function discoverAndRegisterWorktrees(
   }
 }
 
-function getInstallCommand(pm: IterateConfig["packageManager"]): string {
-  switch (pm) {
-    case "pnpm": return "pnpm install --prefer-offline";
-    case "yarn": return "yarn install";
-    case "bun": return "bun install";
-    default: return "npm install --prefer-offline";
-  }
+/**
+ * Resolve which app to use for an incoming request, given an optional caller-supplied
+ * app name. Returns undefined if the caller didn't specify one and the config has
+ * multiple apps (so there's no unambiguous default).
+ */
+function resolveAppForRequest(config: IterateConfig, appName: string | undefined): AppConfig | undefined {
+  if (appName) return findApp(config, appName);
+  return getDefaultApp(config);
 }
 
-function buildDevCommand(baseCommand: string, port: number): string {
-  if (baseCommand.includes("next")) return `${baseCommand} -p ${port}`;
-  if (baseCommand.includes("vite")) return `${baseCommand} --port ${port}`;
-  return baseCommand;
+/**
+ * Resolve which app an externally-created worktree targets. We support two conventions:
+ *  1. `iterate/<appName>/<rest>` — explicit; chooses the matching app.
+ *  2. `iterate/<rest>` or any other branch — falls back to the sole configured app.
+ * Returns undefined if the repo has multiple apps and the branch name doesn't
+ * disambiguate — the worktree is left untracked rather than misconfigured.
+ */
+function resolveAppForWorktreeBranch(config: IterateConfig, branch: string): AppConfig | undefined {
+  const iteratePrefix = "iterate/";
+  if (branch.startsWith(iteratePrefix)) {
+    const rest = branch.slice(iteratePrefix.length);
+    const firstSlash = rest.indexOf("/");
+    if (firstSlash !== -1) {
+      const candidate = rest.slice(0, firstSlash);
+      const matched = findApp(config, candidate);
+      if (matched) return matched;
+    }
+  }
+  return getDefaultApp(config);
 }
 
 /** Shell HTML for the control UI with command bar and updated toolbar. */

@@ -28,6 +28,7 @@
   },
   "dependencies": {
     "iterate-ui-babel-plugin": "workspace:*",
+    "iterate-ui-core": "workspace:*",
     "iterate-ui-daemon": "workspace:*",
     "iterate-ui-overlay": "workspace:*"
   },

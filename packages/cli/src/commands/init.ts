@@ -2,12 +2,23 @@ import { Command } from "commander";
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_CONFIG, type IterateConfig } from "iterate-ui-core";
+import {
+  DEFAULT_CONFIG,
+  normalizeConfig,
+  type AppConfig,
+  type IterateConfig,
+} from "iterate-ui-core";
+import { saveConfig, loadConfig } from "iterate-ui-core/node";
 
 export const initCommand = new Command("init")
   .description("Initialize iterate in the current project")
   .option("--dev-command <cmd>", "Dev server command (auto-detected if omitted)")
-  .option("--port <port>", "Daemon port", "4000")
+  .option("--app-name <name>", "Name of the app to register (default: \"app\")")
+  .option("--app-dir <path>", "Subdirectory of this repo where the app lives (for monorepos)")
+  .option("--port-env-var <var>", "Env var the dev script reads for its port (e.g., BRAND_ADMIN_PORT)")
+  .option("--env-file <path>", "Dotenv file to source into the dev server (repeatable)", collect, [])
+  .option("--base-path <path>", "App's basePath (Next) or base (Vite), e.g. /admin")
+  .option("--port <port>", "Starting daemon port (auto-picks upward from here)")
   .action(async (opts) => {
     const cwd = process.cwd();
 
@@ -19,32 +30,50 @@ export const initCommand = new Command("init")
       process.exit(1);
     }
 
-    // Check for existing .iterate/
     const iterateDir = join(cwd, ".iterate");
-    if (existsSync(iterateDir)) {
-      console.log("iterate is already initialized in this project.");
-      return;
-    }
+    const existing = loadConfig(cwd);
 
     // Detect package manager
     const packageManager = detectPackageManager(cwd);
 
-    // Detect dev command
-    const devCommand = opts.devCommand ?? detectDevCommand(cwd, packageManager);
+    // Detect dev command (only used when not already registered or supplied)
+    const rootPkgDir = opts.appDir ? join(cwd, opts.appDir) : cwd;
+    const devCommand = opts.devCommand ?? detectDevCommand(rootPkgDir, packageManager);
 
-    const config: IterateConfig = {
-      ...DEFAULT_CONFIG,
+    const appEntry: AppConfig = {
+      name: opts.appName ?? "app",
       devCommand,
-      packageManager,
-      daemonPort: parseInt(opts.port, 10),
+      ...(opts.appDir ? { appDir: opts.appDir } : {}),
+      ...(opts.portEnvVar ? { portEnvVar: opts.portEnvVar } : {}),
+      ...(opts.envFile && opts.envFile.length > 0 ? { envFiles: opts.envFile } : {}),
+      ...(opts.basePath ? { basePath: opts.basePath } : {}),
     };
 
-    // Create .iterate directory and config
+    let config: IterateConfig;
+    if (existing) {
+      // Merge: add or replace the app entry of the same name
+      const apps = [...existing.apps];
+      const idx = apps.findIndex((a) => a.name === appEntry.name);
+      if (idx === -1) apps.push(appEntry);
+      else apps[idx] = { ...apps[idx], ...appEntry };
+
+      config = normalizeConfig({
+        ...existing,
+        apps,
+        packageManager: existing.packageManager ?? packageManager,
+        daemonPort: opts.port ? parseInt(opts.port, 10) : existing.daemonPort,
+      });
+    } else {
+      config = normalizeConfig({
+        ...DEFAULT_CONFIG,
+        apps: [appEntry],
+        packageManager,
+        daemonPort: opts.port ? parseInt(opts.port, 10) : DEFAULT_CONFIG.daemonPort,
+      });
+    }
+
     mkdirSync(iterateDir, { recursive: true });
-    writeFileSync(
-      join(iterateDir, "config.json"),
-      JSON.stringify(config, null, 2)
-    );
+    saveConfig(cwd, config);
 
     // Generate .mcp.json for Claude Code integration
     const mcpPath = join(cwd, ".mcp.json");
@@ -54,9 +83,8 @@ export const initCommand = new Command("init")
           iterate: {
             command: "npx",
             args: ["iterate-ui-mcp"],
-            env: {
-              ITERATE_DAEMON_PORT: String(config.daemonPort),
-            },
+            // Port omitted here — the MCP server auto-discovers via .iterate/daemon.lock,
+            // so it stays correct even when the daemon auto-picks a different port.
           },
         },
       };
@@ -125,13 +153,20 @@ export const initCommand = new Command("init")
 
     console.log("\nInitialized iterate:");
     console.log(`  Package manager: ${config.packageManager}`);
-    console.log(`  Dev command: ${config.devCommand}`);
-    console.log(`  Daemon port: ${config.daemonPort}`);
+    console.log(`  Registered apps: ${config.apps.map((a) => a.name).join(", ")}`);
+    for (const a of config.apps) {
+      console.log(`    - ${a.name}: ${a.devCommand}${a.appDir ? ` (in ${a.appDir})` : ""}`);
+    }
+    console.log(`  Daemon port (starting point): ${config.daemonPort}`);
     console.log(`  Max iterations: ${config.maxIterations}`);
-    console.log(`\nRun \`iterate serve\` to start the control server.`);
+    console.log(`\nRun \`iterate doctor\` to verify setup, then \`iterate serve\` to start the daemon.`);
     console.log(`Slash commands: /iterate:go, /iterate:prompt, /iterate:keep`);
     console.log(`Restart Claude Code to activate slash commands.`);
   });
+
+function collect(value: string, prev: string[]): string[] {
+  return [...prev, value];
+}
 
 function detectPackageManager(cwd: string): IterateConfig["packageManager"] {
   if (existsSync(join(cwd, "pnpm-lock.yaml"))) return "pnpm";

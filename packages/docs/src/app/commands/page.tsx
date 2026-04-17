@@ -72,19 +72,23 @@ export default function CommandsPage() {
         <tbody>
           <tr>
             <td><code>iterate init</code></td>
-            <td>Detect package manager and dev command, create <code>.iterate/config.json</code></td>
+            <td>Register an app (detects dev command, env files, package manager) and write <code>.iterate/config.json</code>. Re-run to register additional apps in a monorepo.</td>
+          </tr>
+          <tr>
+            <td><code>iterate doctor</code></td>
+            <td>Preflight checks: config validity, daemon port availability, env file parsing, package managers, docker-compose hints</td>
           </tr>
           <tr>
             <td><code>iterate serve</code></td>
-            <td>Launch the daemon on port 4000</td>
+            <td>Launch the daemon (auto-picks a free port starting at 47100, writes <code>.iterate/daemon.lock</code>)</td>
           </tr>
           <tr>
-            <td><code>iterate branch &lt;name&gt;</code></td>
-            <td>Create a git worktree, install dependencies, start dev server on a unique port</td>
+            <td><code>iterate branch &lt;name&gt; [--app &lt;id&gt;]</code></td>
+            <td>Create a git worktree, install dependencies, start the chosen app&apos;s dev server on a unique port</td>
           </tr>
           <tr>
             <td><code>iterate list</code></td>
-            <td>Show all active iterations with their status and ports</td>
+            <td>Show all active iterations with their status, target app, and ports</td>
           </tr>
           <tr>
             <td><code>iterate pick &lt;name&gt;</code></td>

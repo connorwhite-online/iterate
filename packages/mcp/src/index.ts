@@ -3,8 +3,22 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { DaemonClient } from "./connection/daemon-client.js";
 import { formatBatchPrompt } from "iterate-ui-core";
+import { loadConfig, resolveDaemonPort } from "iterate-ui-core/node";
 
-const DAEMON_PORT = parseInt(process.env.ITERATE_DAEMON_PORT ?? "4000", 10);
+const CWD = process.env.ITERATE_CWD ?? process.cwd();
+// Resolution order: explicit env var → lockfile → config → default.
+const DAEMON_PORT = (() => {
+  if (process.env.ITERATE_DAEMON_PORT) {
+    const parsed = parseInt(process.env.ITERATE_DAEMON_PORT, 10);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  try {
+    const config = loadConfig(CWD);
+    return resolveDaemonPort(CWD, config);
+  } catch {
+    return 47100;
+  }
+})();
 
 /** Attempt to connect to the daemon with retries */
 async function connectWithRetry(
@@ -90,18 +104,23 @@ async function main() {
 
   server.tool(
     "iterate_create_iteration",
-    "Create a new iteration (git worktree + dev server)",
+    "Create a new iteration (git worktree + dev server). In multi-app repos, pass appName to pick which registered app this iteration targets.",
     {
       name: z.string().describe("Name for the new iteration"),
       baseBranch: z
         .string()
         .optional()
         .describe("Branch to fork from (defaults to current)"),
+      appName: z
+        .string()
+        .optional()
+        .describe("Registered app (from .iterate/config.json apps[]) this iteration targets. Required when multiple apps are configured."),
     },
-    async ({ name, baseBranch }) => {
+    async ({ name, baseBranch, appName }) => {
       const result = await client.callApi("POST", "/api/iterations", {
         name,
         baseBranch,
+        appName,
       });
       return {
         content: [

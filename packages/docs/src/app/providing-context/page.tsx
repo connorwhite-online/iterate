@@ -88,7 +88,7 @@ export default function ProvidingContextPage() {
   CLI("CLI")
   CLI --> Daemon
 
-  subgraph Daemon[" Daemon :4000 "]
+  subgraph Daemon[" Daemon (auto-picked port) "]
     direction LR
     D1("Worktree Mgr") --- D2("Process Mgr") --- D3("Proxy") --- D4("WebSocket") --- D5("State")
   end

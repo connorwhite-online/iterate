@@ -5,6 +5,7 @@ import { listCommand } from "./commands/list.js";
 import { pickCommand } from "./commands/pick.js";
 import { serveCommand } from "./commands/serve.js";
 import { stopCommand } from "./commands/stop.js";
+import { doctorCommand } from "./commands/doctor.js";
 
 const program = new Command();
 
@@ -21,5 +22,6 @@ program.addCommand(listCommand);
 program.addCommand(pickCommand);
 program.addCommand(serveCommand);
 program.addCommand(stopCommand);
+program.addCommand(doctorCommand);
 
 program.parse();
