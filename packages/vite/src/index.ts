@@ -174,11 +174,21 @@ export function iterate(options: IteratePluginOptions = {}): Plugin[] {
         res.end(overlayJS);
       });
 
-      // Proxy iterate API and WebSocket to daemon
+      // Proxy iterate API and WebSocket to daemon — honor Vite's `base` so
+      // subpath-mounted apps (e.g. base: "/admin/") route /admin/api/* and
+      // /admin/__iterate__/* correctly.
+      const basePrefix = resolvedBase ? resolvedBase : "";
       server.middlewares.use((req, res, next) => {
         const url = req.url ?? "";
+        const matches = (prefix: string) =>
+          url.startsWith(prefix) || (!!basePrefix && url.startsWith(`${basePrefix}${prefix}`));
 
-        if (url.startsWith("/api/") || url.startsWith("/__iterate__/")) {
+        if (matches("/api/") || matches("/__iterate__/")) {
+          // Strip the base prefix before forwarding so the daemon sees
+          // paths relative to its own root.
+          if (basePrefix && url.startsWith(basePrefix)) {
+            req.url = url.slice(basePrefix.length) || "/";
+          }
           proxyRequest(req, res, port);
           return;
         }
