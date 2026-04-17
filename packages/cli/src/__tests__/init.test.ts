@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { execSync, execFileSync } from "node:child_process";
+import { execSync, execFileSync, spawnSync } from "node:child_process";
 
 const CLI_BIN = join(__dirname, "..", "..", "dist", "index.js");
 
@@ -25,15 +25,17 @@ afterEach(() => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
-function runIterate(args: string[]): { stdout: string; status: number } {
-  try {
-    const stdout = execFileSync("node", [CLI_BIN, ...args], { cwd: tmp, encoding: "utf-8" });
-    return { stdout, status: 0 };
-  } catch (err) {
-    const e = err as { stdout?: string; status?: number; message: string };
-    return { stdout: e.stdout ?? e.message, status: e.status ?? 1 };
-  }
+function runIterate(args: string[]): { stdout: string; stderr: string; status: number } {
+  // spawnSync captures stderr on success AND failure (execFileSync only on failure).
+  const res = spawnSync("node", [CLI_BIN, ...args], { cwd: tmp, encoding: "utf-8" });
+  return {
+    stdout: res.stdout ?? "",
+    stderr: res.stderr ?? "",
+    status: res.status ?? 1,
+  };
 }
+// Keep execFileSync referenced for the not-in-git-repo test path.
+void execFileSync;
 
 function readConfig(): any {
   return JSON.parse(readFileSync(join(tmp, ".iterate", "config.json"), "utf-8"));
@@ -235,6 +237,20 @@ describe("iterate init — failure modes", () => {
     } finally {
       rmSync(noGit, { recursive: true, force: true });
     }
+  });
+
+  it("fails when --app-name contains invalid characters", () => {
+    const { stdout, stderr, status } = runIterate(["init", "--app-name", "has spaces"]);
+    expect(status).not.toBe(0);
+    const combined = stdout + stderr;
+    expect(combined).toMatch(/app-name must be alphanumeric/);
+  });
+
+  it("accepts alphanumeric app-name with hyphens and underscores", () => {
+    const { status } = runIterate(["init", "--app-name", "brand_admin-v2"]);
+    expect(status).toBe(0);
+    const config = JSON.parse(readFileSync(join(tmp, ".iterate", "config.json"), "utf-8"));
+    expect(config.apps[0].name).toBe("brand_admin-v2");
   });
 
   it("fails clearly when an existing .iterate/config.json is malformed", () => {

@@ -51,8 +51,18 @@ export const initCommand = new Command("init")
     const rootPkgDir = opts.appDir ? join(cwd, opts.appDir) : cwd;
     const devCommand = opts.devCommand ?? detectDevCommand(rootPkgDir, packageManager);
 
+    // App names flow into branch names (iterate/<app>/<feature>) and URL
+    // segments in the shell UI. Restrict to safe characters.
+    const appName = opts.appName ?? "app";
+    if (!/^[a-zA-Z0-9_-]+$/.test(appName)) {
+      console.error(
+        `Error: --app-name must be alphanumeric (hyphens/underscores allowed). Got: "${appName}"`
+      );
+      process.exit(1);
+    }
+
     const appEntry: AppConfig = {
-      name: opts.appName ?? "app",
+      name: appName,
       devCommand,
       ...(opts.appDir ? { appDir: opts.appDir } : {}),
       ...(opts.portEnvVar ? { portEnvVar: opts.portEnvVar } : {}),
