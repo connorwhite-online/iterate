@@ -5,3 +5,4 @@ dist/
 .iterate/
 .next/
 out/
+.claude/launch.json
