@@ -204,18 +204,20 @@ export const initCommand = new Command("init")
       console.log("Registered iterate plugin in .claude/settings.json.");
     }
 
-    // Ensure .iterate is in .gitignore
-    const gitignorePath = join(cwd, ".gitignore");
-    if (existsSync(gitignorePath)) {
-      const content = readFileSync(gitignorePath, "utf-8");
-      if (!content.split("\n").some((line) => line.trim() === ".iterate")) {
-        writeFileSync(gitignorePath, content.trimEnd() + "\n.iterate\n");
-        console.log("Added .iterate to .gitignore.");
-      }
-    } else {
-      writeFileSync(gitignorePath, ".iterate\n");
-      console.log("Created .gitignore with .iterate entry.");
-    }
+    // Ensure .gitignore has the right pattern for .iterate/
+    //
+    // Recommended: track `config.json` (it's project intent — every contributor
+    // should agree on which apps exist, which dev commands run, etc.) but
+    // ignore runtime state (`daemon.lock`, `worktrees/`, any future caches).
+    //
+    // Pattern:
+    //   .iterate/*
+    //   !.iterate/config.json
+    //
+    // If the user has an older `.iterate` / `.iterate/` entry from a previous
+    // init, we replace it with the partial-ignore pattern to keep them on the
+    // current default. (Users who WANT to ignore everything can edit manually.)
+    updateGitignore(cwd);
 
     console.log("\nInitialized iterate:");
     console.log(`  Package manager: ${config.packageManager}`);
@@ -232,6 +234,48 @@ export const initCommand = new Command("init")
 
 function collect(value: string, prev: string[]): string[] {
   return [...prev, value];
+}
+
+/**
+ * Ensure .gitignore ignores everything under `.iterate/` EXCEPT
+ * `.iterate/config.json`. Upgrades older init-generated entries that
+ * ignored the whole directory.
+ */
+function updateGitignore(cwd: string): void {
+  const gitignorePath = join(cwd, ".gitignore");
+  const partialIgnore = [".iterate/*", "!.iterate/config.json"];
+
+  if (!existsSync(gitignorePath)) {
+    writeFileSync(gitignorePath, partialIgnore.join("\n") + "\n");
+    console.log("Created .gitignore — ignoring .iterate/ state, tracking config.json.");
+    return;
+  }
+
+  const lines = readFileSync(gitignorePath, "utf-8").split("\n");
+  const hasPartial =
+    lines.some((l) => l.trim() === ".iterate/*") &&
+    lines.some((l) => l.trim() === "!.iterate/config.json");
+  if (hasPartial) return; // already up-to-date
+
+  // Replace any older `.iterate` / `.iterate/` entries with the new pattern.
+  const filtered = lines.filter((l) => {
+    const t = l.trim();
+    return t !== ".iterate" && t !== ".iterate/";
+  });
+  const hadOldEntry = filtered.length !== lines.length;
+
+  // Drop trailing blank lines before appending so we don't stack them.
+  while (filtered.length && filtered[filtered.length - 1]!.trim() === "") {
+    filtered.pop();
+  }
+  filtered.push(...partialIgnore);
+
+  writeFileSync(gitignorePath, filtered.join("\n") + "\n");
+  console.log(
+    hadOldEntry
+      ? "Updated .gitignore: .iterate/ → .iterate/* + !.iterate/config.json (tracking config, ignoring state)."
+      : "Added .iterate/ rules to .gitignore (tracking config.json, ignoring state)."
+  );
 }
 
 function detectPackageManager(cwd: string): IterateConfig["packageManager"] {

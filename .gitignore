@@ -2,7 +2,8 @@ node_modules/
 dist/
 .turbo/
 *.tsbuildinfo
-.iterate/
+.iterate/*
+!.iterate/config.json
 .next/
 out/
 .claude/launch.json

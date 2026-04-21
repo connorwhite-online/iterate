@@ -86,6 +86,40 @@ describe("iterate init — greenfield", () => {
     expect(readConfig().daemonPort).toBe(48000);
   });
 
+  it("writes .gitignore with partial-ignore: track config.json, ignore state", () => {
+    runIterate(["init"]);
+    const gi = readFileSync(join(tmp, ".gitignore"), "utf-8");
+    expect(gi).toContain(".iterate/*");
+    expect(gi).toContain("!.iterate/config.json");
+    // config.json is NOT ignored; daemon.lock IS.
+    expect(
+      execSync(`git check-ignore .iterate/config.json; echo $?`, { cwd: tmp, encoding: "utf-8" }).trim()
+    ).toMatch(/^1$/);
+    expect(
+      execSync(`git check-ignore .iterate/daemon.lock; echo $?`, { cwd: tmp, encoding: "utf-8" }).trim()
+    ).toMatch(/^\.iterate\/daemon\.lock\n0$/);
+  });
+
+  it("upgrades an older .gitignore that ignored the whole .iterate/ directory", () => {
+    writeFileSync(join(tmp, ".gitignore"), "node_modules/\n.iterate\n.next/\n");
+    runIterate(["init"]);
+    const gi = readFileSync(join(tmp, ".gitignore"), "utf-8");
+    // Old line replaced with new pattern, other entries preserved.
+    expect(gi).not.toMatch(/^\.iterate$/m);
+    expect(gi).toContain("node_modules/");
+    expect(gi).toContain(".next/");
+    expect(gi).toContain(".iterate/*");
+    expect(gi).toContain("!.iterate/config.json");
+  });
+
+  it("leaves .gitignore untouched if it already has the partial pattern", () => {
+    const existing = "node_modules/\n.iterate/*\n!.iterate/config.json\n";
+    writeFileSync(join(tmp, ".gitignore"), existing);
+    runIterate(["init"]);
+    const gi = readFileSync(join(tmp, ".gitignore"), "utf-8");
+    expect(gi).toBe(existing);
+  });
+
   it("creates .mcp.json and .claude/settings.json", () => {
     runIterate(["init"]);
     expect(existsSync(join(tmp, ".mcp.json"))).toBe(true);

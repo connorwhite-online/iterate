@@ -21,6 +21,20 @@ custom dev-script wrappers, shared env files, and subpath-mounted apps.
 - **`withIterate` now returns an async function.** Next accepts it without
   any changes to your `next.config.ts`. Only affects you if you were
   statically inspecting the default export (unusual).
+- **`.gitignore` now partially tracks `.iterate/`.** `iterate init` writes:
+  ```
+  .iterate/*
+  !.iterate/config.json
+  ```
+  so `config.json` is checked in (it's project intent — everyone on the
+  team should agree which apps exist) while `daemon.lock`, worktree state,
+  and any future runtime files stay ignored. If your repo still has a
+  whole-directory `.iterate` / `.iterate/` entry from an earlier init,
+  re-running `iterate init` upgrades it in place.
+- **Plugin option: `appName`.** In multi-app repos, pass `appName` to
+  `withIterate` / `iterate()` matching the entry in `apps[]`. Without it,
+  iterations created via the overlay's fork button always spawn the first
+  configured app — not whichever dev server the user was actually viewing.
 
 ### New capabilities
 
@@ -50,6 +64,17 @@ custom dev-script wrappers, shared env files, and subpath-mounted apps.
   ```
   Pick which app an iteration targets at creation time:
   `iterate branch my-feature --app brand-admin`.
+
+  Also pass `appName` to each app's framework plugin so the overlay's
+  fork button spawns the right app:
+
+  ```ts
+  // apps/brand-admin/next.config.ts
+  export default withIterate(nextConfig, { appName: "brand-admin" });
+
+  // projects/world-v3/next.config.ts
+  export default withIterate(nextConfig, { appName: "world-v3" });
+  ```
 
 - **Opaque dev commands.** Wrappers like `dotenv-cli`, `env-cmd`,
   `doppler run`, `op run`, or custom TS runners now work untouched.

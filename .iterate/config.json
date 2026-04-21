@@ -1,0 +1,30 @@
+{
+  "apps": [
+    {
+      "name": "docs",
+      "devCommand": "pnpm exec next dev --port 3200",
+      "appDir": "packages/docs"
+    },
+    {
+      "name": "next-15-example",
+      "devCommand": "pnpm --filter example-next-15-app exec next dev -p 3000",
+      "appDir": "examples/next-15-app"
+    },
+    {
+      "name": "next-16-example",
+      "devCommand": "pnpm --filter example-next-16-app exec next dev -p 3016",
+      "appDir": "examples/next-16-app"
+    },
+    {
+      "name": "vite-example",
+      "devCommand": "pnpm --filter example-vite-app exec vite",
+      "appDir": "examples/vite-app"
+    }
+  ],
+  "packageManager": "pnpm",
+  "basePort": 3100,
+  "daemonPort": 4000,
+  "maxIterations": 3,
+  "idleTimeout": 0,
+  "buildCommand": "pnpm run build"
+}
