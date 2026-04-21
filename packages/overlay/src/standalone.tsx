@@ -5,6 +5,7 @@ import { IterateOverlay, type ToolMode } from "./IterateOverlay.js";
 import { FloatingPanel, ORIGINAL_TAB } from "./panel/FloatingPanel.js";
 import { DaemonConnection } from "./transport/connection.js";
 import { ThemeProvider } from "./theme.js";
+import { buildForkRequest } from "./fork-request.js";
 import type { IterationInfo } from "iterate-ui-core";
 
 /** postMessage types for parent <-> iframe communication */
@@ -539,14 +540,21 @@ function StandaloneOverlay() {
     }
   }, [isViewingIteration, postToIframe]);
 
-  // Handle creating iterations (fork)
+  // Handle creating iterations (fork). In a multi-app repo, we forward the
+  // `appName` that was stamped into __iterate_shell__ by the Next/Vite plugin
+  // so the daemon knows which app's dev server to spawn for each iteration.
+  // (Without this, every iteration would spawn the first/default app,
+  // regardless of which dev server the user clicked fork from.) See
+  // buildForkRequest for the payload shape.
   const handleFork = useCallback(
     async () => {
       try {
+        const shell = typeof window !== "undefined" ? ((window as any).__iterate_shell__ ?? null) : null;
+        const body = buildForkRequest(shell);
         const res = await fetch("/api/command", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ command: "iterate", count: 3 }),
+          body: JSON.stringify(body),
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({ message: "Unknown error" }));

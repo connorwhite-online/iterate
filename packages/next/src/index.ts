@@ -65,6 +65,18 @@ export interface IterateNextOptions {
    *   4. Auto-picked starting from the default (47100)
    */
   daemonPort?: number;
+  /**
+   * Name of the app this plugin instance wraps. Must match a `name` in
+   * `.iterate/config.json`'s `apps[]` array. When set, the overlay forwards
+   * this name to the daemon's `/api/command` and `/api/iterations` endpoints
+   * when the user creates iterations via the overlay toolbar — so iterations
+   * spawn the right dev server for the app the user is currently viewing
+   * (and not whatever the first configured app happens to be).
+   *
+   * Required in multi-app repos. Optional (and harmless) in single-app
+   * repos where there's no ambiguity.
+   */
+  appName?: string;
   /** Disable the babel plugin that injects component names/source locations (default: false) */
   disableBabelPlugin?: boolean;
 }
@@ -212,12 +224,17 @@ export function withIterate(
     const result: NextConfig = {
       ...nextConfig,
 
-      // Expose iteration name and daemon port to the client-side <Iterate /> component
+      // Expose iteration name, daemon port, basePath, and (if set) the app
+      // identifier to the client-side <Iterate /> component. The overlay
+      // forwards NEXT_PUBLIC_ITERATE_APP_NAME to the daemon when creating
+      // iterations, so multi-app repos spawn the right dev server for
+      // whichever app the user is currently viewing.
       env: {
         ...nextConfig.env,
         NEXT_PUBLIC_ITERATE_ITERATION_NAME: process.env.ITERATE_ITERATION_NAME ?? "__original__",
         NEXT_PUBLIC_ITERATE_DAEMON_PORT: String(daemonPort),
         NEXT_PUBLIC_ITERATE_BASE_PATH: basePath,
+        ...(options.appName ? { NEXT_PUBLIC_ITERATE_APP_NAME: options.appName } : {}),
       },
 
       // Add rewrites to proxy to the daemon

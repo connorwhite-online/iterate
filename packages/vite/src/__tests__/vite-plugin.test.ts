@@ -141,4 +141,28 @@ describe("transformIndexHtml — overlay injection", () => {
     expect(html).toContain(`basePath: "/app"`);
     expect(html).toContain("daemonPort: 54321");
   });
+
+  it("stamps appName into __iterate_shell__ when the option is set", async () => {
+    const plugins = iterate({ daemonPort: 54321, disableBabelPlugin: true, appName: "vite-example" });
+    const main = plugins.find((p) => p.name === "iterate")!;
+    // @ts-expect-error — fake config
+    await main.configResolved?.({ base: "/", root: tmp });
+
+    // @ts-expect-error — fake transform args
+    const out = main.transformIndexHtml?.("<html><body>hi</body></html>", {});
+    const html = typeof out === "string" ? out : out?.html;
+    expect(html).toContain(`appName: "vite-example"`);
+  });
+
+  it("omits appName from __iterate_shell__ when the option is not set", async () => {
+    const plugins = iterate({ daemonPort: 54321, disableBabelPlugin: true });
+    const main = plugins.find((p) => p.name === "iterate")!;
+    // @ts-expect-error — fake config
+    await main.configResolved?.({ base: "/", root: tmp });
+
+    // @ts-expect-error — fake transform args
+    const out = main.transformIndexHtml?.("<html><body>hi</body></html>", {});
+    const html = typeof out === "string" ? out : out?.html;
+    expect(html).not.toContain("appName");
+  });
 });

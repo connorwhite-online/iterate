@@ -36,6 +36,16 @@ export interface IteratePluginOptions {
    *   4. Auto-picked starting from the default (47100)
    */
   daemonPort?: number;
+  /**
+   * Name of the app this plugin instance wraps. Must match a `name` in
+   * `.iterate/config.json`'s `apps[]` array. When set, the overlay forwards
+   * this name to the daemon's `/api/command` and `/api/iterations` endpoints
+   * when the user creates iterations via the overlay toolbar — so iterations
+   * spawn the right dev server for the app the user is currently viewing.
+   *
+   * Required in multi-app repos. Optional in single-app repos.
+   */
+  appName?: string;
   /** Disable the babel plugin that injects component names/source locations (default: false) */
   disableBabelPlugin?: boolean;
 }
@@ -253,10 +263,15 @@ export function iterate(options: IteratePluginOptions = {}): Plugin[] {
       const iterationName = JSON.stringify(process.env.ITERATE_ITERATION_NAME ?? "__original__");
       const port = resolvedPort ?? 47100;
       const overlaySrc = `${resolvedBase}/__iterate__/overlay.js`;
+      // Stamp the app identifier into the shell when configured. The overlay
+      // forwards this to the daemon when the user creates iterations, so
+      // multi-app repos spawn the right dev server for the app the user is
+      // currently viewing.
+      const appNameKey = options.appName ? `, appName: ${JSON.stringify(options.appName)}` : "";
       return html.replace(
         "</body>",
         `<script>
-  window.__iterate_shell__ = { activeTool: 'select', activeIteration: ${iterationName}, daemonPort: ${port}, basePath: ${JSON.stringify(resolvedBase)} };
+  window.__iterate_shell__ = { activeTool: 'select', activeIteration: ${iterationName}, daemonPort: ${port}, basePath: ${JSON.stringify(resolvedBase)}${appNameKey} };
 </script>
 <script src=${JSON.stringify(overlaySrc)} defer></script>
 </body>`

@@ -60,7 +60,7 @@ export async function registerProxyRoutes(
             host: `127.0.0.1:${iterationInfo!.port}`,
           };
         },
-        onResponse: createOnResponse(daemonPort, iterationInfo.name, basePath),
+        onResponse: createOnResponse(daemonPort, iterationInfo.name, basePath, iterationInfo.appName),
       });
     } catch {
       return reply.status(502).send({
@@ -117,7 +117,7 @@ export function resolveIterationFromReferer(
  * HTML responses are intercepted to inject the overlay script.
  * Non-HTML responses are passed through unchanged.
  */
-function createOnResponse(daemonPort: number, iterationName: string, basePath: string) {
+function createOnResponse(daemonPort: number, iterationName: string, basePath: string, appName?: string) {
   return (_request: any, reply: any, res: any) => {
     const contentType = String(
       res.headers?.["content-type"] ?? res.getHeader?.("content-type") ?? ""
@@ -143,7 +143,7 @@ function createOnResponse(daemonPort: number, iterationName: string, basePath: s
       source.on("data", (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
       source.on("end", () => {
         let html = Buffer.concat(chunks).toString("utf-8");
-        html = injectOverlayScript(html, daemonPort, iterationName, basePath);
+        html = injectOverlayScript(html, daemonPort, iterationName, basePath, appName);
 
         const headers = { ...res.headers };
         delete headers["content-length"];
@@ -176,7 +176,13 @@ function createOnResponse(daemonPort: number, iterationName: string, basePath: s
  * overlay bundle loads from the right path when the app mounts under a subpath
  * like "/admin".
  */
-export function injectOverlayScript(html: string, daemonPort: number, iterationName: string, basePath: string): string {
+export function injectOverlayScript(
+  html: string,
+  daemonPort: number,
+  iterationName: string,
+  basePath: string,
+  appName?: string
+): string {
   // Skip if already injected (by the iteration's own framework plugin)
   if (html.includes("__iterate_shell__") || html.includes("__iterate-overlay-root__")) {
     return html;
@@ -185,9 +191,12 @@ export function injectOverlayScript(html: string, daemonPort: number, iterationN
   const safeIterationName = JSON.stringify(iterationName);
   const normalizedBase = basePath ? basePath.replace(/\/+$/, "") : "";
   const overlaySrc = `${normalizedBase}/__iterate__/overlay.js`;
+  // If we know the iteration's app, stamp it so fork-from-iteration POSTs
+  // to /api/command carry the right appName.
+  const appNameKey = appName ? `,appName:${JSON.stringify(appName)}` : "";
   const script = `<script>
 if(typeof window!=='undefined'&&!window.__iterate_shell__){
-window.__iterate_shell__={activeTool:'browse',activeIteration:${safeIterationName},daemonPort:${daemonPort},basePath:${JSON.stringify(normalizedBase)}};
+window.__iterate_shell__={activeTool:'browse',activeIteration:${safeIterationName},daemonPort:${daemonPort},basePath:${JSON.stringify(normalizedBase)}${appNameKey}};
 var s=document.createElement('script');s.src=${JSON.stringify(overlaySrc)};s.defer=true;document.head.appendChild(s);
 function __iterateReady(){try{window.parent.postMessage({type:'iterate:frame-ready',iteration:${safeIterationName}},'*')}catch(e){}}
 window.addEventListener('load',function(){(typeof requestIdleCallback==='function'?requestIdleCallback:function(cb){setTimeout(cb,100)})(__iterateReady)});

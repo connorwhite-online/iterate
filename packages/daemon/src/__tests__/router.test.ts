@@ -71,6 +71,16 @@ describe("injectOverlayScript", () => {
     expect(out).toContain('basePath:"/admin"');
   });
 
+  it("stamps appName into __iterate_shell__ when passed", () => {
+    const out = injectOverlayScript(html, 47100, "v1", "", "brand-admin");
+    expect(out).toContain('appName:"brand-admin"');
+  });
+
+  it("omits appName when not provided", () => {
+    const out = injectOverlayScript(html, 47100, "v1", "");
+    expect(out).not.toContain("appName");
+  });
+
   it("strips trailing slashes from basePath", () => {
     const out = injectOverlayScript(html, 47100, "v1", "/admin/");
     expect(out).toContain('"/admin/__iterate__/overlay.js"');

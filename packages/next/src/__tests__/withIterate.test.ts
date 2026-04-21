@@ -90,6 +90,18 @@ describe("withIterate — dev mode shape", () => {
     expect(result.env?.NEXT_PUBLIC_ITERATE_BASE_PATH).toBe("");
   });
 
+  it("stamps NEXT_PUBLIC_ITERATE_APP_NAME when appName is configured", async () => {
+    const result = await withIterate({}, { daemonPort: 48888, appName: "next-16-example" })();
+    expect(result.env?.NEXT_PUBLIC_ITERATE_APP_NAME).toBe("next-16-example");
+  });
+
+  it("omits NEXT_PUBLIC_ITERATE_APP_NAME when appName is not set", async () => {
+    const result = await withIterate({}, { daemonPort: 48888 })();
+    // Intentionally absent rather than empty string — overlay treats absence as
+    // "no app declared, let the daemon fall back to the sole configured app".
+    expect("NEXT_PUBLIC_ITERATE_APP_NAME" in (result.env ?? {})).toBe(false);
+  });
+
   it("exposes an async rewrites() that returns an array of proxy rules", async () => {
     const result = await withIterate({}, { daemonPort: 48888 })();
     const rewrites = await result.rewrites();

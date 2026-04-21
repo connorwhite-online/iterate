@@ -6,4 +6,4 @@ const config: NextConfig = {
   trailingSlash: true,
 };
 
-export default withIterate(config);
+export default withIterate(config, { appName: "docs" });

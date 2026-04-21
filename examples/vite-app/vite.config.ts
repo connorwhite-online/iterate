@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 import { iterate } from "iterate-ui-vite";
 
 export default defineConfig({
-  plugins: [react(), iterate()],
+  plugins: [react(), iterate({ appName: "vite-example" })],
   server: {
     // iterate sets PORT env var for each worktree's dev server
     port: parseInt(process.env.PORT ?? "5173"),
