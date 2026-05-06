@@ -5,7 +5,7 @@ import { IterateOverlay, type ToolMode } from "./IterateOverlay.js";
 import { FloatingPanel, ORIGINAL_TAB } from "./panel/FloatingPanel.js";
 import { DaemonConnection } from "./transport/connection.js";
 import { ThemeProvider } from "./theme.js";
-import { buildForkRequest } from "./fork-request.js";
+import { buildForkRequest, filterIterationsForApp } from "./fork-request.js";
 import type { IterationInfo } from "iterate-ui-core";
 
 /** postMessage types for parent <-> iframe communication */
@@ -79,7 +79,7 @@ function StandaloneOverlay() {
   const [tabCounts, setTabCounts] = useState<Record<string, { batch: number; move: number }>>({});
   const [tabProcessing, setTabProcessing] = useState<Record<string, boolean>>({});
   const [previewMode, setPreviewMode] = useState(true);
-  const [iterations, setIterations] = useState<Record<string, IterationInfo>>({});
+  const [allIterations, setAllIterations] = useState<Record<string, IterationInfo>>({});
   const [readyIframes, setReadyIframes] = useState<Set<string>>(new Set());
 
   // Detect context
@@ -92,9 +92,18 @@ function StandaloneOverlay() {
   // without a shell and matches iterate's default starting port.
   const shell = (window as any).__iterate_shell__;
   const daemonPort = shell?.daemonPort ?? 47100;
+  const currentAppName: string | undefined = shell?.appName;
   const wsUrl = !isDaemonShell && shell?.daemonPort
     ? `ws://${window.location.hostname}:${shell.daemonPort}/ws`
     : undefined;
+
+  // Filter iterations to only those that target the current app (in
+  // multi-app repos). See filterIterationsForApp for the rules; memoized
+  // so callback deps that depend on `iterations` stay stable.
+  const iterations = React.useMemo<Record<string, IterationInfo>>(
+    () => filterIterationsForApp(allIterations, { isDaemonShell, currentAppName }),
+    [allIterations, isDaemonShell, currentAppName]
+  );
 
   // Keep refs in sync with state (for use in event handlers with stable deps)
   modeRef.current = mode;
@@ -336,7 +345,7 @@ function StandaloneOverlay() {
     connectionRef.current = conn;
 
     const unsub = conn.onIterationsChange((iters) => {
-      setIterations(iters);
+      setAllIterations(iters);
     });
 
     conn.connect();

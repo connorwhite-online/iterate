@@ -159,10 +159,10 @@ export function iterate(options: IteratePluginOptions = {}): Plugin[] {
       resolvedPort = await resolveDaemonPort(repoRoot, startingPort, options.daemonPort ?? envPort);
     },
 
-    configureServer(server: ViteDevServer) {
+    async configureServer(server: ViteDevServer) {
       const repoRoot = getGitRoot() ?? server.config.root;
       const port = resolvedPort ?? 47100;
-      daemon = startDaemon(port, repoRoot);
+      daemon = await startDaemonIfNeeded(port, repoRoot);
 
       const overlayPath = `${resolvedBase}/__iterate__/overlay.js`;
 
@@ -248,10 +248,15 @@ export function iterate(options: IteratePluginOptions = {}): Plugin[] {
         }
       });
 
-      // Clean up daemon when dev server closes
+      // Clean up daemon when dev server closes — but only if this plugin
+      // instance was the one that spawned it. If we reused a pre-existing
+      // daemon (daemon === null after startDaemonIfNeeded), some other
+      // plugin owns its lifecycle and we leave it running.
       server.httpServer?.on("close", () => {
-        stopDaemon(daemon, port);
-        daemon = null;
+        if (daemon) {
+          stopDaemon(daemon, port);
+          daemon = null;
+        }
       });
     },
 
@@ -297,6 +302,20 @@ function getGitRoot(): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Spawn a daemon for this repo if no live one exists. Reuses an already-
+ * running daemon when the port is bound (e.g. another plugin instance in
+ * the same monorepo started one first). Mirrors the Next plugin's behavior
+ * so multiple concurrent dev servers can coexist.
+ */
+async function startDaemonIfNeeded(port: number, cwd: string): Promise<ChildProcess | null> {
+  if (await isPortInUse(port)) {
+    console.log(`[iterate] daemon already running on port ${port}`);
+    return null;
+  }
+  return startDaemon(port, cwd);
 }
 
 function startDaemon(port: number, cwd: string): ChildProcess {
