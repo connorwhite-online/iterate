@@ -1,4 +1,5 @@
 import { simpleGit, type SimpleGit } from "simple-git";
+import { createSerializer } from "./serialize.js";
 import { join, basename, resolve } from "node:path";
 
 export interface DiscoveredWorktree {
@@ -14,6 +15,15 @@ export class WorktreeManager {
   private cwd: string;
   /** Base directory for iterate worktrees: <parent>/.iterate/<project>/ */
   private worktreeBase: string;
+  /**
+   * Serialize `git worktree add/remove` invocations against this repo.
+   * Concurrent mutations race on `.git/worktrees/`: one `worktree add`
+   * enumerates the dir while another is mid-write, producing
+   *   "fatal: failed to read .git/worktrees/<other>/commondir: Undefined error: 0"
+   * The fork flow fires N creates in parallel for speed, so we funnel
+   * them through this single chain. See ./serialize.ts.
+   */
+  private runSerialized = createSerializer();
 
   constructor(cwd: string) {
     this.cwd = cwd;
@@ -40,69 +50,75 @@ export class WorktreeManager {
     name: string,
     baseBranch?: string
   ): Promise<{ worktreePath: string; branch: string }> {
-    const base = baseBranch ?? (await this.getCurrentBranch());
+    return this.runSerialized(async () => {
+      const base = baseBranch ?? (await this.getCurrentBranch());
 
-    // Verify the base ref exists (handles unborn HEAD, nonexistent branches)
-    try {
-      await this.git.raw(["rev-parse", "--verify", base]);
-    } catch {
-      throw new Error(
-        `Base ref "${base}" does not exist. Make sure you have at least one commit.`
-      );
-    }
+      // Verify the base ref exists (handles unborn HEAD, nonexistent branches)
+      try {
+        await this.git.raw(["rev-parse", "--verify", base]);
+      } catch {
+        throw new Error(
+          `Base ref "${base}" does not exist. Make sure you have at least one commit.`
+        );
+      }
 
-    const branch = `iterate/${name}`;
-    const worktreePath = join(this.worktreeBase, name);
+      const branch = `iterate/${name}`;
+      const worktreePath = join(this.worktreeBase, name);
 
-    // Clean up stale branch/worktree from a previous run
-    try {
-      await this.git.raw(["rev-parse", "--verify", branch]);
-      // Branch exists — remove stale worktree first, then delete branch
-      try { await this.git.raw(["worktree", "remove", "--force", worktreePath]); } catch { /* may not exist */ }
-      await this.git.raw(["worktree", "prune"]);
-      await this.git.raw(["branch", "-D", branch]);
-    } catch {
-      // Branch doesn't exist — good, nothing to clean up
-    }
+      // Clean up stale branch/worktree from a previous run
+      try {
+        await this.git.raw(["rev-parse", "--verify", branch]);
+        // Branch exists — remove stale worktree first, then delete branch
+        try { await this.git.raw(["worktree", "remove", "--force", worktreePath]); } catch { /* may not exist */ }
+        await this.git.raw(["worktree", "prune"]);
+        await this.git.raw(["branch", "-D", branch]);
+      } catch {
+        // Branch doesn't exist — good, nothing to clean up
+      }
 
-    await this.git.raw([
-      "worktree",
-      "add",
-      "-b",
-      branch,
-      worktreePath,
-      base,
-    ]);
+      await this.git.raw([
+        "worktree",
+        "add",
+        "-b",
+        branch,
+        worktreePath,
+        base,
+      ]);
 
-    return { worktreePath, branch };
+      return { worktreePath, branch };
+    });
   }
 
   /** Remove a worktree and optionally delete its branch */
   async remove(name: string, deleteBranch = true): Promise<void> {
-    const worktreePath = join(this.worktreeBase, name);
+    return this.runSerialized(async () => {
+      const worktreePath = join(this.worktreeBase, name);
 
-    await this.git.raw(["worktree", "remove", "--force", worktreePath]);
+      await this.git.raw(["worktree", "remove", "--force", worktreePath]);
 
-    if (deleteBranch) {
-      try {
-        await this.git.raw(["branch", "-D", `iterate/${name}`]);
-      } catch {
-        // Branch may already be deleted
+      if (deleteBranch) {
+        try {
+          await this.git.raw(["branch", "-D", `iterate/${name}`]);
+        } catch {
+          // Branch may already be deleted
+        }
       }
-    }
+    });
   }
 
   /** Remove a worktree by its full path (for external worktrees) */
   async removeByPath(worktreePath: string, branch?: string, deleteBranch = false): Promise<void> {
-    await this.git.raw(["worktree", "remove", "--force", worktreePath]);
+    return this.runSerialized(async () => {
+      await this.git.raw(["worktree", "remove", "--force", worktreePath]);
 
-    if (deleteBranch && branch) {
-      try {
-        await this.git.raw(["branch", "-D", branch]);
-      } catch {
-        // Branch may already be deleted
+      if (deleteBranch && branch) {
+        try {
+          await this.git.raw(["branch", "-D", branch]);
+        } catch {
+          // Branch may already be deleted
+        }
       }
-    }
+    });
   }
 
   /** List all iterate worktrees (filtered to iterate/ branches only) */

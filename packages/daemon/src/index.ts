@@ -26,6 +26,7 @@ import {
   runIterationPipeline,
   resolveAppForRequest,
   resolveAppForWorktreeBranch,
+  countIterationsForApp,
 } from "./iteration/pipeline.js";
 
 export interface DaemonOptions {
@@ -95,19 +96,19 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
       return reply.status(409).send({ message: `Iteration "${name}" already exists` });
     }
 
-    const iterationCount = Object.keys(store.getIterations()).length;
-    if (iterationCount >= config.maxIterations) {
-      return reply.status(429).send({
-        message: `Maximum iterations (${config.maxIterations}) reached. Remove one first.`,
-      });
-    }
-
     const app = resolveAppForRequest(config, appName);
     if (!app) {
       return reply.status(400).send({
         message: appName
           ? `App "${appName}" not registered in .iterate/config.json.`
           : `No app specified and config has ${config.apps.length} apps — pass "appName" in the request body.`,
+      });
+    }
+
+    const iterationCount = countIterationsForApp(store.getIterations(), config, app.name);
+    if (iterationCount >= config.maxIterations) {
+      return reply.status(429).send({
+        message: `Maximum iterations (${config.maxIterations}) reached for app "${app.name}". Remove one first.`,
       });
     }
 
@@ -369,7 +370,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
       // Skip if already exists
       if (store.getIteration(name)) continue;
 
-      const iterationCount = Object.keys(store.getIterations()).length;
+      const iterationCount = countIterationsForApp(store.getIterations(), config, app.name);
       if (iterationCount >= config.maxIterations) break;
 
       try {
@@ -613,10 +614,6 @@ async function discoverAndRegisterWorktrees(
     );
     if (alreadyTrackedByBranch) continue;
 
-    // Respect maxIterations limit
-    const iterationCount = Object.keys(store.getIterations()).length + pendingPaths.size;
-    if (iterationCount >= config.maxIterations) break;
-
     // This is a new, untracked worktree — register it.
     // Resolve which app this worktree targets:
     //  - Branch convention "iterate/<appName>/<rest>" wins if <appName> matches a registered app.
@@ -627,6 +624,10 @@ async function discoverAndRegisterWorktrees(
       // Can't infer app; leave as untracked rather than starting with wrong config
       continue;
     }
+
+    // Respect maxIterations limit (per-app, not global)
+    const iterationCount = countIterationsForApp(store.getIterations(), config, app.name);
+    if (iterationCount >= config.maxIterations) continue;
 
     pendingPaths.add(wt.path);
     const baseName = deriveIterationName(wt.branch);

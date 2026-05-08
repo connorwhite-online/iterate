@@ -30,6 +30,31 @@ export function resolveAppForRequest(config: IterateConfig, appName: string | un
  * Returns undefined if the repo has multiple apps and the branch name doesn't
  * disambiguate — the worktree is left untracked rather than misconfigured.
  */
+/**
+ * Count iterations belonging to a given app.
+ *
+ * `maxIterations` is a per-app cap, not a global one — three iterations
+ * of `next-16-example` should not exhaust the quota for `vite-example`.
+ *
+ * Iterations without an `appName` are treated as belonging to the sole
+ * configured app when the config has only one app (legacy single-app
+ * behavior). In multi-app configs, untagged iterations are orphans and
+ * count toward no app's quota.
+ */
+export function countIterationsForApp(
+  iterations: Record<string, IterationInfo>,
+  config: IterateConfig,
+  appName: string,
+): number {
+  const isSingleApp = config.apps.length <= 1;
+  let count = 0;
+  for (const info of Object.values(iterations)) {
+    if (info.appName === appName) count += 1;
+    else if (!info.appName && isSingleApp) count += 1;
+  }
+  return count;
+}
+
 export function resolveAppForWorktreeBranch(config: IterateConfig, branch: string): AppConfig | undefined {
   const iteratePrefix = "iterate/";
   if (branch.startsWith(iteratePrefix)) {

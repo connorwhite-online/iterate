@@ -43,7 +43,7 @@ export interface FloatingPanelProps {
   /** Called when user switches iteration */
   onIterationChange?: (name: string) => void;
   /** Called when user wants to create iterations (fork) */
-  onFork?: () => void;
+  onFork?: () => void | Promise<void>;
   /** Called when user wants to pick the active iteration */
   onPick?: (name: string) => void | Promise<void>;
   /** Called when user wants to discard all iterations and keep original */
@@ -165,7 +165,10 @@ export function FloatingPanel({
     };
   }, []);
 
-  // Clear local fork loading state once real iterations appear
+  // Clear local fork loading state once real iterations appear.
+  // Note: forkLoading is ALSO cleared in the click handler when the fork POST
+  // resolves — that's the fallback for the case where the daemon returns
+  // 0 iterations (e.g. maxIterations cap hit), so the spinner doesn't hang.
   useEffect(() => {
     if (hasIterations) setForkLoading(false);
   }, [hasIterations]);
@@ -552,9 +555,17 @@ export function FloatingPanel({
               <IconButton
                 icon={<ForkIcon size={ICON_SIZE} />}
                 label="Create iterations"
-                onClick={() => {
+                onClick={async () => {
                   setForkLoading(true);
-                  onFork?.();
+                  try {
+                    await onFork?.();
+                  } finally {
+                    // Always clear — if iterations were created, the
+                    // hasIterations effect would clear too, but if the
+                    // daemon returned 0 (e.g. maxIterations cap), this
+                    // is the only thing that unsticks the spinner.
+                    setForkLoading(false);
+                  }
                 }}
               />
             )}
@@ -961,6 +972,7 @@ function IconButton({
   return (
     <button
       ref={buttonRef}
+      aria-label={label}
       onClick={(e) => {
         e.stopPropagation();
         if (!disabled) onClick();

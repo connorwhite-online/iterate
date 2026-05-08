@@ -568,6 +568,17 @@ function StandaloneOverlay() {
         if (!res.ok) {
           const err = await res.json().catch(() => ({ message: "Unknown error" }));
           console.error("[iterate] Fork failed:", err.message);
+          return;
+        }
+        // Daemon returned 200 but may have created zero iterations
+        // (e.g. maxIterations cap reached). Log so the user can see why
+        // nothing happened — without this, the spinner clearing looks
+        // mysterious.
+        const data = await res.json().catch(() => null) as { iterations?: string[] } | null;
+        if (data && Array.isArray(data.iterations) && data.iterations.length === 0) {
+          console.warn(
+            "[iterate] Fork created 0 iterations — likely the per-app maxIterations cap is reached. Remove an existing iteration first."
+          );
         }
       } catch (err) {
         console.error("[iterate] Fork failed:", err);

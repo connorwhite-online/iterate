@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import type { AppConfig, IterateConfig } from "iterate-ui-core";
+import type { IterationInfo } from "iterate-ui-core";
 import {
   buildDevCommand,
   getInstallCommand,
@@ -11,6 +12,7 @@ import {
   resolveAppForRequest,
   resolveAppForWorktreeBranch,
   joinAppDir,
+  countIterationsForApp,
 } from "../iteration/pipeline.js";
 
 const baseConfig: IterateConfig = {
@@ -481,5 +483,69 @@ describe("buildChildEnv — precedence matrix", () => {
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
+  });
+});
+
+describe("countIterationsForApp", () => {
+  function mkIter(name: string, appName?: string): IterationInfo {
+    return {
+      name,
+      branch: `iterate/${name}`,
+      worktreePath: "",
+      port: 0,
+      pid: null,
+      status: "ready",
+      createdAt: new Date().toISOString(),
+      source: "iterate",
+      ...(appName ? { appName } : {}),
+    };
+  }
+
+  const multiApp: IterateConfig = {
+    ...baseConfig,
+    apps: [
+      { name: "web", devCommand: "next dev" },
+      { name: "admin", devCommand: "next dev" },
+    ],
+  };
+
+  it("counts only iterations matching the requested app (multi-app)", () => {
+    const all = {
+      a: mkIter("a", "web"),
+      b: mkIter("b", "web"),
+      c: mkIter("c", "admin"),
+    };
+    expect(countIterationsForApp(all, multiApp, "web")).toBe(2);
+    expect(countIterationsForApp(all, multiApp, "admin")).toBe(1);
+  });
+
+  it("ignores iterations without appName in multi-app configs (orphans)", () => {
+    const all = { a: mkIter("a", "web"), legacy: mkIter("legacy") };
+    expect(countIterationsForApp(all, multiApp, "web")).toBe(1);
+    expect(countIterationsForApp(all, multiApp, "admin")).toBe(0);
+  });
+
+  it("counts orphan iterations toward the sole app in single-app configs", () => {
+    const singleApp: IterateConfig = {
+      ...baseConfig,
+      apps: [{ name: "web", devCommand: "next dev" }],
+    };
+    const all = { a: mkIter("a", "web"), legacy: mkIter("legacy") };
+    expect(countIterationsForApp(all, singleApp, "web")).toBe(2);
+  });
+
+  it("returns 0 for an empty iteration set", () => {
+    expect(countIterationsForApp({}, multiApp, "web")).toBe(0);
+  });
+
+  it("the per-app cap does not block a different app (the bug we are fixing)", () => {
+    // Three iterations of `web` should NOT exhaust the quota for `admin`.
+    const all = {
+      a: mkIter("a", "web"),
+      b: mkIter("b", "web"),
+      c: mkIter("c", "web"),
+    };
+    expect(countIterationsForApp(all, multiApp, "web")).toBe(3);
+    expect(countIterationsForApp(all, multiApp, "admin")).toBe(0);
   });
 });
