@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, fireEvent } from "@testing-library/react";
+import { render, fireEvent, act, waitFor } from "@testing-library/react";
 import { FloatingPanel, ORIGINAL_TAB } from "../panel/FloatingPanel.js";
 
 const defaultProps = {
@@ -184,6 +184,48 @@ describe("FloatingPanel", () => {
       fireEvent.click(forkButton);
       expect(onFork).toHaveBeenCalled();
     }
+  });
+
+  it("clears forkLoading when onFork resolves with no iterations created (maxIterations cap)", async () => {
+    // Bug: when daemon returns 0 iterations (per-app cap reached), the
+    // hasIterations effect never fires → spinner stuck forever. The fix
+    // awaits onFork in the click handler and always clears forkLoading.
+    let resolveFork!: () => void;
+    const forkPromise = new Promise<void>((r) => { resolveFork = r; });
+    const onFork = vi.fn(() => forkPromise);
+
+    const { container } = render(
+      <FloatingPanel {...defaultProps} onFork={onFork} />
+    );
+
+    const findForkButton = () =>
+      container.querySelector('button[aria-label="Create iterations"]') as HTMLButtonElement | null;
+    const findSpinner = () =>
+      container.querySelector('button[aria-label="Creating iterations"]') as HTMLButtonElement | null;
+
+    expect(findForkButton()).not.toBeNull();
+
+    await act(async () => {
+      fireEvent.click(findForkButton()!);
+    });
+    expect(onFork).toHaveBeenCalled();
+
+    // Spinner is showing while the fork POST is in-flight.
+    expect(findSpinner()).not.toBeNull();
+    expect(findForkButton()).toBeNull();
+
+    // Daemon returns; resolves with no iterations created (empty `iterations`
+    // map remains empty → hasIterations stays false). The spinner must clear
+    // anyway because we now `finally { setForkLoading(false) }`.
+    await act(async () => {
+      resolveFork();
+      await forkPromise;
+    });
+
+    await waitFor(() => {
+      expect(findSpinner()).toBeNull();
+      expect(findForkButton()).not.toBeNull();
+    });
   });
 
   it("tools work when viewing an iteration (postMessage bridge)", () => {

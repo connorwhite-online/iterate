@@ -27,17 +27,22 @@ export class ProcessManager {
     this.maxPort = basePort + 99;
   }
 
-  /** Find an available port starting from the next in range */
+  /**
+   * Find an available port starting from the next in range.
+   *
+   * Race-safe against concurrent callers: we bump `nextPort` BEFORE the
+   * async port probe so a second caller that enters the loop mid-await
+   * sees a different starting port. Without this, two iterations created
+   * back-to-back via /api/command would both pick up the same port.
+   */
   async allocatePort(): Promise<number> {
-    for (let port = this.nextPort; port <= this.maxPort; port++) {
-      const available = await this.isPortAvailable(port);
-      if (available) {
-        this.nextPort = port + 1;
-        return port;
-      }
+    while (this.nextPort <= this.maxPort) {
+      const port = this.nextPort;
+      this.nextPort = port + 1; // reserve eagerly
+      if (await this.isPortAvailable(port)) return port;
     }
     throw new Error(
-      `No available ports in range ${this.nextPort - 99}-${this.maxPort}`
+      `No available ports in range ${this.nextPort - 100}-${this.maxPort}`
     );
   }
 
@@ -180,26 +185,47 @@ export class ProcessManager {
     throw new Error(`Dev server on port ${port} did not start within ${timeoutMs / 1000}s`);
   }
 
-  /** Check if something is listening on a port (TCP connect probe) */
+  /**
+   * Check if something is listening on a port (TCP connect probe).
+   *
+   * Probes BOTH IPv4 (127.0.0.1) and IPv6 (::1) loopback in parallel and
+   * returns true if either responds. Necessary because dev servers bind
+   * inconsistently — vite binds to `localhost` which resolves to `::1` on
+   * macOS, while Next.js binds dual-stack. A 127.0.0.1-only probe times
+   * out against a vite server that's actually up and serving.
+   */
   private isPortListening(port: number): Promise<boolean> {
-    return new Promise((resolve) => {
-      const socket = createConnection({ port, host: "127.0.0.1" });
-      socket.setTimeout(1000);
-      socket.once("connect", () => { socket.destroy(); resolve(true); });
-      socket.once("error", () => { socket.destroy(); resolve(false); });
-      socket.once("timeout", () => { socket.destroy(); resolve(false); });
-    });
+    const probe = (host: string) =>
+      new Promise<boolean>((resolve) => {
+        const socket = createConnection({ port, host });
+        socket.setTimeout(1000);
+        socket.once("connect", () => { socket.destroy(); resolve(true); });
+        socket.once("error", () => { socket.destroy(); resolve(false); });
+        socket.once("timeout", () => { socket.destroy(); resolve(false); });
+      });
+    return Promise.all([probe("127.0.0.1"), probe("::1")]).then(
+      ([v4, v6]) => v4 || v6
+    );
   }
 
-  /** Check if a port is available */
+  /**
+   * Check if a port is available on BOTH IPv4 and IPv6 loopback.
+   * If something is bound to ::1 only, our spawned dev server (which may
+   * bind dual-stack or to ::1) would collide — so we treat the port as
+   * unavailable in that case too.
+   */
   private isPortAvailable(port: number): Promise<boolean> {
-    return new Promise((resolve) => {
-      const server = createServer();
-      server.once("error", () => resolve(false));
-      server.once("listening", () => {
-        server.close(() => resolve(true));
+    const tryBind = (host: string) =>
+      new Promise<boolean>((resolve) => {
+        const server = createServer();
+        server.once("error", () => resolve(false));
+        server.once("listening", () => {
+          server.close(() => resolve(true));
+        });
+        server.listen(port, host);
       });
-      server.listen(port, "127.0.0.1");
-    });
+    return Promise.all([tryBind("127.0.0.1"), tryBind("::1")]).then(
+      ([v4, v6]) => v4 && v6
+    );
   }
 }

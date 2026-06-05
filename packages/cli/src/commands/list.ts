@@ -1,20 +1,22 @@
 import { Command } from "commander";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import type { IterateConfig, IterationInfo } from "iterate-ui-core";
+import type { IterationInfo } from "iterate-ui-core";
+import { loadConfig, resolveDaemonPort } from "iterate-ui-core/node";
+import { fetchWithTimeout, parseJsonSafe, resolveRepoRoot } from "../http-utils.js";
 
 export const listCommand = new Command("list")
   .description("List all active iterations")
   .action(async () => {
-    const cwd = process.cwd();
+    const cwd = resolveRepoRoot();
     const config = loadConfig(cwd);
-    if (!config) return;
+    if (!config) {
+      console.error("Error: iterate not initialized. Run `iterate init` first.");
+      process.exit(1);
+    }
+    const port = resolveDaemonPort(cwd, config);
 
     try {
-      const res = await fetch(
-        `http://localhost:${config.daemonPort}/api/iterations`
-      );
-      const iterations: Record<string, IterationInfo> = await res.json();
+      const res = await fetchWithTimeout(`http://localhost:${port}/api/iterations`);
+      const iterations = (await parseJsonSafe<Record<string, IterationInfo>>(res)) ?? {};
       const entries = Object.values(iterations);
 
       if (entries.length === 0) {
@@ -26,23 +28,17 @@ export const listCommand = new Command("list")
       for (const it of entries) {
         const status =
           it.status === "ready" ? "\x1b[32m●\x1b[0m" : "\x1b[33m○\x1b[0m";
+        const app = it.appName ? ` app: ${it.appName},` : "";
         console.log(
-          `  ${status} ${it.name} (branch: ${it.branch}, port: ${it.port}, status: ${it.status})`
+          `  ${status} ${it.name} (branch: ${it.branch},${app} port: ${it.port}, status: ${it.status})`
         );
       }
-    } catch {
-      console.error(
-        "Error: cannot connect to iterate daemon. Run `iterate serve` first."
-      );
+    } catch (err) {
+      const timedOut = (err as Error).name === "AbortError";
+      const prefix = timedOut
+        ? `Error: request to iterate daemon on port ${port} timed out.`
+        : `Error: cannot connect to iterate daemon on port ${port}.`;
+      console.error(`${prefix} Run \`iterate serve\` first.`);
       process.exit(1);
     }
   });
-
-function loadConfig(cwd: string): IterateConfig | null {
-  const configPath = join(cwd, ".iterate", "config.json");
-  if (!existsSync(configPath)) {
-    console.error("Error: iterate not initialized. Run `iterate init` first.");
-    process.exit(1);
-  }
-  return JSON.parse(readFileSync(configPath, "utf-8"));
-}

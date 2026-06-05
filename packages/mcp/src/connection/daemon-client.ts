@@ -35,7 +35,7 @@ export class DaemonClient {
   private maxReconnectAttempts = Infinity;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(daemonPort: number = 4000) {
+  constructor(daemonPort: number = 47100) {
     this.daemonUrl = `ws://127.0.0.1:${daemonPort}/ws`;
   }
 
@@ -162,7 +162,7 @@ export class DaemonClient {
     path: string,
     body?: unknown
   ): Promise<unknown> {
-    const port = new URL(this.daemonUrl).port || "4000";
+    const port = new URL(this.daemonUrl).port || "47100";
     const res = await fetch(`http://127.0.0.1:${port}${path}`, {
       method,
       headers: body ? { "Content-Type": "application/json" } : {},

@@ -1,6 +1,6 @@
 {
   "name": "iterate-ui-cli",
-  "version": "0.1.7",
+  "version": "0.2.0",
   "description": "CLI for iterate — manage worktree iterations",
   "license": "MIT",
   "repository": {
@@ -9,7 +9,13 @@
     "directory": "packages/cli"
   },
   "homepage": "https://iterate-ui.com",
-  "keywords": ["iterate", "ui", "cli", "worktree", "ai"],
+  "keywords": [
+    "iterate",
+    "ui",
+    "cli",
+    "worktree",
+    "ai"
+  ],
   "engines": {
     "node": ">=18.0.0"
   },
@@ -27,7 +33,8 @@
     "prepublishOnly": "pnpm build",
     "build": "tsup",
     "dev": "tsup --watch",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "vitest run"
   },
   "dependencies": {
     "iterate-ui-core": "workspace:*",
@@ -36,6 +43,7 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "tsup": "^8.3.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^4.0.18"
   }
 }

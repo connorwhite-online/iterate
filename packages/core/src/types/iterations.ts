@@ -19,6 +19,12 @@ export interface IterationInfo {
   pid: number | null;
   status: IterationStatus;
   createdAt: string;
+  /**
+   * Name of the registered app this iteration targets (from config.apps[].name).
+   * Optional for backward compatibility with iterations created before multi-app support;
+   * if missing, callers should treat it as the sole app in the config.
+   */
+  appName?: string;
   /** The prompt that spawned this iteration (from /iterate command) */
   commandPrompt?: string;
   /** Groups iterations from the same /iterate command */

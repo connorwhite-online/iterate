@@ -196,16 +196,14 @@ describe("StateStore", () => {
       expect(store.getCommandContext("nope")).toBeUndefined();
     });
 
-    it("getLatestCommand returns most recently created", () => {
-      vi.spyOn(Date, "now")
-        .mockReturnValueOnce(1000)
-        .mockReturnValueOnce(3000)
-        .mockReturnValueOnce(2000);
+    it("getLatestCommand returns the most recently inserted", () => {
+      // Map preserves insertion order; the last setCommandContext wins
+      // regardless of Date.now ordering. This makes ties deterministic
+      // when multiple /iterate commands fire in the same millisecond.
       store.setCommandContext("cmd-1", "first", []);
       store.setCommandContext("cmd-2", "second", []);
       store.setCommandContext("cmd-3", "third", []);
-      expect(store.getLatestCommand()?.commandId).toBe("cmd-2");
-      vi.restoreAllMocks();
+      expect(store.getLatestCommand()?.commandId).toBe("cmd-3");
     });
 
     it("getLatestCommand returns undefined when empty", () => {

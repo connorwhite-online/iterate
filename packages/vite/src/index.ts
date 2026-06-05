@@ -2,11 +2,50 @@ import type { Plugin, ViteDevServer } from "vite";
 import { spawn, execSync, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import http from "node:http";
+import {
+  findFreePort,
+  isPortInUse,
+  loadConfig,
+  readLockfile,
+  isDaemonAlive,
+} from "iterate-ui-core/node";
+
+/**
+ * Resolve a package's entry point via require.resolve, falling back to reading
+ * the package.json for ESM-only packages without a "require" export.
+ */
+function resolvePackageEntry(packageName: string, _require: NodeRequire): string {
+  try {
+    return _require.resolve(packageName);
+  } catch {
+    const pkgJsonPath = _require.resolve(`${packageName}/package.json`);
+    const pkg = JSON.parse(readFileSync(pkgJsonPath, "utf-8"));
+    const main = pkg.exports?.["."]?.import ?? pkg.main ?? "index.js";
+    return join(dirname(pkgJsonPath), main);
+  }
+}
 
 export interface IteratePluginOptions {
-  /** Port for the iterate daemon (default: 4000) */
+  /**
+   * Port for the iterate daemon. If omitted, resolved in order:
+   *   1. ITERATE_DAEMON_PORT env var
+   *   2. An already-running daemon's port from .iterate/daemon.lock
+   *   3. `daemonPort` from .iterate/config.json
+   *   4. Auto-picked starting from the default (47100)
+   */
   daemonPort?: number;
+  /**
+   * Name of the app this plugin instance wraps. Must match a `name` in
+   * `.iterate/config.json`'s `apps[]` array. When set, the overlay forwards
+   * this name to the daemon's `/api/command` and `/api/iterations` endpoints
+   * when the user creates iterations via the overlay toolbar — so iterations
+   * spawn the right dev server for the app the user is currently viewing.
+   *
+   * Required in multi-app repos. Optional in single-app repos.
+   */
+  appName?: string;
   /** Disable the babel plugin that injects component names/source locations (default: false) */
   disableBabelPlugin?: boolean;
 }
@@ -31,8 +70,9 @@ export interface IteratePluginOptions {
  * 5. Cleans up daemon when dev server stops
  */
 export function iterate(options: IteratePluginOptions = {}): Plugin[] {
-  const daemonPort = options.daemonPort ?? 4000;
   let daemon: ChildProcess | null = null;
+  let resolvedPort: number | null = null;
+  let resolvedBase = "";
   let overlayJS: string | null = null;
 
   const plugins: Plugin[] = [];
@@ -87,7 +127,7 @@ export function iterate(options: IteratePluginOptions = {}): Plugin[] {
 
           if (!result?.code) return null;
           return { code: result.code, map: result.map };
-        } catch (err) {
+        } catch {
           // Don't break the build if our plugin fails on a file
           return null;
         }
@@ -100,18 +140,39 @@ export function iterate(options: IteratePluginOptions = {}): Plugin[] {
     name: "iterate",
     apply: "serve", // Only active during dev
 
-    configureServer(server: ViteDevServer) {
-      // Start the daemon
+    async configResolved(config) {
+      // Track Vite's base so /__iterate__ resolves correctly under subpath mounts.
+      resolvedBase = (config.base ?? "/").replace(/\/+$/, "");
+
+      const repoRoot = getGitRoot() ?? config.root;
+      const fileConfig = (() => {
+        try {
+          return loadConfig(repoRoot);
+        } catch {
+          return null;
+        }
+      })();
+
+      const envPort = process.env.ITERATE_DAEMON_PORT ? parseInt(process.env.ITERATE_DAEMON_PORT, 10) : undefined;
+      const startingPort = options.daemonPort ?? envPort ?? fileConfig?.daemonPort ?? 47100;
+
+      resolvedPort = await resolveDaemonPort(repoRoot, startingPort, options.daemonPort ?? envPort);
+    },
+
+    async configureServer(server: ViteDevServer) {
       const repoRoot = getGitRoot() ?? server.config.root;
-      daemon = startDaemon(daemonPort, repoRoot);
+      const port = resolvedPort ?? 47100;
+      daemon = await startDaemonIfNeeded(port, repoRoot);
+
+      const overlayPath = `${resolvedBase}/__iterate__/overlay.js`;
 
       // Serve the overlay bundle directly (avoids extra proxy hop)
-      server.middlewares.use("/__iterate__/overlay.js", (_req, res) => {
+      server.middlewares.use(overlayPath, (_req, res) => {
         if (!overlayJS) {
           try {
             const require = createRequire(import.meta.url);
-            const overlayPath = require.resolve("iterate-ui-overlay/standalone");
-            overlayJS = readFileSync(overlayPath, "utf-8");
+            const path = require.resolve("iterate-ui-overlay/standalone");
+            overlayJS = readFileSync(path, "utf-8");
           } catch {
             res.statusCode = 404;
             res.end("Overlay bundle not found");
@@ -123,12 +184,22 @@ export function iterate(options: IteratePluginOptions = {}): Plugin[] {
         res.end(overlayJS);
       });
 
-      // Proxy iterate API and WebSocket to daemon
+      // Proxy iterate API and WebSocket to daemon — honor Vite's `base` so
+      // subpath-mounted apps (e.g. base: "/admin/") route /admin/api/* and
+      // /admin/__iterate__/* correctly.
+      const basePrefix = resolvedBase ? resolvedBase : "";
       server.middlewares.use((req, res, next) => {
         const url = req.url ?? "";
+        const matches = (prefix: string) =>
+          url.startsWith(prefix) || (!!basePrefix && url.startsWith(`${basePrefix}${prefix}`));
 
-        if (url.startsWith("/api/") || url.startsWith("/__iterate__/")) {
-          proxyRequest(req, res, daemonPort);
+        if (matches("/api/") || matches("/__iterate__/")) {
+          // Strip the base prefix before forwarding so the daemon sees
+          // paths relative to its own root.
+          if (basePrefix && url.startsWith(basePrefix)) {
+            req.url = url.slice(basePrefix.length) || "/";
+          }
+          proxyRequest(req, res, port);
           return;
         }
 
@@ -141,12 +212,12 @@ export function iterate(options: IteratePluginOptions = {}): Plugin[] {
           const proxy = http.request(
             {
               hostname: "127.0.0.1",
-              port: daemonPort,
+              port,
               path: "/ws",
               method: "GET",
               headers: {
                 ...req.headers,
-                host: `127.0.0.1:${daemonPort}`,
+                host: `127.0.0.1:${port}`,
               },
             },
             () => {}
@@ -177,10 +248,15 @@ export function iterate(options: IteratePluginOptions = {}): Plugin[] {
         }
       });
 
-      // Clean up daemon when dev server closes
+      // Clean up daemon when dev server closes — but only if this plugin
+      // instance was the one that spawned it. If we reused a pre-existing
+      // daemon (daemon === null after startDaemonIfNeeded), some other
+      // plugin owns its lifecycle and we leave it running.
       server.httpServer?.on("close", () => {
-        stopDaemon(daemon, daemonPort);
-        daemon = null;
+        if (daemon) {
+          stopDaemon(daemon, port);
+          daemon = null;
+        }
       });
     },
 
@@ -190,18 +266,34 @@ export function iterate(options: IteratePluginOptions = {}): Plugin[] {
       // ITERATE_ITERATION_NAME is set by the daemon's process manager when starting
       // iteration dev servers — this lets the overlay know which iteration it's in.
       const iterationName = JSON.stringify(process.env.ITERATE_ITERATION_NAME ?? "__original__");
+      const port = resolvedPort ?? 47100;
+      const overlaySrc = `${resolvedBase}/__iterate__/overlay.js`;
+      // Stamp the app identifier into the shell when configured. The overlay
+      // forwards this to the daemon when the user creates iterations, so
+      // multi-app repos spawn the right dev server for the app the user is
+      // currently viewing.
+      const appNameKey = options.appName ? `, appName: ${JSON.stringify(options.appName)}` : "";
       return html.replace(
         "</body>",
         `<script>
-  window.__iterate_shell__ = { activeTool: 'select', activeIteration: ${iterationName}, daemonPort: ${daemonPort} };
+  window.__iterate_shell__ = { activeTool: 'select', activeIteration: ${iterationName}, daemonPort: ${port}, basePath: ${JSON.stringify(resolvedBase)}${appNameKey} };
 </script>
-<script src="/__iterate__/overlay.js" defer></script>
+<script src=${JSON.stringify(overlaySrc)} defer></script>
 </body>`
       );
     },
   });
 
   return plugins;
+}
+
+/** Exported for tests. Resolves the daemon port for a vite plugin invocation. */
+export async function resolveDaemonPort(repoRoot: string, startingFrom: number, override?: number): Promise<number> {
+  if (override && Number.isFinite(override)) return override;
+  const lock = readLockfile(repoRoot);
+  if (lock && isDaemonAlive(lock)) return lock.port;
+  if (await isPortInUse(startingFrom)) return startingFrom;
+  return await findFreePort(startingFrom);
 }
 
 function getGitRoot(): string | null {
@@ -212,10 +304,36 @@ function getGitRoot(): string | null {
   }
 }
 
+/**
+ * Spawn a daemon for this repo if no live one exists. Reuses an already-
+ * running daemon when the port is bound (e.g. another plugin instance in
+ * the same monorepo started one first). Mirrors the Next plugin's behavior
+ * so multiple concurrent dev servers can coexist.
+ */
+async function startDaemonIfNeeded(port: number, cwd: string): Promise<ChildProcess | null> {
+  if (await isPortInUse(port)) {
+    console.log(`[iterate] daemon already running on port ${port}`);
+    return null;
+  }
+  return startDaemon(port, cwd);
+}
+
 function startDaemon(port: number, cwd: string): ChildProcess {
+  // Resolve the daemon via this package's require so we can pass an absolute
+  // file:// URL to the child — avoids relying on the child's cwd or node_modules
+  // hoisting to find the daemon package (pnpm-unfriendly). The vite plugin is
+  // ESM-only, so we always go through createRequire.
+  const _req = createRequire(import.meta.url);
+  const daemonEntryPath = resolvePackageEntry("iterate-ui-daemon", _req);
+  const daemonPath = `file://${daemonEntryPath}`;
+
   const child = spawn(
     process.execPath,
-    ["--input-type=module", "-e", `import { startDaemon } from "iterate-ui-daemon"; startDaemon({ port: ${port}, cwd: ${JSON.stringify(cwd)} });`],
+    [
+      "--input-type=module",
+      "-e",
+      `import { startDaemon } from ${JSON.stringify(daemonPath)}; startDaemon({ port: ${port}, cwd: ${JSON.stringify(cwd)} });`,
+    ],
     {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
@@ -249,10 +367,7 @@ function startDaemon(port: number, cwd: string): ChildProcess {
   return child;
 }
 
-async function stopDaemon(
-  child: ChildProcess | null,
-  port: number
-): Promise<void> {
+async function stopDaemon(child: ChildProcess | null, port: number): Promise<void> {
   // Try graceful shutdown via API first
   try {
     await fetch(`http://127.0.0.1:${port}/api/shutdown`, { method: "POST" });

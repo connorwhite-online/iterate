@@ -1,69 +1,163 @@
 import { Command } from "commander";
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { DEFAULT_CONFIG, type IterateConfig } from "iterate-ui-core";
+import { join, isAbsolute, resolve, relative } from "node:path";
+import {
+  DEFAULT_CONFIG,
+  normalizeConfig,
+  type AppConfig,
+  type IterateConfig,
+} from "iterate-ui-core";
+import { saveConfig, loadConfig } from "iterate-ui-core/node";
 
 export const initCommand = new Command("init")
   .description("Initialize iterate in the current project")
   .option("--dev-command <cmd>", "Dev server command (auto-detected if omitted)")
-  .option("--port <port>", "Daemon port", "4000")
+  .option("--app-name <name>", "Name of the app to register (default: \"app\")")
+  .option("--app-dir <path>", "Subdirectory of this repo where the app lives (for monorepos)")
+  .option("--port-env-var <var>", "Env var the dev script reads for its port (e.g., BRAND_ADMIN_PORT)")
+  .option("--env-file <path>", "Dotenv file to source into the dev server (repeatable)", collect, [])
+  .option("--base-path <path>", "App's basePath (Next) or base (Vite), e.g. /admin")
+  .option("--port <port>", "Starting daemon port (auto-picks upward from here)")
   .action(async (opts) => {
-    const cwd = process.cwd();
+    const invocationCwd = process.cwd();
 
-    // Check we're in a git repo (supports monorepos where .git is in a parent)
+    // Resolve the git repo root so .iterate/config.json always lives at the
+    // top of the repo. Without this, running `iterate init` from a subdirectory
+    // (e.g. inside `apps/web`) would create a config the daemon never finds,
+    // because the daemon always runs from the git root.
+    let cwd: string;
     try {
-      execSync("git rev-parse --is-inside-work-tree", { cwd, stdio: "ignore" });
+      cwd = execSync("git rev-parse --show-toplevel", {
+        cwd: invocationCwd,
+        encoding: "utf-8",
+      }).trim();
     } catch {
       console.error("Error: not a git repository. Run `git init` first.");
       process.exit(1);
     }
 
-    // Check for existing .iterate/
+    if (cwd !== invocationCwd) {
+      console.log(
+        `Note: running from a subdirectory. Writing config to the repo root: ${cwd}`
+      );
+      // Relocate --app-dir relative to the repo root so iterate's runtime
+      // (which always cwds to the repo root) can find the app.
+      if (opts.appDir) {
+        const absAppDir = isAbsolute(opts.appDir)
+          ? opts.appDir
+          : resolve(invocationCwd, opts.appDir);
+        const rewritten = relative(cwd, absAppDir);
+        if (rewritten !== opts.appDir) {
+          console.log(`Note: rewriting --app-dir "${opts.appDir}" → "${rewritten}" (relative to repo root).`);
+          opts.appDir = rewritten;
+        }
+      }
+    }
+
     const iterateDir = join(cwd, ".iterate");
-    if (existsSync(iterateDir)) {
-      console.log("iterate is already initialized in this project.");
-      return;
+    let existing;
+    try {
+      existing = loadConfig(cwd);
+    } catch (err) {
+      console.error(
+        `Error: failed to parse existing .iterate/config.json — ${(err as Error).message}`
+      );
+      console.error(
+        "Fix or delete the file, then re-run `iterate init`."
+      );
+      process.exit(1);
     }
 
     // Detect package manager
     const packageManager = detectPackageManager(cwd);
 
-    // Detect dev command
-    const devCommand = opts.devCommand ?? detectDevCommand(cwd, packageManager);
+    // Detect dev command (only used when not already registered or supplied)
+    const rootPkgDir = opts.appDir ? join(cwd, opts.appDir) : cwd;
+    const devCommand = opts.devCommand ?? detectDevCommand(rootPkgDir, packageManager);
 
-    const config: IterateConfig = {
-      ...DEFAULT_CONFIG,
+    // App names flow into branch names (iterate/<app>/<feature>) and URL
+    // segments in the shell UI. Restrict to safe characters.
+    const appName = opts.appName ?? "app";
+    if (!/^[a-zA-Z0-9_-]+$/.test(appName)) {
+      console.error(
+        `Error: --app-name must be alphanumeric (hyphens/underscores allowed). Got: "${appName}"`
+      );
+      process.exit(1);
+    }
+
+    const appEntry: AppConfig = {
+      name: appName,
       devCommand,
-      packageManager,
-      daemonPort: parseInt(opts.port, 10),
+      ...(opts.appDir ? { appDir: opts.appDir } : {}),
+      ...(opts.portEnvVar ? { portEnvVar: opts.portEnvVar } : {}),
+      ...(opts.envFile && opts.envFile.length > 0 ? { envFiles: opts.envFile } : {}),
+      ...(opts.basePath ? { basePath: opts.basePath } : {}),
     };
 
-    // Create .iterate directory and config
-    mkdirSync(iterateDir, { recursive: true });
-    writeFileSync(
-      join(iterateDir, "config.json"),
-      JSON.stringify(config, null, 2)
-    );
+    let config: IterateConfig;
+    if (existing) {
+      // Merge: add or replace the app entry of the same name
+      const apps = [...existing.apps];
+      const idx = apps.findIndex((a) => a.name === appEntry.name);
+      if (idx === -1) apps.push(appEntry);
+      else apps[idx] = { ...apps[idx], ...appEntry };
 
-    // Generate .mcp.json for Claude Code integration
+      config = normalizeConfig({
+        ...existing,
+        apps,
+        packageManager: existing.packageManager ?? packageManager,
+        daemonPort: opts.port ? parseInt(opts.port, 10) : existing.daemonPort,
+      });
+    } else {
+      config = normalizeConfig({
+        ...DEFAULT_CONFIG,
+        apps: [appEntry],
+        packageManager,
+        daemonPort: opts.port ? parseInt(opts.port, 10) : DEFAULT_CONFIG.daemonPort,
+      });
+    }
+
+    mkdirSync(iterateDir, { recursive: true });
+    saveConfig(cwd, config);
+
+    // Generate / patch .mcp.json for Claude Code integration. The port is
+    // intentionally omitted — the MCP server auto-discovers via
+    // .iterate/daemon.lock, so the config stays correct when the daemon
+    // auto-picks a different port.
+    const iterateMcpEntry = {
+      command: "npx",
+      args: ["iterate-ui-mcp"],
+    };
     const mcpPath = join(cwd, ".mcp.json");
     if (!existsSync(mcpPath)) {
-      const mcpConfig = {
-        mcpServers: {
-          iterate: {
-            command: "npx",
-            args: ["iterate-ui-mcp"],
-            env: {
-              ITERATE_DAEMON_PORT: String(config.daemonPort),
-            },
-          },
-        },
-      };
-      writeFileSync(mcpPath, JSON.stringify(mcpConfig, null, 2) + "\n");
+      writeFileSync(
+        mcpPath,
+        JSON.stringify({ mcpServers: { iterate: iterateMcpEntry } }, null, 2) + "\n"
+      );
       console.log("Created .mcp.json for Claude Code integration.");
     } else {
-      console.log("Note: .mcp.json already exists — add the iterate MCP server manually if needed.");
+      // Patch existing .mcp.json: add the iterate server if missing, or replace
+      // a stale entry (older versions pinned ITERATE_DAEMON_PORT: 4000, which
+      // breaks auto-port discovery).
+      try {
+        const raw = JSON.parse(readFileSync(mcpPath, "utf-8"));
+        const servers = (raw.mcpServers ?? {}) as Record<string, unknown>;
+        const existingIterate = servers.iterate as Record<string, unknown> | undefined;
+        const hasStaleEnv =
+          existingIterate && typeof existingIterate.env === "object" && existingIterate.env !== null;
+        if (!existingIterate || hasStaleEnv) {
+          raw.mcpServers = { ...servers, iterate: iterateMcpEntry };
+          writeFileSync(mcpPath, JSON.stringify(raw, null, 2) + "\n");
+          console.log(
+            existingIterate
+              ? "Patched .mcp.json: removed the hardcoded ITERATE_DAEMON_PORT (auto-discovery via lockfile)."
+              : "Patched .mcp.json: added the iterate MCP server entry."
+          );
+        }
+      } catch {
+        console.log("Note: .mcp.json exists but couldn't be parsed — add the iterate MCP server manually.");
+      }
     }
 
     // Register Claude Code plugin via .claude/settings.json
@@ -110,28 +204,79 @@ export const initCommand = new Command("init")
       console.log("Registered iterate plugin in .claude/settings.json.");
     }
 
-    // Ensure .iterate is in .gitignore
-    const gitignorePath = join(cwd, ".gitignore");
-    if (existsSync(gitignorePath)) {
-      const content = readFileSync(gitignorePath, "utf-8");
-      if (!content.split("\n").some((line) => line.trim() === ".iterate")) {
-        writeFileSync(gitignorePath, content.trimEnd() + "\n.iterate\n");
-        console.log("Added .iterate to .gitignore.");
-      }
-    } else {
-      writeFileSync(gitignorePath, ".iterate\n");
-      console.log("Created .gitignore with .iterate entry.");
-    }
+    // Ensure .gitignore has the right pattern for .iterate/
+    //
+    // Recommended: track `config.json` (it's project intent — every contributor
+    // should agree on which apps exist, which dev commands run, etc.) but
+    // ignore runtime state (`daemon.lock`, `worktrees/`, any future caches).
+    //
+    // Pattern:
+    //   .iterate/*
+    //   !.iterate/config.json
+    //
+    // If the user has an older `.iterate` / `.iterate/` entry from a previous
+    // init, we replace it with the partial-ignore pattern to keep them on the
+    // current default. (Users who WANT to ignore everything can edit manually.)
+    updateGitignore(cwd);
 
     console.log("\nInitialized iterate:");
     console.log(`  Package manager: ${config.packageManager}`);
-    console.log(`  Dev command: ${config.devCommand}`);
-    console.log(`  Daemon port: ${config.daemonPort}`);
+    console.log(`  Registered apps: ${config.apps.map((a) => a.name).join(", ")}`);
+    for (const a of config.apps) {
+      console.log(`    - ${a.name}: ${a.devCommand}${a.appDir ? ` (in ${a.appDir})` : ""}`);
+    }
+    console.log(`  Daemon port (starting point): ${config.daemonPort}`);
     console.log(`  Max iterations: ${config.maxIterations}`);
-    console.log(`\nRun \`iterate serve\` to start the control server.`);
+    console.log(`\nRun \`iterate doctor\` to verify setup, then \`iterate serve\` to start the daemon.`);
     console.log(`Slash commands: /iterate:go, /iterate:prompt, /iterate:keep`);
     console.log(`Restart Claude Code to activate slash commands.`);
   });
+
+function collect(value: string, prev: string[]): string[] {
+  return [...prev, value];
+}
+
+/**
+ * Ensure .gitignore ignores everything under `.iterate/` EXCEPT
+ * `.iterate/config.json`. Upgrades older init-generated entries that
+ * ignored the whole directory.
+ */
+function updateGitignore(cwd: string): void {
+  const gitignorePath = join(cwd, ".gitignore");
+  const partialIgnore = [".iterate/*", "!.iterate/config.json"];
+
+  if (!existsSync(gitignorePath)) {
+    writeFileSync(gitignorePath, partialIgnore.join("\n") + "\n");
+    console.log("Created .gitignore — ignoring .iterate/ state, tracking config.json.");
+    return;
+  }
+
+  const lines = readFileSync(gitignorePath, "utf-8").split("\n");
+  const hasPartial =
+    lines.some((l) => l.trim() === ".iterate/*") &&
+    lines.some((l) => l.trim() === "!.iterate/config.json");
+  if (hasPartial) return; // already up-to-date
+
+  // Replace any older `.iterate` / `.iterate/` entries with the new pattern.
+  const filtered = lines.filter((l) => {
+    const t = l.trim();
+    return t !== ".iterate" && t !== ".iterate/";
+  });
+  const hadOldEntry = filtered.length !== lines.length;
+
+  // Drop trailing blank lines before appending so we don't stack them.
+  while (filtered.length && filtered[filtered.length - 1]!.trim() === "") {
+    filtered.pop();
+  }
+  filtered.push(...partialIgnore);
+
+  writeFileSync(gitignorePath, filtered.join("\n") + "\n");
+  console.log(
+    hadOldEntry
+      ? "Updated .gitignore: .iterate/ → .iterate/* + !.iterate/config.json (tracking config, ignoring state)."
+      : "Added .iterate/ rules to .gitignore (tracking config.json, ignoring state)."
+  );
+}
 
 function detectPackageManager(cwd: string): IterateConfig["packageManager"] {
   if (existsSync(join(cwd, "pnpm-lock.yaml"))) return "pnpm";

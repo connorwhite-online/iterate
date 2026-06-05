@@ -3,8 +3,39 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { DaemonClient } from "./connection/daemon-client.js";
 import { formatBatchPrompt } from "iterate-ui-core";
+import { formatIterationList } from "./format.js";
+import { loadConfig, resolveDaemonPort } from "iterate-ui-core/node";
+import { execSync } from "node:child_process";
 
-const DAEMON_PORT = parseInt(process.env.ITERATE_DAEMON_PORT ?? "4000", 10);
+// If the MCP server is launched from a subdirectory of a git repo, walk up
+// to the repo root so we find the config and lockfile. ITERATE_CWD (if set
+// by the caller, e.g. Claude Code) always wins.
+function resolveCwd(): string {
+  if (process.env.ITERATE_CWD) return process.env.ITERATE_CWD;
+  try {
+    return execSync("git rev-parse --show-toplevel", {
+      cwd: process.cwd(),
+      encoding: "utf-8",
+    }).trim();
+  } catch {
+    return process.cwd();
+  }
+}
+
+const CWD = resolveCwd();
+// Resolution order: explicit env var → lockfile → config → default.
+const DAEMON_PORT = (() => {
+  if (process.env.ITERATE_DAEMON_PORT) {
+    const parsed = parseInt(process.env.ITERATE_DAEMON_PORT, 10);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  try {
+    const config = loadConfig(CWD);
+    return resolveDaemonPort(CWD, config);
+  } catch {
+    return 47100;
+  }
+})();
 
 /** Attempt to connect to the daemon with retries */
 async function connectWithRetry(
@@ -64,44 +95,30 @@ async function main() {
     "List all active iterate iterations (worktrees with dev servers)",
     {},
     async () => {
-      const iterations = client.getIterations();
-      const entries = Object.values(iterations);
-
-      if (entries.length === 0) {
-        return {
-          content: [
-            { type: "text", text: "No active iterations." },
-          ],
-        };
-      }
-
-      const text = entries
-        .map(
-          (it) =>
-            `- **${it.name}** (branch: \`${it.branch}\`, port: ${it.port}, status: ${it.status})` +
-            (it.commandPrompt ? `\n  Command: "${it.commandPrompt}"` : "") +
-            (it.commandId ? ` [command: ${it.commandId}]` : "")
-        )
-        .join("\n");
-
+      const text = formatIterationList(Object.values(client.getIterations()));
       return { content: [{ type: "text", text }] };
     }
   );
 
   server.tool(
     "iterate_create_iteration",
-    "Create a new iteration (git worktree + dev server)",
+    "Create a new iteration (git worktree + dev server). In multi-app repos, pass appName to pick which registered app this iteration targets.",
     {
       name: z.string().describe("Name for the new iteration"),
       baseBranch: z
         .string()
         .optional()
         .describe("Branch to fork from (defaults to current)"),
+      appName: z
+        .string()
+        .optional()
+        .describe("Registered app (from .iterate/config.json apps[]) this iteration targets. Required when multiple apps are configured."),
     },
-    async ({ name, baseBranch }) => {
+    async ({ name, baseBranch, appName }) => {
       const result = await client.callApi("POST", "/api/iterations", {
         name,
         baseBranch,
+        appName,
       });
       return {
         content: [

@@ -5,6 +5,7 @@ import { IterateOverlay, type ToolMode } from "./IterateOverlay.js";
 import { FloatingPanel, ORIGINAL_TAB } from "./panel/FloatingPanel.js";
 import { DaemonConnection } from "./transport/connection.js";
 import { ThemeProvider } from "./theme.js";
+import { buildForkRequest, filterIterationsForApp } from "./fork-request.js";
 import type { IterationInfo } from "iterate-ui-core";
 
 /** postMessage types for parent <-> iframe communication */
@@ -78,19 +79,31 @@ function StandaloneOverlay() {
   const [tabCounts, setTabCounts] = useState<Record<string, { batch: number; move: number }>>({});
   const [tabProcessing, setTabProcessing] = useState<Record<string, boolean>>({});
   const [previewMode, setPreviewMode] = useState(true);
-  const [iterations, setIterations] = useState<Record<string, IterationInfo>>({});
+  const [allIterations, setAllIterations] = useState<Record<string, IterationInfo>>({});
   const [readyIframes, setReadyIframes] = useState<Set<string>>(new Set());
 
   // Detect context
   const isDaemonShell = typeof document !== "undefined" && !!document.getElementById("viewport");
   const isEmbedded = typeof window !== "undefined" && window.self !== window.top;
 
-  // In framework plugin mode, connect directly to the daemon port
+  // In framework plugin mode, connect directly to the daemon port. The
+  // framework plugin injects the resolved port into __iterate_shell__; the
+  // 47100 fallback is only reached if the overlay is loaded standalone
+  // without a shell and matches iterate's default starting port.
   const shell = (window as any).__iterate_shell__;
-  const daemonPort = shell?.daemonPort ?? 4000;
+  const daemonPort = shell?.daemonPort ?? 47100;
+  const currentAppName: string | undefined = shell?.appName;
   const wsUrl = !isDaemonShell && shell?.daemonPort
     ? `ws://${window.location.hostname}:${shell.daemonPort}/ws`
     : undefined;
+
+  // Filter iterations to only those that target the current app (in
+  // multi-app repos). See filterIterationsForApp for the rules; memoized
+  // so callback deps that depend on `iterations` stay stable.
+  const iterations = React.useMemo<Record<string, IterationInfo>>(
+    () => filterIterationsForApp(allIterations, { isDaemonShell, currentAppName }),
+    [allIterations, isDaemonShell, currentAppName]
+  );
 
   // Keep refs in sync with state (for use in event handlers with stable deps)
   modeRef.current = mode;
@@ -332,7 +345,7 @@ function StandaloneOverlay() {
     connectionRef.current = conn;
 
     const unsub = conn.onIterationsChange((iters) => {
-      setIterations(iters);
+      setAllIterations(iters);
     });
 
     conn.connect();
@@ -536,18 +549,36 @@ function StandaloneOverlay() {
     }
   }, [isViewingIteration, postToIframe]);
 
-  // Handle creating iterations (fork)
+  // Handle creating iterations (fork). In a multi-app repo, we forward the
+  // `appName` that was stamped into __iterate_shell__ by the Next/Vite plugin
+  // so the daemon knows which app's dev server to spawn for each iteration.
+  // (Without this, every iteration would spawn the first/default app,
+  // regardless of which dev server the user clicked fork from.) See
+  // buildForkRequest for the payload shape.
   const handleFork = useCallback(
     async () => {
       try {
+        const shell = typeof window !== "undefined" ? ((window as any).__iterate_shell__ ?? null) : null;
+        const body = buildForkRequest(shell);
         const res = await fetch("/api/command", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ command: "iterate", count: 3 }),
+          body: JSON.stringify(body),
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({ message: "Unknown error" }));
           console.error("[iterate] Fork failed:", err.message);
+          return;
+        }
+        // Daemon returned 200 but may have created zero iterations
+        // (e.g. maxIterations cap reached). Log so the user can see why
+        // nothing happened — without this, the spinner clearing looks
+        // mysterious.
+        const data = await res.json().catch(() => null) as { iterations?: string[] } | null;
+        if (data && Array.isArray(data.iterations) && data.iterations.length === 0) {
+          console.warn(
+            "[iterate] Fork created 0 iterations — likely the per-app maxIterations cap is reached. Remove an existing iteration first."
+          );
         }
       } catch (err) {
         console.error("[iterate] Fork failed:", err);

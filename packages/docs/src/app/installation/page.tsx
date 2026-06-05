@@ -126,6 +126,17 @@ export default function InstallationPage() {
       />
       <p style={{ marginBottom: "0.5rem" }}>
         This detects your package manager and dev command, then creates <code>.iterate/config.json</code>.
+        For monorepos, pass <code>--app-name</code> and <code>--app-dir</code> to register a specific app; re-run the
+        command to register additional apps in the same repo.
+      </p>
+
+      <h3 style={{ marginTop: "1rem" }}>Verify</h3>
+      <CodeBlock
+        code={`npx iterate doctor`}
+      />
+      <p style={{ marginBottom: "0.5rem" }}>
+        Runs preflight checks: registered apps resolve, the daemon port is free, env files parse,
+        package managers are installed, and so on. Fix any ✗ items before continuing.
       </p>
 
       <h3 style={{ marginTop: "1rem" }}>Next.js</h3>
@@ -212,8 +223,7 @@ export default defineConfig({
   "mcpServers": {
     "iterate": {
       "command": "npx",
-      "args": ["iterate-mcp"],
-      "env": { "ITERATE_DAEMON_PORT": "4000" }
+      "args": ["iterate-ui-mcp"]
     }
   }
 }`}

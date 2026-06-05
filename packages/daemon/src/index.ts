@@ -1,18 +1,33 @@
 import Fastify from "fastify";
 import fastifyWebsocket from "@fastify/websocket";
 import fastifyReplyFrom from "@fastify/reply-from";
-import { readFileSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { execa } from "execa";
-import { DEFAULT_CONFIG, type IterateConfig, type IterationInfo } from "iterate-ui-core";
+import {
+  DEFAULT_CONFIG,
+  type IterateConfig,
+  type IterationInfo,
+} from "iterate-ui-core";
+import {
+  findFreePort,
+  writeLockfile,
+  removeLockfile,
+  readLockfile,
+  isDaemonAlive,
+  loadConfig,
+} from "iterate-ui-core/node";
 import { StateStore } from "./state/store.js";
-import { WorktreeManager, type DiscoveredWorktree } from "./worktree/manager.js";
+import { WorktreeManager } from "./worktree/manager.js";
 import { ProcessManager } from "./process/manager.js";
 import { WebSocketHub } from "./websocket/hub.js";
 import { copyFilesToWorktree, copyUncommittedFiles } from "./worktree/copy-files.js";
 import { registerProxyRoutes } from "./proxy/router.js";
+import {
+  runIterationPipeline,
+  resolveAppForRequest,
+  resolveAppForWorktreeBranch,
+  countIterationsForApp,
+} from "./iteration/pipeline.js";
 
 export interface DaemonOptions {
   port?: number;
@@ -21,14 +36,27 @@ export interface DaemonOptions {
 
 export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   const cwd = opts.cwd ?? process.env.ITERATE_CWD ?? process.cwd();
-  const port =
-    opts.port ?? parseInt(process.env.ITERATE_PORT ?? "4000", 10);
 
-  // Load config
-  const configPath = join(cwd, ".iterate", "config.json");
-  const config: IterateConfig = existsSync(configPath)
-    ? JSON.parse(readFileSync(configPath, "utf-8"))
-    : DEFAULT_CONFIG;
+  // Load config (normalizeConfig applied inside loadConfig — legacy flat
+  // configs become apps[])
+  const config: IterateConfig = loadConfig(cwd) ?? { ...DEFAULT_CONFIG };
+
+  // Resolve daemon port:
+  //   explicit opt.port → ITERATE_PORT env → auto-pick starting from config.daemonPort.
+  // If a prior lockfile points at an already-alive daemon for this cwd, we don't start
+  // a second one — the framework plugins will reach the existing daemon.
+  const existingLock = readLockfile(cwd);
+  if (existingLock && isDaemonAlive(existingLock) && !opts.port && !process.env.ITERATE_PORT) {
+    console.log(`[iterate] daemon already running on port ${existingLock.port} (pid ${existingLock.pid})`);
+    return;
+  }
+  // Stale lock — clean up.
+  if (existingLock && !isDaemonAlive(existingLock)) {
+    removeLockfile(cwd);
+  }
+
+  const requestedPort = opts.port ?? (process.env.ITERATE_PORT ? parseInt(process.env.ITERATE_PORT, 10) : undefined);
+  const port = requestedPort ?? (await findFreePort(config.daemonPort));
 
   // Initialize services
   const store = new StateStore(config);
@@ -52,9 +80,10 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   });
 
   app.post("/api/iterations", async (request, reply) => {
-    const { name, baseBranch } = request.body as {
+    const { name, baseBranch, appName } = request.body as {
       name: string;
       baseBranch?: string;
+      appName?: string;
     };
 
     if (!name || !/^[a-zA-Z0-9_-]+$/.test(name)) {
@@ -67,10 +96,19 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
       return reply.status(409).send({ message: `Iteration "${name}" already exists` });
     }
 
-    const iterationCount = Object.keys(store.getIterations()).length;
+    const app = resolveAppForRequest(config, appName);
+    if (!app) {
+      return reply.status(400).send({
+        message: appName
+          ? `App "${appName}" not registered in .iterate/config.json.`
+          : `No app specified and config has ${config.apps.length} apps — pass "appName" in the request body.`,
+      });
+    }
+
+    const iterationCount = countIterationsForApp(store.getIterations(), config, app.name);
     if (iterationCount >= config.maxIterations) {
       return reply.status(429).send({
-        message: `Maximum iterations (${config.maxIterations}) reached. Remove one first.`,
+        message: `Maximum iterations (${config.maxIterations}) reached for app "${app.name}". Remove one first.`,
       });
     }
 
@@ -84,6 +122,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
         status: "creating",
         createdAt: new Date().toISOString(),
         source: "iterate",
+        appName: app.name,
       };
       store.setIteration(name, info);
       wsHub.broadcast({ type: "iteration:status", payload: { name, status: "creating" } });
@@ -96,40 +135,16 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
       copyFilesToWorktree(cwd, worktreePath, config.copyFiles ?? [".env*", ".npmrc"]);
       copyUncommittedFiles(cwd, worktreePath);
 
-      // Install dependencies (always at worktree root)
-      info.status = "installing";
-      store.setIteration(name, info);
-      wsHub.broadcast({ type: "iteration:status", payload: { name, status: "installing" } });
-
-      const installCmd = getInstallCommand(config.packageManager);
-      const [cmd, ...args] = installCmd.split(" ");
-      await execa(cmd!, args, { cwd: worktreePath });
-
-      // Run optional build command (e.g., for monorepo workspace deps)
-      if (config.buildCommand) {
-        const [buildCmd, ...buildArgs] = config.buildCommand.split(" ");
-        await execa(buildCmd!, buildArgs, { cwd: worktreePath });
-      }
-
-      // Start dev server (in appDir subdirectory if configured, for monorepos)
-      const devCwd = config.appDir ? join(worktreePath, config.appDir) : worktreePath;
-
-      info.status = "starting";
-      store.setIteration(name, info);
-      wsHub.broadcast({ type: "iteration:status", payload: { name, status: "starting" } });
-
-      const allocatedPort = await processManager.allocatePort();
-      info.port = allocatedPort;
-
-      const devCommand = buildDevCommand(config.devCommand, allocatedPort);
-      const { pid } = await processManager.start(name, devCwd, devCommand, allocatedPort, { ITERATE_WORKTREE_ROOT: worktreePath });
-      info.pid = pid ?? null;
-
-      // Wait for the dev server to actually accept connections before marking ready
-      await processManager.waitForReady(name, allocatedPort);
-
-      info.status = "ready";
-      store.setIteration(name, info);
+      await runIterationPipeline({
+        repoRoot: cwd,
+        worktreeRoot: worktreePath,
+        app,
+        info,
+        config,
+        processManager,
+        store,
+        wsHub,
+      });
 
       wsHub.broadcast({ type: "iteration:created", payload: info });
 
@@ -321,14 +336,24 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
 
   /** Submit a command (e.g. /iterate prompt) to create multiple iterations */
   app.post("/api/command", async (request, reply) => {
-    const { command, prompt, count = 3 } = request.body as {
+    const { command, prompt, count = 3, appName } = request.body as {
       command: string;
       prompt?: string;
       count?: number;
+      appName?: string;
     };
 
     if (command !== "iterate") {
       return reply.status(400).send({ message: `Unknown command: ${command}` });
+    }
+
+    const app = resolveAppForRequest(config, appName);
+    if (!app) {
+      return reply.status(400).send({
+        message: appName
+          ? `App "${appName}" not registered in .iterate/config.json.`
+          : `Config has ${config.apps.length} apps — pass "appName" in the request body.`,
+      });
     }
 
     const commandId = crypto.randomUUID();
@@ -345,7 +370,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
       // Skip if already exists
       if (store.getIteration(name)) continue;
 
-      const iterationCount = Object.keys(store.getIterations()).length;
+      const iterationCount = countIterationsForApp(store.getIterations(), config, app.name);
       if (iterationCount >= config.maxIterations) break;
 
       try {
@@ -360,6 +385,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
           commandPrompt: prompt?.trim() ?? "",
           commandId,
           source: "iterate",
+          appName: app.name,
         };
         store.setIteration(name, info);
         // Broadcast as iteration:created so overlay tracks all iterations immediately
@@ -380,39 +406,17 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
             copyFilesToWorktree(cwd, worktreePath, config.copyFiles ?? [".env*", ".npmrc"]);
             copyUncommittedFiles(cwd, worktreePath);
 
-            info.status = "installing";
-            store.setIteration(name, info);
-            wsHub.broadcast({ type: "iteration:status", payload: { name, status: "installing" } });
+            await runIterationPipeline({
+              repoRoot: cwd,
+              worktreeRoot: worktreePath,
+              app,
+              info,
+              config,
+              processManager,
+              store,
+              wsHub,
+            });
 
-            const installCmd = getInstallCommand(config.packageManager);
-            const [cmd, ...args] = installCmd.split(" ");
-            await execa(cmd!, args, { cwd: worktreePath });
-
-            // Run optional build command (e.g., for monorepo workspace deps)
-            if (config.buildCommand) {
-              const [buildCmd, ...buildArgs] = config.buildCommand.split(" ");
-              await execa(buildCmd!, buildArgs, { cwd: worktreePath });
-            }
-
-            // Start dev server (in appDir subdirectory if configured, for monorepos)
-            const devCwd = config.appDir ? join(worktreePath, config.appDir) : worktreePath;
-
-            info.status = "starting";
-            store.setIteration(name, info);
-            wsHub.broadcast({ type: "iteration:status", payload: { name, status: "starting" } });
-
-            const allocatedPort = await processManager.allocatePort();
-            info.port = allocatedPort;
-
-            const devCommand = buildDevCommand(config.devCommand, allocatedPort);
-            const { pid } = await processManager.start(name, devCwd, devCommand, allocatedPort, { ITERATE_WORKTREE_ROOT: worktreePath });
-            info.pid = pid ?? null;
-
-            // Wait for the dev server to actually accept connections before marking ready
-            await processManager.waitForReady(name, allocatedPort);
-
-            info.status = "ready";
-            store.setIteration(name, info);
             wsHub.broadcast({ type: "iteration:created", payload: info });
           } catch (err) {
             const errorMessage = (err as Error).message;
@@ -446,6 +450,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
 
   app.post("/api/shutdown", async (_request, reply) => {
     await processManager.stopAll();
+    removeLockfile(cwd);
     await reply.send({ ok: true });
     setTimeout(() => process.exit(0), 500);
   });
@@ -469,7 +474,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   });
 
   // Proxy routes (registered last — wildcard catch-all)
-  await registerProxyRoutes(app, store, port);
+  await registerProxyRoutes(app, store, port, config);
 
   // Root route: control UI shell
   app.get("/", async (_request, reply) => {
@@ -480,6 +485,12 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   try {
     await app.listen({ port, host: "0.0.0.0" });
     console.log(`iterate daemon running on http://localhost:${port}`);
+    writeLockfile(cwd, {
+      pid: process.pid,
+      port,
+      cwd,
+      startedAt: new Date().toISOString(),
+    });
   } catch (err) {
     console.error("Failed to start daemon:", err);
     process.exit(1);
@@ -515,6 +526,17 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
 
     clearInterval(scanInterval);
     console.log("\nShutting down iterate daemon...");
+
+    // Remove the lockfile immediately so CLI/plugins can see the daemon is
+    // going away. Do this before we await any potentially-hanging work.
+    removeLockfile(cwd);
+
+    // Hard upper bound: even if processManager.stopAll() or Fastify's app.close()
+    // hangs on keep-alive sockets, we exit within 2s to avoid leaking the process.
+    const forceExit = setTimeout(() => process.exit(0), 2000);
+    // Don't block Node from exiting naturally if cleanup finishes first.
+    forceExit.unref();
+
     try {
       await processManager.stopAll();
       await app.close();
@@ -592,11 +614,21 @@ async function discoverAndRegisterWorktrees(
     );
     if (alreadyTrackedByBranch) continue;
 
-    // Respect maxIterations limit
-    const iterationCount = Object.keys(store.getIterations()).length + pendingPaths.size;
-    if (iterationCount >= config.maxIterations) break;
+    // This is a new, untracked worktree — register it.
+    // Resolve which app this worktree targets:
+    //  - Branch convention "iterate/<appName>/<rest>" wins if <appName> matches a registered app.
+    //  - Otherwise fall back to the sole configured app (getDefaultApp).
+    //  - If neither works in a multi-app repo, skip the worktree (can't infer intent).
+    const app = resolveAppForWorktreeBranch(config, wt.branch);
+    if (!app) {
+      // Can't infer app; leave as untracked rather than starting with wrong config
+      continue;
+    }
 
-    // This is a new, untracked worktree — register it
+    // Respect maxIterations limit (per-app, not global)
+    const iterationCount = countIterationsForApp(store.getIterations(), config, app.name);
+    if (iterationCount >= config.maxIterations) continue;
+
     pendingPaths.add(wt.path);
     const baseName = deriveIterationName(wt.branch);
     const name = uniqueName(baseName, store);
@@ -610,6 +642,7 @@ async function discoverAndRegisterWorktrees(
       status: "creating",
       createdAt: new Date().toISOString(),
       source: "external",
+      appName: app.name,
     };
 
     store.setIteration(name, info);
@@ -618,39 +651,16 @@ async function discoverAndRegisterWorktrees(
     // Fire off the startup pipeline asynchronously
     (async () => {
       try {
-        info.status = "installing";
-        store.setIteration(name, info);
-        wsHub.broadcast({ type: "iteration:status", payload: { name, status: "installing" } });
-
-        const installCmd = getInstallCommand(config.packageManager);
-        const [cmd, ...args] = installCmd.split(" ");
-        await execa(cmd!, args, { cwd: wt.path });
-
-        if (config.buildCommand) {
-          const [buildCmd, ...buildArgs] = config.buildCommand.split(" ");
-          await execa(buildCmd!, buildArgs, { cwd: wt.path });
-        }
-
-        // Start dev server (in appDir subdirectory if configured)
-        const devCwd = config.appDir
-          ? (existsSync(join(wt.path, config.appDir)) ? join(wt.path, config.appDir) : wt.path)
-          : wt.path;
-
-        info.status = "starting";
-        store.setIteration(name, info);
-        wsHub.broadcast({ type: "iteration:status", payload: { name, status: "starting" } });
-
-        const allocatedPort = await processManager.allocatePort();
-        info.port = allocatedPort;
-
-        const devCommand = buildDevCommand(config.devCommand, allocatedPort);
-        const { pid } = await processManager.start(name, devCwd, devCommand, allocatedPort, { ITERATE_WORKTREE_ROOT: wt.path });
-        info.pid = pid ?? null;
-
-        await processManager.waitForReady(name, allocatedPort);
-
-        info.status = "ready";
-        store.setIteration(name, info);
+        await runIterationPipeline({
+          repoRoot,
+          worktreeRoot: wt.path,
+          app,
+          info,
+          config,
+          processManager,
+          store,
+          wsHub,
+        });
         wsHub.broadcast({ type: "iteration:created", payload: info });
       } catch (err) {
         const errorMessage = (err as Error).message;
@@ -683,23 +693,10 @@ async function discoverAndRegisterWorktrees(
   }
 }
 
-function getInstallCommand(pm: IterateConfig["packageManager"]): string {
-  switch (pm) {
-    case "pnpm": return "pnpm install --prefer-offline";
-    case "yarn": return "yarn install";
-    case "bun": return "bun install";
-    default: return "npm install --prefer-offline";
-  }
-}
-
-function buildDevCommand(baseCommand: string, port: number): string {
-  if (baseCommand.includes("next")) return `${baseCommand} -p ${port}`;
-  if (baseCommand.includes("vite")) return `${baseCommand} --port ${port}`;
-  return baseCommand;
-}
-
-/** Shell HTML for the control UI with command bar and updated toolbar. */
-function getShellHTML(): string {
+/** Shell HTML for the control UI with command bar and updated toolbar.
+ *  Exported only for tests (see __tests__/shell-html.test.ts) — regular
+ *  callers should use the GET "/" route. */
+export function getShellHTML(): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -710,15 +707,20 @@ function getShellHTML(): string {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #fafafa; height: 100vh; display: flex; flex-direction: column; }
     #tab-bar { display: flex; gap: 2px; padding: 8px 12px; background: #141414; border-bottom: 1px solid #2a2a2a; align-items: center; }
-    .tab { padding: 6px 16px; border-radius: 6px 6px 0 0; background: #1a1a1a; color: #888; cursor: pointer; font-size: 13px; border: 1px solid transparent; transition: all 0.15s; user-select: none; }
+    .tab { position: relative; padding: 6px 28px 6px 16px; border-radius: 6px 6px 0 0; background: #1a1a1a; color: #888; cursor: pointer; font-size: 13px; border: 1px solid transparent; transition: all 0.15s; user-select: none; display: flex; align-items: center; gap: 2px; }
     .tab:hover { color: #ccc; background: #222; }
+    .tab:hover .tab-close { opacity: 1; }
     .tab.active { color: #fff; background: #0a0a0a; border-color: #2a2a2a; border-bottom-color: #0a0a0a; }
-    .tab.add { color: #555; font-size: 16px; }
-    .tab .status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; }
+    .tab.active .tab-close { opacity: 0.6; }
+    .tab.add { color: #555; font-size: 16px; padding: 6px 16px; }
+    .tab .status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; flex-shrink: 0; }
     .tab .status-dot.ready { background: #22c55e; }
-    .tab .status-dot.creating, .tab .status-dot.installing, .tab .status-dot.starting { background: #eab308; }
+    .tab .status-dot.creating, .tab .status-dot.installing, .tab .status-dot.starting { background: #eab308; animation: pulse 1.5s ease-in-out infinite; }
     .tab .status-dot.error { background: #ef4444; }
     .tab .status-dot.stopped { background: #666; }
+    .tab .tab-close { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; border-radius: 3px; color: #888; opacity: 0; transition: opacity 0.15s, background 0.15s; font-size: 16px; line-height: 1; }
+    .tab .tab-close:hover { background: #2a2a2a; color: #fff; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
     #command-bar { display: flex; align-items: center; padding: 6px 12px; background: #111; border-bottom: 1px solid #2a2a2a; }
     #command-input { flex: 1; background: #0a0a1a; border: 1px solid #2a2a4a; border-radius: 6px; color: #fafafa; padding: 6px 12px; font-size: 13px; font-family: monospace; outline: none; }
     #command-input:focus { border-color: #2563eb; }
@@ -729,10 +731,6 @@ function getShellHTML(): string {
     .tool-btn.active { color: #fff; background: #2563eb; border-color: #2563eb; }
     #viewport { flex: 1; position: relative; overflow: hidden; }
     #viewport iframe { width: 100%; height: 100%; border: none; }
-    .iframe-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #0a0a0a; color: #555; font-size: 14px; z-index: 10; transition: opacity 0.3s; }
-    .iframe-loading.hidden { opacity: 0; pointer-events: none; }
-    .iframe-loading .spinner { width: 20px; height: 20px; border: 2px solid #333; border-top-color: #22c55e; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 10px; }
-    @keyframes spin { to { transform: rotate(360deg); } }
     .empty-state { display: flex; align-items: center; justify-content: center; height: 100%; color: #555; font-size: 14px; flex-direction: column; gap: 8px; }
     .empty-state code { background: #1a1a1a; padding: 4px 8px; border-radius: 4px; font-size: 13px; }
     #status-bar { padding: 4px 12px; background: #111; border-top: 1px solid #2a2a2a; font-size: 11px; color: #555; display: flex; justify-content: space-between; }
@@ -796,13 +794,45 @@ function getShellHTML(): string {
     function renderTabs() {
       const bar = document.getElementById('tab-bar'); bar.innerHTML = '';
       const names = Object.keys(state.iterations);
+      // Only show app badges if the repo actually has multiple registered apps.
+      const configuredApps = (state.config && Array.isArray(state.config.apps)) ? state.config.apps : [];
+      const showAppBadges = configuredApps.length > 1;
       for (const name of names) {
         const info = state.iterations[name]; const tab = document.createElement('div');
         tab.className = 'tab' + (name === activeIteration ? ' active' : '');
         const dot = document.createElement('span'); dot.className = 'status-dot ' + (info.status || 'stopped');
         tab.appendChild(dot); tab.appendChild(document.createTextNode(name));
+        if (showAppBadges && info.appName) {
+          const appBadge = document.createElement('span');
+          appBadge.style.cssText = 'font-size:9px;color:#888;margin-left:4px;padding:1px 5px;border-radius:3px;background:#222;';
+          appBadge.textContent = info.appName;
+          tab.appendChild(appBadge);
+        }
         if (info.source === 'external') { const badge = document.createElement('span'); badge.style.cssText = 'font-size:9px;color:#666;margin-left:4px;'; badge.textContent = '(ext)'; tab.appendChild(badge); }
-        if (info.commandPrompt) tab.title = info.commandPrompt;
+        // Tooltip surfaces the stuff that doesn't fit on the tab: current
+        // status (when not-ready), the /iterate prompt that spawned it (if
+        // any), and the error message (if any). Hover a yellow/red tab to
+        // see why.
+        const tooltipParts = [];
+        if (info.status && info.status !== 'ready') tooltipParts.push('Status: ' + info.status);
+        if (info.commandPrompt) tooltipParts.push('Prompt: ' + info.commandPrompt);
+        if (info.error) tooltipParts.push('Error: ' + info.error);
+        if (tooltipParts.length > 0) tab.title = tooltipParts.join('\\n');
+        // Close (×) button. Calls DELETE /api/iterations/<name>. We stop
+        // propagation so clicking × doesn't ALSO switch to that tab.
+        const close = document.createElement('span');
+        close.className = 'tab-close';
+        close.textContent = '×';
+        close.title = 'Remove this iteration';
+        close.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (!confirm('Remove iteration "' + name + '"? This deletes the worktree and branch.')) return;
+          try {
+            const res = await fetch('/api/iterations/' + encodeURIComponent(name), { method: 'DELETE' });
+            if (!res.ok) { const err = await res.json().catch(() => ({})); alert('Remove failed: ' + (err.message || res.status)); }
+          } catch (err) { alert('Remove failed: ' + err.message); }
+        });
+        tab.appendChild(close);
         tab.addEventListener('click', () => switchIteration(name)); bar.appendChild(tab);
       }
       const addTab = document.createElement('div'); addTab.className = 'tab add'; addTab.textContent = '+';
@@ -819,7 +849,7 @@ function getShellHTML(): string {
       // Hide all iframes, show only the active one
       viewport.querySelectorAll('iframe').forEach(f => f.style.display = 'none');
       // Remove stale overlays and empty states
-      viewport.querySelectorAll('.iframe-loading, .empty-state').forEach(el => el.remove());
+      viewport.querySelectorAll('.empty-state').forEach(el => el.remove());
       if (info.status === 'ready') {
         let iframe = iframeCache[activeIteration];
         if (!iframe) { iframe = document.createElement('iframe'); iframe.src = '/' + encodeURIComponent(activeIteration) + '/'; iframe.dataset.iteration = activeIteration; viewport.appendChild(iframe); iframeCache[activeIteration] = iframe; }

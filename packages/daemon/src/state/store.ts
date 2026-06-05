@@ -15,6 +15,14 @@ export interface CommandContext {
   createdAt: number;
 }
 
+/**
+ * Hard cap on the number of command contexts we retain. Every /iterate
+ * slash command adds an entry; without a cap the map grows unboundedly
+ * over a long-running daemon. The most recent commands are the ones the
+ * agent actually needs to look up.
+ */
+const COMMAND_CONTEXT_CAP = 50;
+
 /** In-memory state store for the daemon */
 export class StateStore {
   private state: IterateState;
@@ -132,6 +140,13 @@ export class StateStore {
       iterations,
       createdAt: Date.now(),
     });
+    // Evict oldest entries once over the cap. Map preserves insertion order,
+    // so the first key returned by `keys()` is the oldest.
+    while (this.commands.size > COMMAND_CONTEXT_CAP) {
+      const oldest = this.commands.keys().next().value;
+      if (oldest === undefined) break;
+      this.commands.delete(oldest);
+    }
   }
 
   getCommandContext(commandId: string): CommandContext | undefined {
@@ -139,12 +154,12 @@ export class StateStore {
   }
 
   getLatestCommand(): CommandContext | undefined {
+    // Map preserves insertion order; the last value is the most recently set.
+    // Relying on that (rather than createdAt comparison) makes ties resolve
+    // deterministically — entries inserted in the same millisecond are still
+    // ordered by insertion.
     let latest: CommandContext | undefined;
-    for (const cmd of this.commands.values()) {
-      if (!latest || cmd.createdAt > latest.createdAt) {
-        latest = cmd;
-      }
-    }
+    for (const cmd of this.commands.values()) latest = cmd;
     return latest;
   }
 
