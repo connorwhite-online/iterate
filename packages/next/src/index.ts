@@ -254,7 +254,7 @@ export function withIterate(
           // With a basePath, Next strips the prefix before matching `source`, so
           // the source stays unprefixed but the destination is the raw daemon URL.
           source: path,
-          destination: `http://127.0.0.1:${daemonPort}${path.replace(":path*", ":path*")}`,
+          destination: `http://localhost:${daemonPort}${path.replace(":path*", ":path*")}`,
         }));
 
         // Handle both array and object rewrite formats

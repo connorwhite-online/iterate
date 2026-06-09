@@ -93,4 +93,34 @@ describe("DaemonClient.callApi", () => {
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("http://127.0.0.1:47100/api/iterations");
   });
+
+  it("throws on a 404, surfacing the daemon's error message", async () => {
+    // Reproduces the silent no-op: implementing a nonexistent change id must
+    // not look like success. The daemon returns 404 { message: "Change not found" }.
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ message: "Change not found" }), { status: 404 })
+    );
+    const client = new DaemonClient(47100);
+    await expect(
+      client.callApi("PATCH", "/api/changes/bogus-id/implement")
+    ).rejects.toThrow(/404.*Change not found/);
+  });
+
+  it("throws on a 500 with a non-JSON body", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response("Internal Server Error", { status: 500 })
+    );
+    const client = new DaemonClient(47100);
+    await expect(
+      client.callApi("POST", "/api/iterations", { name: "v1" })
+    ).rejects.toThrow(/500.*Internal Server Error/);
+  });
+
+  it("does not throw on a 2xx with an empty body", async () => {
+    // 204 No Content requires a null body in the Response ctor; 200 + "" is
+    // equivalent for this layer (matches the empty-body test above).
+    fetchMock.mockResolvedValueOnce(new Response("", { status: 200 }));
+    const client = new DaemonClient(47100);
+    await expect(client.callApi("DELETE", "/api/dom-changes/x")).resolves.toEqual({});
+  });
 });

@@ -122,6 +122,15 @@ export function SelectionPanel({
     }
   }, [hasSelection]);
 
+  // Auto-size textarea whenever comment changes — handles both typing and
+  // the initial open-with-existing-text case (editing a saved annotation).
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = el.scrollHeight + "px";
+  }, [comment]);
+
   // Shake animation on click outside
   const [shaking, setShaking] = useState(false);
   const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -405,11 +414,7 @@ export function SelectionPanel({
           <textarea
             ref={inputRef}
             value={comment}
-            onChange={(e) => {
-              setComment(e.target.value);
-              e.target.style.height = "auto";
-              e.target.style.height = e.target.scrollHeight + "px";
-            }}
+            onChange={(e) => setComment(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Change this..."
             rows={3}
@@ -425,7 +430,8 @@ export function SelectionPanel({
               resize: "none",
               outline: "none",
               boxSizing: "border-box",
-              overflow: "hidden",
+              overflowY: "auto",
+              maxHeight: "40vh",
             }}
           />
 

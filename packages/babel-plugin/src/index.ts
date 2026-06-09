@@ -1,5 +1,42 @@
 import type { PluginObj, types as t } from "@babel/core";
 
+// HTML and SVG intrinsics that accept data-* attributes.
+// Lowercase JSX names NOT in this set are treated as R3F/Three.js primitives
+// and are skipped to prevent TypeError crashes when R3F forwards unknown props.
+const HTML_TAGS = new Set([
+  // HTML block/flow
+  "address", "article", "aside", "blockquote", "caption", "col", "colgroup",
+  "data", "dd", "details", "dialog", "div", "dl", "dt", "fieldset",
+  "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5",
+  "h6", "header", "hgroup", "hr", "li", "main", "nav", "ol", "p", "pre",
+  "search", "section", "summary", "table", "tbody", "td", "tfoot", "th",
+  "thead", "tr", "ul",
+  // HTML inline/phrasing
+  "a", "abbr", "b", "bdi", "bdo", "br", "cite", "code", "del", "dfn", "em",
+  "i", "ins", "kbd", "mark", "q", "rp", "rt", "ruby", "s", "samp", "small",
+  "span", "strong", "sub", "sup", "time", "u", "var", "wbr",
+  // HTML embedded/media
+  "area", "audio", "canvas", "embed", "iframe", "img", "map", "object",
+  "picture", "source", "track", "video",
+  // HTML form
+  "button", "datalist", "input", "label", "legend", "meter", "optgroup",
+  "option", "output", "progress", "select", "textarea",
+  // HTML document/metadata
+  "base", "body", "head", "html", "link", "meta", "noscript", "script",
+  "slot", "style", "template", "title",
+  // SVG
+  "animate", "animateMotion", "animateTransform", "circle", "clipPath",
+  "defs", "desc", "ellipse", "feBlend", "feColorMatrix", "feComponentTransfer",
+  "feComposite", "feConvolveMatrix", "feDiffuseLighting", "feDisplacementMap",
+  "feDropShadow", "feFlood", "feFuncA", "feFuncB", "feFuncG", "feFuncR",
+  "feGaussianBlur", "feImage", "feMerge", "feMergeNode", "feMorphology",
+  "feOffset", "fePointLight", "feSpecularLighting", "feSpotLight", "feTile",
+  "feTurbulence", "filter", "foreignObject", "g", "image", "line",
+  "linearGradient", "marker", "mask", "metadata", "mpath", "path", "pattern",
+  "polygon", "polyline", "radialGradient", "rect", "set", "stop", "svg",
+  "switch", "symbol", "text", "textPath", "tspan", "use", "view",
+]);
+
 interface PluginState {
   filename?: string;
   opts?: {
@@ -175,6 +212,15 @@ function injectAttributes(
 ): void {
   const openingElement = jsxPath.node.openingElement;
   if (!openingElement) return;
+
+  // Skip R3F/Three.js intrinsics (group, mesh, instancedMesh, etc.).
+  // Only React components (PascalCase) and known HTML/SVG tags accept data-* props.
+  if (t.isJSXIdentifier(openingElement.name)) {
+    const name = openingElement.name.name;
+    const isReactComponent = /^[A-Z]/.test(name);
+    const isHtmlOrSvg = HTML_TAGS.has(name);
+    if (!isReactComponent && !isHtmlOrSvg) return;
+  }
 
   const existingAttrs: string[] = openingElement.attributes
     .filter((a: any) => t.isJSXAttribute(a))
