@@ -155,6 +155,39 @@ describe("iterate babel plugin", () => {
     });
   });
 
+  describe("R3F / Three.js intrinsics", () => {
+    it("skips injection on R3F group element", () => {
+      const code = `function Scene() { return <group><mesh /></group>; }`;
+      const output = transform(code);
+      expect(output).not.toContain("data-iterate-component");
+      expect(output).not.toContain("data-iterate-source");
+    });
+
+    it("skips injection on R3F mesh element", () => {
+      const code = `function Model() { return <mesh position={[0,0,0]} />; }`;
+      const output = transform(code);
+      expect(output).not.toContain("data-iterate-component");
+    });
+
+    it("skips injection on camelCase R3F primitive (instancedMesh)", () => {
+      const code = `function Instances() { return <instancedMesh args={[null, null, 100]} />; }`;
+      const output = transform(code);
+      expect(output).not.toContain("data-iterate-component");
+    });
+
+    it("still injects on HTML elements inside a React component", () => {
+      const code = `function HUD() { return <div className="hud">overlay</div>; }`;
+      const output = transform(code);
+      expect(output).toContain('"data-iterate-component": "HUD"');
+    });
+
+    it("still injects when root element is a PascalCase React component", () => {
+      const code = `function Scene() { return <Canvas><mesh /></Canvas>; }`;
+      const output = transform(code);
+      expect(output).toContain('"data-iterate-component": "Scene"');
+    });
+  });
+
   describe("nested functions", () => {
     it("does not cross into nested function returns", () => {
       const code = `

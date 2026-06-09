@@ -1,6 +1,6 @@
 {
   "name": "iterate-ui-daemon",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "iterate daemon — control server, worktree manager, proxy",
   "license": "MIT",
   "repository": {

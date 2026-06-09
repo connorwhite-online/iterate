@@ -45,6 +45,35 @@ export class WorktreeManager {
     return status.current ?? "main";
   }
 
+  /**
+   * Tracked files with uncommitted changes (modified, staged, renamed, or
+   * deleted) in the main working tree, excluding iterate's own `.iterate/`
+   * scratch dir.
+   *
+   * These are the files at risk of a merge conflict: `copyUncommittedFiles`
+   * propagates them into each iteration worktree as uncommitted edits. If the
+   * developer later commits the SAME edits directly to the base branch, the
+   * iteration's copy ends up committed against a different parent, so picking
+   * the iteration produces a three-way conflict on the shared lines. The
+   * create flow uses this to warn before that situation can arise.
+   *
+   * Untracked files (`?? `) are intentionally excluded — they can't conflict
+   * since they don't exist on the base branch.
+   */
+  async getDirtyTrackedFiles(): Promise<string[]> {
+    const status = await this.git.status();
+    const files = new Set<string>([
+      ...status.modified,
+      ...status.staged,
+      ...status.created,
+      ...status.deleted,
+      ...status.renamed.map((r) => r.to),
+    ]);
+    return [...files].filter(
+      (f) => f !== ".iterate" && !f.startsWith(".iterate/")
+    );
+  }
+
   /** Create a new worktree with a new branch */
   async create(
     name: string,
@@ -221,14 +250,16 @@ export class WorktreeManager {
       await this.git.commit("iterate: save changes before pick");
     }
 
+    // Run the chosen integration. CRITICAL: simple-git does NOT reject when
+    // `git merge` exits non-zero due to conflicts — it resolves with the
+    // conflict text. So a try/catch alone silently misses merge conflicts,
+    // leaving `<<<<<<<` markers in tracked files (which the dev's bundler then
+    // surfaces as an opaque "Expression expected" parse error). We must inspect
+    // the repo state after the operation, not rely on a thrown error.
+    let opError: Error | null = null;
     try {
       if (strategy === "squash") {
         await this.git.raw(["merge", "--squash", winnerBranch]);
-        // Check if there are staged changes to commit
-        const status = await this.git.status();
-        if (status.staged.length > 0) {
-          await this.git.raw(["commit", "-m", `iterate: pick ${winnerDisplayName}`]);
-        }
       } else if (strategy === "rebase") {
         await this.git.raw(["rebase", winnerBranch]);
       } else {
@@ -240,7 +271,19 @@ export class WorktreeManager {
         ]);
       }
     } catch (err) {
-      // Abort on conflict so we don't leave the repo in a broken state
+      // Rebase conflicts DO reject; merge conflicts do not. Capture either.
+      opError = err as Error;
+    }
+
+    // Capture conflicted files BEFORE aborting (abort clears the unmerged
+    // state). Naming them makes the failure self-evidently a git conflict.
+    const conflictedFiles = await this.git
+      .status()
+      .then((s) => s.conflicted)
+      .catch(() => [] as string[]);
+
+    if (opError || conflictedFiles.length > 0) {
+      // Abort so we never leave conflict markers in tracked files.
       try {
         if (strategy === "rebase") {
           await this.git.raw(["rebase", "--abort"]);
@@ -248,13 +291,28 @@ export class WorktreeManager {
           await this.git.raw(["merge", "--abort"]);
         }
       } catch {
-        // Already clean
+        // Nothing to abort / already clean
       }
+
+      const fileList = conflictedFiles.length
+        ? `\nConflicting files:\n${conflictedFiles.map((f) => `  - ${f}`).join("\n")}`
+        : "";
       throw new Error(
-        `Merge failed (likely conflicts). Aborted to keep the repo clean. ` +
-        `Resolve manually with: git merge ${winnerBranch}\n` +
-        `Original error: ${(err as Error).message}`
+        `Merge conflict picking "${winnerDisplayName}". ` +
+        `Aborted to keep your working tree clean (no conflict markers were written).` +
+        fileList +
+        `\n\nThis usually means the same lines changed on both your base branch and ` +
+        `the iteration. Resolve manually with: git merge ${winnerBranch}` +
+        (opError ? `\nOriginal error: ${opError.message}` : "")
       );
+    }
+
+    // Squash leaves changes staged but uncommitted — finalize the commit.
+    if (strategy === "squash") {
+      const status = await this.git.status();
+      if (status.staged.length > 0) {
+        await this.git.raw(["commit", "-m", `iterate: pick ${winnerDisplayName}`]);
+      }
     }
 
     // Remove all iteration worktrees (including the winner)

@@ -112,11 +112,11 @@ describe("withIterate — dev mode shape", () => {
     expect(sources).toContain("/api/command");
   });
 
-  it("points rewrites at 127.0.0.1:<daemonPort>", async () => {
+  it("points rewrites at localhost:<daemonPort>", async () => {
     const result = await withIterate({}, { daemonPort: 48888 })();
     const rewrites = (await result.rewrites()) as Array<{ source: string; destination: string }>;
     for (const r of rewrites) {
-      expect(r.destination).toContain("http://127.0.0.1:48888");
+      expect(r.destination).toContain("http://localhost:48888");
     }
   });
 

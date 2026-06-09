@@ -360,6 +360,27 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     const iterationNames: string[] = [];
     const clampedCount = Math.min(Math.max(count, 1), config.maxIterations);
 
+    // Pre-flight: warn (once, before the parallel create loop) if the working
+    // tree has uncommitted edits to tracked files. These get copied into each
+    // iteration; if the dev later commits the same edits to the base branch,
+    // picking an iteration that touched those lines yields a merge conflict.
+    // Non-blocking — copying dirty files into iterations is intentional.
+    try {
+      const dirty = await worktreeManager.getDirtyTrackedFiles();
+      if (dirty.length > 0) {
+        console.warn(
+          `[iterate] Heads up: ${dirty.length} uncommitted tracked file(s) will be ` +
+          `copied into each iteration:\n` +
+          dirty.map((f) => `  - ${f}`).join("\n") +
+          `\nIf you also commit these to "${await worktreeManager.getCurrentBranch()}" ` +
+          `before picking, you may hit a merge conflict on the shared lines. ` +
+          `Commit or stash first to avoid it.`
+        );
+      }
+    } catch {
+      // Best-effort warning; never block iteration creation on it.
+    }
+
     // Create N iterations with the command context
     for (let i = 1; i <= clampedCount; i++) {
       const suffix = prompt?.trim()
@@ -483,7 +504,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
 
   // Start server
   try {
-    await app.listen({ port, host: "0.0.0.0" });
+    await app.listen({ port, host: "::" });
     console.log(`iterate daemon running on http://localhost:${port}`);
     writeLockfile(cwd, {
       pid: process.pid,

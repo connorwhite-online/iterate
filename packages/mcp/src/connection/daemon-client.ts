@@ -169,7 +169,32 @@ export class DaemonClient {
       body: body ? JSON.stringify(body) : undefined,
     });
     const text = await res.text();
-    return text ? JSON.parse(text) : {};
+
+    let data: unknown = {};
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = text; // non-JSON error bodies (e.g. plain-text 500s)
+      }
+    }
+
+    // Surface non-2xx responses as errors. Without this, a 404 (e.g. an
+    // unknown change/iteration id) returns its error body as if it were a
+    // success — so callers like iterate_implement_change report "Implemented"
+    // for a no-op. Throwing lets the MCP layer return a real error to the
+    // agent, prompting it to refetch valid ids instead of silently moving on.
+    if (!res.ok) {
+      const message =
+        data && typeof data === "object" && "message" in data
+          ? String((data as { message?: unknown }).message)
+          : typeof data === "string" && data
+            ? data
+            : res.statusText || "request failed";
+      throw new Error(`${method} ${path} → ${res.status}: ${message}`);
+    }
+
+    return data;
   }
 
   private handleMessage(msg: ServerMessage): void {
