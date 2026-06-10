@@ -134,6 +134,24 @@ export function isPortInUse(port: number): Promise<boolean> {
   });
 }
 
+/**
+ * Is something already bound to this port on EITHER 127.0.0.1 OR ::1?
+ * Use this for daemon liveness probes — a daemon may have bound IPv6-only
+ * (`::` dual-stack on macOS resolves to ::1 only on some kernels), so a
+ * 127.0.0.1-only check would miss a live daemon and spawn a duplicate.
+ */
+export function isPortInUseAny(port: number): Promise<boolean> {
+  const probe = (host: string) =>
+    new Promise<boolean>((resolveFn) => {
+      const socket = createConnection({ port, host });
+      socket.once("connect", () => { socket.destroy(); resolveFn(true); });
+      socket.once("error", () => resolveFn(false));
+    });
+  return Promise.all([probe("127.0.0.1"), probe("::1")]).then(
+    ([v4, v6]) => v4 || v6
+  );
+}
+
 /** Can we bind a fresh listener to this port? (Stronger check than isPortInUse.) */
 export function canBindPort(port: number): Promise<boolean> {
   return new Promise((resolveFn) => {

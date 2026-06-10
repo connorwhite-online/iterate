@@ -64,6 +64,11 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   const processManager = new ProcessManager(config.basePort);
   const wsHub = new WebSocketHub(store);
 
+  // Hoisted here so route handlers (DELETE /api/iterations/:name) can close
+  // over them before the worktree-scan section further below initializes them.
+  const pendingPaths = new Set<string>();
+  const ignoredPaths = new Set<string>();
+
   // Create Fastify server
   const app = Fastify({ logger: true });
 
@@ -517,10 +522,15 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     process.exit(1);
   }
 
+  // Guard: if anything below throws before the cleanup handlers are registered,
+  // remove the lockfile so the next startup doesn't see a stale one.
+  let cleanupHandlersRegistered = false;
+  try {
+
   // --- General worktree detection ---
   // Discover existing worktrees on startup and scan periodically
-  const pendingPaths = new Set<string>();
-  const ignoredPaths = new Set<string>();
+  // (pendingPaths and ignoredPaths are declared near the top of startDaemon so
+  //  route-handler closures can reference them before this point)
 
   const scanWorktrees = async () => {
     try {
@@ -569,6 +579,15 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
 
   process.on("SIGINT", cleanup);
   process.on("SIGTERM", cleanup);
+  cleanupHandlersRegistered = true;
+
+  } catch (err) {
+    // Startup failed after writeLockfile — remove the stale lock before rethrowing.
+    if (!cleanupHandlersRegistered) {
+      removeLockfile(cwd);
+    }
+    throw err;
+  }
 }
 
 // --- Worktree discovery ---
