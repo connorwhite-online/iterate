@@ -54,6 +54,13 @@ export interface IterateConfig {
   /** Glob patterns for files to copy from project root into each new worktree (default: [".env*", ".npmrc"]) */
   copyFiles?: string[];
   /**
+   * Additional path-segment names to exclude when copying untracked directories into new worktrees.
+   * Extends the built-in default list (`node_modules`, `dist`, `build`, `.next`, `.turbo`,
+   * `coverage`, `.cache`). Each entry is matched as a segment anywhere in the relative path
+   * (e.g. `"vendor"` excludes `apps/web/vendor` as well as `vendor`).
+   */
+  copyIgnore?: string[];
+  /**
    * Host env vars to pass through from the iterate CLI/daemon into every dev-server child.
    * Useful for secrets injected by your shell that shouldn't live in config (e.g., DOPPLER_TOKEN).
    */

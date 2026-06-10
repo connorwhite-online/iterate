@@ -133,7 +133,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
 
       // Copy config files (e.g., .env.local) and uncommitted changes into the new worktree
       copyFilesToWorktree(cwd, worktreePath, config.copyFiles ?? [".env*", ".npmrc"]);
-      copyUncommittedFiles(cwd, worktreePath);
+      copyUncommittedFiles(cwd, worktreePath, config.copyIgnore);
 
       await runIterationPipeline({
         repoRoot: cwd,
@@ -425,7 +425,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
 
             // Copy config files (e.g., .env.local) and uncommitted changes into the new worktree
             copyFilesToWorktree(cwd, worktreePath, config.copyFiles ?? [".env*", ".npmrc"]);
-            copyUncommittedFiles(cwd, worktreePath);
+            copyUncommittedFiles(cwd, worktreePath, config.copyIgnore);
 
             await runIterationPipeline({
               repoRoot: cwd,

@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { copyFilesToWorktree } from "../worktree/copy-files.js";
+import { copyFilesToWorktree, copyUncommittedFiles, DEFAULT_COPY_IGNORE } from "../worktree/copy-files.js";
 
 /**
  * copyFilesToWorktree handles the copying of `.env*`, `.npmrc`, and any
@@ -94,5 +94,131 @@ describe("copyFilesToWorktree", () => {
     copyFilesToWorktree(src, dst, ["apps/web/.env"]);
 
     expect(existsSync(join(dst, "apps", "web", ".env"))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// copyUncommittedFiles — exclusion / copyIgnore tests
+// These tests mock `execSync` so they don't need a real git repo.
+// ---------------------------------------------------------------------------
+
+import { execSync } from "node:child_process";
+
+vi.mock("node:child_process", () => ({
+  execSync: vi.fn(),
+}));
+
+const mockExecSync = execSync as ReturnType<typeof vi.fn>;
+
+describe("copyUncommittedFiles – DEFAULT_COPY_IGNORE", () => {
+  it("exports the expected default ignore list", () => {
+    expect(DEFAULT_COPY_IGNORE).toEqual(
+      expect.arrayContaining(["node_modules", "dist", "build", ".next", ".turbo", "coverage", ".cache"])
+    );
+  });
+});
+
+describe("copyUncommittedFiles – skips ignored untracked dirs", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("skips a top-level untracked node_modules directory", () => {
+    // git status reports untracked dirs with a trailing slash
+    mockExecSync.mockReturnValue("?? node_modules/\n");
+
+    copyUncommittedFiles(src, dst);
+
+    // Nothing should have been written to dst
+    expect(existsSync(join(dst, "node_modules"))).toBe(false);
+  });
+
+  it("skips a nested node_modules dir (e.g. apps/web/node_modules)", () => {
+    mockExecSync.mockReturnValue("?? apps/web/node_modules/\n");
+
+    copyUncommittedFiles(src, dst);
+
+    expect(existsSync(join(dst, "apps", "web", "node_modules"))).toBe(false);
+  });
+
+  it("skips .next, dist, build, .turbo, coverage, and .cache by default", () => {
+    const dirs = [".next", "dist", "build", ".turbo", "coverage", ".cache"];
+    mockExecSync.mockReturnValue(dirs.map((d) => `?? ${d}/`).join("\n") + "\n");
+
+    copyUncommittedFiles(src, dst);
+
+    for (const d of dirs) {
+      expect(existsSync(join(dst, d))).toBe(false);
+    }
+  });
+
+  it("does NOT skip a tracked (modified) file whose path contains an ignored segment name", () => {
+    // Suppose there's a tracked file "dist/bundle.js" that was modified —
+    // it has " M" status, not "??", so it must still be copied.
+    writeFileSync(join(src, "dist-notes.txt"), "modified content");
+    mockExecSync.mockReturnValue(" M dist-notes.txt\n");
+
+    copyUncommittedFiles(src, dst);
+
+    // dist-notes.txt doesn't contain an ignored segment so it should be copied
+    expect(existsSync(join(dst, "dist-notes.txt"))).toBe(true);
+  });
+
+  it("copies untracked files not in the ignore list", () => {
+    writeFileSync(join(src, "newfile.ts"), "export {}");
+    mockExecSync.mockReturnValue("?? newfile.ts\n");
+
+    copyUncommittedFiles(src, dst);
+
+    expect(existsSync(join(dst, "newfile.ts"))).toBe(true);
+    expect(readFileSync(join(dst, "newfile.ts"), "utf-8")).toBe("export {}");
+  });
+
+  it("skips entries matching a user-supplied copyIgnore segment", () => {
+    mkdirSync(join(src, "vendor"), { recursive: true });
+    writeFileSync(join(src, "vendor", "lib.js"), "// vendored");
+    mockExecSync.mockReturnValue("?? vendor/\n");
+
+    copyUncommittedFiles(src, dst, ["vendor"]);
+
+    expect(existsSync(join(dst, "vendor"))).toBe(false);
+  });
+
+  it("logs a summary line when entries are skipped", () => {
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    mockExecSync.mockReturnValue("?? node_modules/\n?? dist/\n");
+
+    copyUncommittedFiles(src, dst);
+
+    expect(consoleSpy).toHaveBeenCalledOnce();
+    const msg: string = consoleSpy.mock.calls[0]![0] as string;
+    expect(msg).toMatch(/\[iterate\] skipped copying 2 untracked entries/);
+    expect(msg).toMatch(/node_modules/);
+    expect(msg).toMatch(/dist/);
+
+    consoleSpy.mockRestore();
+  });
+
+  it("does not log when nothing is skipped", () => {
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    writeFileSync(join(src, "readme.md"), "# hi");
+    mockExecSync.mockReturnValue("?? readme.md\n");
+
+    copyUncommittedFiles(src, dst);
+
+    // console.log should NOT have been called for the skip summary
+    const skipCalls = consoleSpy.mock.calls.filter((c) =>
+      typeof c[0] === "string" && (c[0] as string).includes("[iterate] skipped")
+    );
+    expect(skipCalls).toHaveLength(0);
+
+    consoleSpy.mockRestore();
+  });
+
+  it("handles empty git status without errors", () => {
+    mockExecSync.mockReturnValue("   \n");
+
+    // Should not throw
+    expect(() => copyUncommittedFiles(src, dst)).not.toThrow();
   });
 });
