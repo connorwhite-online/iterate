@@ -426,10 +426,12 @@ async function startDaemonIfNeeded(port: number, cwd: string): Promise<ChildProc
 function stopDaemon(child: ChildProcess | null, port: number): void {
   try {
     fetch(`http://127.0.0.1:${port}/api/shutdown`, { method: "POST" }).catch(
-      () => {}
+      (err: unknown) => {
+        console.debug("[iterate] Daemon shutdown request failed (daemon may already be stopped):", (err as Error)?.message ?? err);
+      }
     );
-  } catch {
-    // Ignore
+  } catch (err) {
+    console.debug("[iterate] Could not send daemon shutdown request:", (err as Error)?.message ?? err);
   }
   child?.kill("SIGTERM");
 }

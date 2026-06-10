@@ -74,12 +74,21 @@ async function main() {
   }
 
   // Wait for initial state (with timeout)
+  let stateUnavailable = false;
   try {
     await client.waitForState(15000);
   } catch {
+    stateUnavailable = true;
     console.error(
       "[iterate-mcp] Warning: Timed out waiting for initial state from daemon. Continuing anyway..."
     );
+  }
+
+  /** Prepend a state-unavailable warning line when state sync timed out */
+  function stateWarning(): string {
+    return stateUnavailable
+      ? "Warning: iterate state may be stale or incomplete (initial state sync from daemon timed out).\n\n"
+      : "";
   }
 
   // Create MCP server
@@ -95,7 +104,7 @@ async function main() {
     "List all active iterate iterations (worktrees with dev servers)",
     {},
     async () => {
-      const text = formatIterationList(Object.values(client.getIterations()));
+      const text = stateWarning() + formatIterationList(Object.values(client.getIterations()));
       return { content: [{ type: "text", text }] };
     }
   );
@@ -199,11 +208,11 @@ async function main() {
 
       if (changes.length === 0) {
         return {
-          content: [{ type: "text", text: "No changes found." }],
+          content: [{ type: "text", text: stateWarning() + "No changes found." }],
         };
       }
 
-      const text = changes
+      const text = stateWarning() + changes
         .map((a) => {
           const headline = a.elements[0]
             ? (a.elements[0].componentName || a.elements[0].elementName || a.elements[0].selector)

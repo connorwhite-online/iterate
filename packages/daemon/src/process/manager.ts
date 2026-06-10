@@ -124,13 +124,22 @@ export class ProcessManager {
       try {
         // Wait up to 5s for graceful shutdown
         await Promise.race([
-          managed.process.catch(() => {}),
+          managed.process.catch((err: { exitCode?: number; signal?: string }) => {
+            console.log(
+              `[iterate] Process "${name}" exited` +
+                (err?.exitCode != null ? ` with code ${err.exitCode}` : "") +
+                (err?.signal ? ` (signal: ${err.signal})` : "") +
+                (managed.recentOutput.length > 0
+                  ? `\n[iterate] Last output:\n${managed.recentOutput.slice(-5).join("\n")}`
+                  : "")
+            );
+          }),
           new Promise<void>((_, reject) =>
             setTimeout(() => reject(new Error("timeout")), 5000)
           ),
         ]);
       } catch {
-        // Force kill if it didn't shut down
+        // Force kill if it didn't shut down gracefully
         try {
           managed.process.kill("SIGKILL");
         } catch {

@@ -62,7 +62,11 @@ export async function registerProxyRoutes(
         },
         onResponse: createOnResponse(daemonPort, iterationInfo.name, basePath, iterationInfo.appName),
       });
-    } catch {
+    } catch (err) {
+      console.error(
+        `[iterate] Proxy error for iteration "${iterationInfo.name}" (port ${iterationInfo.port}):`,
+        (err as Error)?.message ?? err
+      );
       return reply.status(502).send({
         error: `Failed to proxy to iteration "${iterationInfo.name}"`,
       });
@@ -156,7 +160,11 @@ function createOnResponse(daemonPort: number, iterationName: string, basePath: s
           .header("content-length", Buffer.byteLength(html))
           .send(html);
       });
-      source.on("error", () => {
+      source.on("error", (err: Error) => {
+        console.error(
+          `[iterate] Decompression error for iteration "${iterationName}":`,
+          err?.message ?? err
+        );
         reply
           .status(502)
           .send({ error: `Proxy error for iteration "${iterationName}"` });
