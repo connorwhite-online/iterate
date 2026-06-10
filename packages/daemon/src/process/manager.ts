@@ -165,7 +165,10 @@ export class ProcessManager {
    */
   async waitForReady(name: string, port: number, timeoutMs = 120000): Promise<void> {
     const start = Date.now();
-    const interval = 500;
+    // Backoff steps: 100 → 150 → 250 → 400 → 500ms cap
+    const backoffSteps = [100, 150, 250, 400];
+    const backoffCap = 500;
+    let attempt = 0;
 
     while (Date.now() - start < timeoutMs) {
       // Fail fast if the process has already exited
@@ -180,6 +183,11 @@ export class ProcessManager {
 
       const listening = await this.isPortListening(port);
       if (listening) return;
+
+      const interval = attempt < backoffSteps.length
+        ? backoffSteps[attempt]
+        : backoffCap;
+      attempt++;
       await new Promise((r) => setTimeout(r, interval));
     }
     throw new Error(`Dev server on port ${port} did not start within ${timeoutMs / 1000}s`);
