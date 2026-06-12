@@ -24,17 +24,51 @@ export function copyFilesToWorktree(
 }
 
 /**
+ * Path-segment names that are excluded from untracked-directory copies by default.
+ * These are typically large build artefacts or vendored dependencies that cost
+ * seconds and gigabytes per iteration without adding value.
+ */
+export const DEFAULT_COPY_IGNORE = [
+  "node_modules",
+  "dist",
+  "build",
+  ".next",
+  ".turbo",
+  "coverage",
+  ".cache",
+];
+
+/**
+ * Return true when any path segment in `relPath` is present in `ignoreSet`.
+ * Works for both forward- and back-slash separators.
+ */
+function hasIgnoredSegment(relPath: string, ignoreSet: Set<string>): boolean {
+  for (const segment of relPath.split(/[/\\]/)) {
+    if (ignoreSet.has(segment)) return true;
+  }
+  return false;
+}
+
+/**
  * Copy all uncommitted changes (modified, added, untracked) from the main
  * working directory into a new worktree so iterations start with the same
  * working state as the developer's current checkout.
+ *
+ * @param copyIgnore - Additional segment names to exclude on top of DEFAULT_COPY_IGNORE.
  */
 export function copyUncommittedFiles(
   cwd: string,
-  worktreePath: string
+  worktreePath: string,
+  copyIgnore: string[] = []
 ): void {
+  // Build the combined ignore set: defaults + user-supplied extras
+  const ignoreSet = new Set([...DEFAULT_COPY_IGNORE, ...copyIgnore]);
+
   // Get all dirty files: modified, added, renamed, and untracked
   const raw = execSync("git status --porcelain", { cwd, encoding: "utf-8" });
   if (!raw.trim()) return;
+
+  const skipped: string[] = [];
 
   for (const line of raw.split("\n")) {
     if (!line) continue;
@@ -51,6 +85,9 @@ export function copyUncommittedFiles(
 
     filePath = filePath.trim();
 
+    // Strip trailing slash that git appends to untracked directory entries
+    if (filePath.endsWith("/")) filePath = filePath.slice(0, -1);
+
     // Skip .iterate/ directory to avoid copying worktrees into themselves
     if (filePath === ".iterate" || filePath.startsWith(".iterate/")) continue;
 
@@ -58,6 +95,13 @@ export function copyUncommittedFiles(
     if (statusCode === " D" || statusCode === "D ") {
       const dest = join(worktreePath, filePath);
       try { unlinkSync(dest); } catch { /* may not exist */ }
+      continue;
+    }
+
+    // Skip untracked entries whose path contains an ignored segment
+    const isUntracked = statusCode === "??" || statusCode === "? ";
+    if (isUntracked && hasIgnoredSegment(filePath, ignoreSet)) {
+      skipped.push(filePath);
       continue;
     }
 
@@ -73,5 +117,11 @@ export function copyUncommittedFiles(
       mkdirSync(dirname(dest), { recursive: true });
       copyFileSync(src, dest);
     }
+  }
+
+  if (skipped.length > 0) {
+    const names = skipped.map((p) => p.split(/[/\\]/).find((s) => ignoreSet.has(s)) ?? p);
+    const unique = [...new Set(names)];
+    console.log(`[iterate] skipped copying ${skipped.length} untracked ${skipped.length === 1 ? "entry" : "entries"} (${unique.join(", ")})`);
   }
 }
