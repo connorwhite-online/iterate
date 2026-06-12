@@ -15,6 +15,7 @@ import {
   isDaemonAlive,
   resolveDaemonPort,
   isPortInUse,
+  isPortInUseAny,
   canBindPort,
   findFreePort,
   parseDotenv,
@@ -214,6 +215,23 @@ describe("port probing", () => {
 
   it("isPortInUse returns true for a listening port", async () => {
     expect(await isPortInUse(busyPort)).toBe(true);
+  });
+
+  it("isPortInUseAny returns true when only 127.0.0.1 is listening", async () => {
+    // busyPort is bound to 127.0.0.1 in beforeEach — isPortInUseAny should detect it
+    expect(await isPortInUseAny(busyPort)).toBe(true);
+  });
+
+  it("isPortInUseAny returns false when nothing is listening on either loopback", async () => {
+    // Use a different port that nothing is listening on.
+    // We close the server then probe — there's a tiny race window but it's
+    // safe in practice: after server.close() the port is unbound on both v4/v6.
+    await new Promise<void>((r) => server.close(() => r()));
+    const wasBusy = busyPort;
+    // Re-open so afterEach's close() doesn't fail
+    server = createServer();
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    expect(await isPortInUseAny(wasBusy)).toBe(false);
   });
 
   it("canBindPort returns false for an occupied port", async () => {

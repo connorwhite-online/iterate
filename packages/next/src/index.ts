@@ -4,7 +4,7 @@ import { join, dirname } from "node:path";
 import { readFileSync } from "node:fs";
 import {
   findFreePort,
-  isPortInUse,
+  isPortInUseAny,
   loadConfig,
   readLockfile,
   isDaemonAlive,
@@ -114,7 +114,9 @@ async function resolveDaemonPort(repoRoot: string, startingFrom: number, overrid
       if (lock && isDaemonAlive(lock)) return lock.port;
       // If the starting port is already listening, assume it's our daemon from
       // a concurrent plugin invocation and reuse it. Otherwise auto-pick upward.
-      if (await isPortInUse(startingFrom)) return startingFrom;
+      // Probe both IPv4 and IPv6 — a daemon may bind :: (dual-stack) which on
+      // some macOS kernels is reachable only via ::1, not 127.0.0.1.
+      if (await isPortInUseAny(startingFrom)) return startingFrom;
       return await findFreePort(startingFrom);
     })();
   }
@@ -368,7 +370,9 @@ function getGitRoot(): string | null {
 }
 
 async function startDaemonIfNeeded(port: number, cwd: string): Promise<ChildProcess | null> {
-  if (await isPortInUse(port)) {
+  // Probe both IPv4 and IPv6 — a daemon may bind :: (dual-stack) which on
+  // some macOS kernels is reachable only via ::1, not 127.0.0.1.
+  if (await isPortInUseAny(port)) {
     console.log(`[iterate] daemon already running on port ${port}`);
     return null;
   }

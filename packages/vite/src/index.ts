@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import http from "node:http";
 import {
   findFreePort,
-  isPortInUse,
+  isPortInUseAny,
   loadConfig,
   readLockfile,
   isDaemonAlive,
@@ -293,7 +293,9 @@ export async function resolveDaemonPort(repoRoot: string, startingFrom: number, 
   if (override && Number.isFinite(override)) return override;
   const lock = readLockfile(repoRoot);
   if (lock && isDaemonAlive(lock)) return lock.port;
-  if (await isPortInUse(startingFrom)) return startingFrom;
+  // Probe both IPv4 and IPv6 — a daemon may bind :: (dual-stack) which on
+  // some macOS kernels is reachable only via ::1, not 127.0.0.1.
+  if (await isPortInUseAny(startingFrom)) return startingFrom;
   return await findFreePort(startingFrom);
 }
 
@@ -312,7 +314,9 @@ function getGitRoot(): string | null {
  * so multiple concurrent dev servers can coexist.
  */
 async function startDaemonIfNeeded(port: number, cwd: string): Promise<ChildProcess | null> {
-  if (await isPortInUse(port)) {
+  // Probe both IPv4 and IPv6 — a daemon may bind :: (dual-stack) which on
+  // some macOS kernels is reachable only via ::1, not 127.0.0.1.
+  if (await isPortInUseAny(port)) {
     console.log(`[iterate] daemon already running on port ${port}`);
     return null;
   }
