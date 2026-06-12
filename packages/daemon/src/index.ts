@@ -1,7 +1,8 @@
 import Fastify from "fastify";
 import fastifyWebsocket from "@fastify/websocket";
 import fastifyReplyFrom from "@fastify/reply-from";
-import { readFileSync } from "node:fs";
+import { readFileSync, watch as fsWatch, existsSync } from "node:fs";
+import { join as pathJoin } from "node:path";
 import { createRequire } from "node:module";
 import {
   DEFAULT_CONFIG,
@@ -553,8 +554,62 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   // Initial scan
   await scanWorktrees();
 
-  // Periodic scan every 5 seconds
-  const scanInterval = setInterval(scanWorktrees, 5000);
+  // Use fs.watch on .git/worktrees for fast change detection, with a slow
+  // fallback interval in case watching is unavailable on this platform.
+  const gitWorktreesDir = pathJoin(cwd, ".git", "worktrees");
+  const gitDir = pathJoin(cwd, ".git");
+
+  let worktreeWatcher: ReturnType<typeof fsWatch> | null = null;
+  let gitDirWatcher: ReturnType<typeof fsWatch> | null = null;
+
+  // Debounce rapid fs events to a single scanWorktrees call
+  let scanDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  const debouncedScan = () => {
+    if (scanDebounceTimer) clearTimeout(scanDebounceTimer);
+    scanDebounceTimer = setTimeout(() => {
+      scanDebounceTimer = null;
+      void scanWorktrees();
+    }, 200);
+  };
+
+  const attachWorktreesWatcher = () => {
+    if (worktreeWatcher) return; // already watching
+    if (!existsSync(gitWorktreesDir)) return;
+    try {
+      worktreeWatcher = fsWatch(gitWorktreesDir, { recursive: false }, () => {
+        debouncedScan();
+      });
+      worktreeWatcher.on("error", (err) => {
+        console.debug("[iterate] fs.watch error on .git/worktrees (ignored):", err.message);
+        worktreeWatcher = null;
+      });
+    } catch (err) {
+      console.debug("[iterate] fs.watch unavailable for .git/worktrees (ignored):", (err as Error).message);
+    }
+  };
+
+  // Watch .git dir so we can lazily attach the worktrees watcher when it appears
+  try {
+    gitDirWatcher = fsWatch(gitDir, { recursive: false }, (eventType, filename) => {
+      if (filename === "worktrees") {
+        attachWorktreesWatcher();
+        debouncedScan();
+      }
+    });
+    gitDirWatcher.on("error", (err) => {
+      console.debug("[iterate] fs.watch error on .git (ignored):", err.message);
+      gitDirWatcher = null;
+    });
+  } catch (err) {
+    console.debug("[iterate] fs.watch unavailable for .git (ignored):", (err as Error).message);
+  }
+
+  // Attach watcher now if .git/worktrees already exists
+  attachWorktreesWatcher();
+
+  // Slow fallback interval (15s) — keeps things in sync even when fs.watch
+  // is unreliable (some CI environments, network filesystems, WSL1, etc.).
+  const scanInterval = setInterval(scanWorktrees, 15000);
 
   // Cleanup on exit — guard against double invocation
   let isShuttingDown = false;
@@ -563,6 +618,9 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     if (isShuttingDown) return;
     isShuttingDown = true;
 
+    if (scanDebounceTimer) clearTimeout(scanDebounceTimer);
+    worktreeWatcher?.close();
+    gitDirWatcher?.close();
     clearInterval(scanInterval);
     console.log("\nShutting down iterate daemon...");
 

@@ -22,6 +22,12 @@ export class DaemonConnection {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private _iterations: Record<string, IterationInfo> = {};
 
+  // Exponential backoff state for reconnection
+  private reconnectDelay = 400; // ms, starting delay
+  private static readonly RECONNECT_MIN = 400;
+  private static readonly RECONNECT_MAX = 10000;
+  private static readonly RECONNECT_JITTER = 0.2; // ±20%
+
   constructor(url?: string) {
     this.url = url ?? `ws://${window.location.host}/ws`;
   }
@@ -42,9 +48,18 @@ export class DaemonConnection {
       }
     };
 
+    this.ws.onopen = () => {
+      // Reset backoff on successful connect
+      this.reconnectDelay = DaemonConnection.RECONNECT_MIN;
+    };
+
     this.ws.onclose = () => {
-      // Attempt reconnection after 2 seconds
-      this.reconnectTimer = setTimeout(() => this.connect(), 2000);
+      // Exponential backoff with ±20% jitter
+      const jitter = 1 + (Math.random() * 2 - 1) * DaemonConnection.RECONNECT_JITTER;
+      const delay = Math.min(this.reconnectDelay * jitter, DaemonConnection.RECONNECT_MAX);
+      this.reconnectTimer = setTimeout(() => this.connect(), delay);
+      // Double the base delay for next attempt (capped)
+      this.reconnectDelay = Math.min(this.reconnectDelay * 2, DaemonConnection.RECONNECT_MAX);
     };
 
     this.ws.onerror = () => {
@@ -54,6 +69,7 @@ export class DaemonConnection {
 
   disconnect(): void {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectDelay = DaemonConnection.RECONNECT_MIN;
     this.ws?.close();
     this.ws = null;
   }
