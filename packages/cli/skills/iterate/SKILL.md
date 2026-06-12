@@ -42,7 +42,7 @@ Read the app's `package.json` `scripts.dev` (or `scripts.start` as fallback). Cl
 - `doppler run`
 - `op run` (1Password)
 - `direnv exec`
-- A custom runner like `env-cmd.ts`, `scripts/dev.ts`, `bun run` on a TS file
+- A custom runner like `env-cmd.ts`, `scripts/dev.ts`, `bun run` on a TS file, or `tsx scripts/dev.ts`
 
 For wrapped commands, iterate must NOT mutate the command string. Instead, find the **port env var** the script uses:
 - Look for `PORT=$FOO`, `--port $FOO`, `-p $FOO`, `--port ${FOO}`, `PORT=%FOO%` in the script value.
@@ -112,7 +112,7 @@ iterate init \
 
 Pick a short, stable `--app-name` based on the app's directory or `package.json` name (e.g., `brand-admin`, `web`, `admin`).
 
-If init reports a starting daemon port that's already in use, pass `--port <N>` with a free alternative in the 47000–48000 range.
+If init reports a starting daemon port that's already in use, pass `--port <N>` with a free alternative in the 47000–48000 range. (The `--port` flag exists on both `iterate init` and `iterate serve`.)
 
 ### 8. Check prerequisites and surface them to the user
 
@@ -129,6 +129,8 @@ If doctor shows any ✗ (fail) items, fix them before moving on. Warnings (`!`) 
 ### 9. Ensure `.mcp.json` and `.claude/settings.json` are set up
 
 The `iterate init` CLI handles these — just verify they were created. If `.mcp.json` already existed, confirm that the `iterate` MCP server entry is present; if not, add it. Do NOT hardcode `ITERATE_DAEMON_PORT` — the MCP server auto-discovers the port from `.iterate/daemon.lock`.
+
+If `.mcp.json` already exists but is invalid JSON or unparseable, `iterate init` will print a note and skip patching it — add the iterate server entry manually. If it exists and already has an `iterate` entry with a hardcoded `env.ITERATE_DAEMON_PORT`, `iterate init` will replace it with the port-agnostic entry automatically.
 
 ```json
 {

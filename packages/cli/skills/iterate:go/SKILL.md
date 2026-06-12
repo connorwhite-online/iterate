@@ -7,19 +7,25 @@ The user has submitted UI feedback changes via the iterate overlay. Your job is 
 
 ## Tools
 
-Use the MCP tools below. If MCP tools are not available (e.g. the server isn't connected), fall back to the daemon's REST API at `http://localhost:<port>`, where `<port>` is read from `.iterate/daemon.lock` in the repo root (JSON with a `port` field):
-
-| MCP tool                          | REST equivalent                                  |
+| MCP tool                          | What it does                                     |
 |-----------------------------------|--------------------------------------------------|
-| `iterate_get_pending_batch`       | `GET /api/changes/pending`                       |
-| `iterate_start_change`            | `PATCH /api/changes/{id}/start`                  |
-| `iterate_implement_change`        | `PATCH /api/changes/{id}/implement`              |
-| `iterate_implement_dom_change`    | `DELETE /api/dom-changes/{id}`                   |
-| `iterate_list_iterations`         | `GET /api/iterations`                            |
+| `iterate_get_pending_batch`       | Fetch all pending changes and DOM changes        |
+| `iterate_start_change`            | Mark a change as in-progress                     |
+| `iterate_implement_change`        | Mark a regular change as resolved                |
+| `iterate_implement_dom_change`    | Mark a DOM change (move/reorder) as resolved     |
+| `iterate_list_iterations`         | List all iterations                              |
 
-- **Start**: `PATCH /api/changes/{id}/start` — no body needed
-- **Implement change**: `PATCH /api/changes/{id}/implement` — body: `{ "summary": "what you changed" }`
-- **Implement DOM change**: `DELETE /api/dom-changes/{id}` — no body needed
+### If MCP tools are unavailable
+
+Read the daemon port from `.iterate/daemon.lock` (JSON, `port` field) and call `http://localhost:<port>` directly:
+
+| Method   | Path                              | Body                                 |
+|----------|-----------------------------------|--------------------------------------|
+| `GET`    | `/api/changes/pending`            | —                                    |
+| `PATCH`  | `/api/changes/{id}/start`         | —                                    |
+| `PATCH`  | `/api/changes/{id}/implement`     | `{ "summary": "what you changed" }`  |
+| `DELETE` | `/api/dom-changes/{id}`           | —                                    |
+| `GET`    | `/api/iterations`                 | —                                    |
 
 ## Steps
 
@@ -48,7 +54,7 @@ Use the MCP tools below. If MCP tools are not available (e.g. the server isn't c
 
 6. **Resolve each change.** After implementing a change, you **must** mark it as resolved so it's removed from the pending queue. **Do not skip this step** — unresolved changes will remain in the overlay as pending. Resolve each change immediately after implementing it, not in a batch at the end.
 
-   - **Regular changes**: Call `iterate_implement_change` with `annotationId` (the change's `id`) and `reply` (a brief summary shown in the overlay UI).
+   - **Regular changes**: Call `iterate_implement_change` with `annotationId` set to the change's `id` value from the pending batch, and `reply` (a brief summary shown in the overlay UI).
    - **DOM changes**: Call `iterate_implement_dom_change` with `id` (the DOM change's `id`) and optionally `reply`. DOM changes have their own IDs shown in the pending batch output — they are resolved separately from regular changes.
 
 7. **Summarize.** After resolving all changes, give the user a brief summary of what you changed. The dev server will hot-reload automatically so they can see the results immediately in the browser.
