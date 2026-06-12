@@ -248,8 +248,8 @@ export function loadEnvFiles(repoRoot: string, files: string[] = []): Record<str
     try {
       const src = readFileSync(full, "utf-8");
       Object.assign(merged, parseDotenv(src));
-    } catch {
-      // ignore unreadable files
+    } catch (err) {
+      console.warn(`[iterate] Could not read env file "${full}":`, (err as Error)?.message ?? err);
     }
   }
   return merged;

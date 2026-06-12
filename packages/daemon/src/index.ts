@@ -182,16 +182,24 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
       // Iterate-created worktree: remove worktree and branch
       try {
         await worktreeManager.remove(name);
-      } catch {
-        // Worktree may already be removed
+      } catch (err) {
+        const msg = (err as Error)?.message ?? String(err);
+        // Silently ignore "not found"-class errors (worktree already gone)
+        if (!/not found|no such|does not exist/i.test(msg)) {
+          console.warn(`[iterate] Failed to remove worktree for "${name}":`, msg);
+        }
       }
     } else if (iteration.worktreePath) {
       // External worktrees: remove the worktree and branch so they're fully cleaned up.
       try {
         await worktreeManager.removeByPath(iteration.worktreePath, iteration.branch, true);
-      } catch {
-        // Worktree may already be removed — add to ignored set as fallback
-        // so the discovery loop won't re-register it.
+      } catch (err) {
+        const msg = (err as Error)?.message ?? String(err);
+        // Silently ignore "not found"-class errors (worktree already gone)
+        if (!/not found|no such|does not exist/i.test(msg)) {
+          console.warn(`[iterate] Failed to remove external worktree at "${iteration.worktreePath}":`, msg);
+        }
+        // Add to ignored set so the discovery loop won't re-register it.
         ignoredPaths.add(iteration.worktreePath);
       }
     }
@@ -794,7 +802,7 @@ export function getShellHTML(): string {
       ws = new WebSocket('ws://' + location.host + '/ws');
       ws.onopen = () => { document.getElementById('status-text').textContent = 'Connected'; document.getElementById('status-text').className = 'connected'; reconnectDelay = 1000; };
       ws.onmessage = (event) => handleMessage(JSON.parse(event.data));
-      ws.onerror = () => {};
+      ws.onerror = (e) => { console.error('[iterate] shell WebSocket error:', e.message || e); };
       ws.onclose = () => { document.getElementById('status-text').textContent = 'Disconnected'; document.getElementById('status-text').className = 'disconnected'; setTimeout(() => { reconnectDelay = Math.min(reconnectDelay * 1.5, 10000); connect(); }, reconnectDelay); };
     }
 
@@ -850,7 +858,7 @@ export function getShellHTML(): string {
           if (!confirm('Remove iteration "' + name + '"? This deletes the worktree and branch.')) return;
           try {
             const res = await fetch('/api/iterations/' + encodeURIComponent(name), { method: 'DELETE' });
-            if (!res.ok) { const err = await res.json().catch(() => ({})); alert('Remove failed: ' + (err.message || res.status)); }
+            if (!res.ok) { const err = await res.json().catch(() => ({})); alert('Remove failed: ' + (err.message || res.statusText || res.status)); }
           } catch (err) { alert('Remove failed: ' + err.message); }
         });
         tab.appendChild(close);

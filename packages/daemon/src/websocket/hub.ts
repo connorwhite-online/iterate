@@ -1,5 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import type { WebSocket } from "ws";
+
+/** WebSocket.OPEN constant (readyState value when the connection is open) */
+const WS_OPEN = 1 as const;
 import type {
   ClientMessage,
   ServerMessage,
@@ -56,7 +59,7 @@ export class WebSocketHub {
   broadcast(msg: ServerMessage): void {
     const data = JSON.stringify(msg);
     for (const client of this.clients) {
-      if (client.readyState === 1) {
+      if (client.readyState === WS_OPEN) {
         client.send(data);
       }
     }
@@ -64,7 +67,7 @@ export class WebSocketHub {
 
   /** Send a message to a specific client */
   private send(socket: WebSocket, msg: ServerMessage): void {
-    if (socket.readyState === 1) {
+    if (socket.readyState === WS_OPEN) {
       socket.send(JSON.stringify(msg));
     }
   }

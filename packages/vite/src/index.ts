@@ -240,7 +240,8 @@ export function iterate(options: IteratePluginOptions = {}): Plugin[] {
             socket.on("error", () => proxySocket.destroy());
           });
 
-          proxy.on("error", () => {
+          proxy.on("error", (err: Error) => {
+            console.error(`[iterate] WebSocket upgrade proxy error (port ${port}):`, err?.message ?? err);
             socket.destroy();
           });
 
@@ -371,8 +372,9 @@ async function stopDaemon(child: ChildProcess | null, port: number): Promise<voi
   // Try graceful shutdown via API first
   try {
     await fetch(`http://127.0.0.1:${port}/api/shutdown`, { method: "POST" });
-  } catch {
-    // API might not be available, kill directly
+  } catch (err) {
+    console.debug("[iterate] Daemon shutdown request failed (daemon may already be stopped):", (err as Error)?.message ?? err);
+    // API not available, kill directly
     child?.kill("SIGTERM");
   }
 }
