@@ -122,6 +122,22 @@ export function getInstallCommand(pm: IterateConfig["packageManager"] | undefine
 }
 
 /**
+ * Resolve the optional build command to run after install for a single app.
+ *
+ * Reads ONLY `app.buildCommand` — it deliberately does NOT fall back to the
+ * legacy top-level `config.buildCommand`. That top-level command is a repo-wide
+ * build and applies solely to the legacy single-app migration path, where
+ * `normalizeConfig` (see iterate-ui-core `config.ts`) copies it onto the
+ * synthesized app's `buildCommand`. A genuine multi-app `apps[]` entry must opt
+ * in to a build explicitly via its own `app.buildCommand`; otherwise a repo-wide
+ * build would run for every iteration of every app even when only one app is
+ * being iterated on (CON-169).
+ */
+export function resolveBuildCommand(app: AppConfig): string | undefined {
+  return app.buildCommand;
+}
+
+/**
  * Build the merged child env for a dev server:
  *   (process.env) → (envFiles, later-wins) → (envPassthrough subset) → (portEnv)
  *
@@ -187,8 +203,9 @@ export async function runIterationPipeline(ctx: IterationStartContext): Promise<
   const [icmd, ...iargs] = installCmd.split(" ");
   await execa(icmd!, iargs, { cwd: worktreeRoot });
 
-  // Optional build
-  const buildCmd = app.buildCommand ?? config.buildCommand;
+  // Optional build (per-app only; see resolveBuildCommand for why the legacy
+  // top-level config.buildCommand is not applied to multi-app entries).
+  const buildCmd = resolveBuildCommand(app);
   if (buildCmd) {
     const [bcmd, ...bargs] = buildCmd.split(" ");
     await execa(bcmd!, bargs, { cwd: worktreeRoot });
