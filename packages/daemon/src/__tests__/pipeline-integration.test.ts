@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "nod
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { AppConfig, IterateConfig, IterationInfo } from "iterate-ui-core";
-import { runIterationPipeline } from "../iteration/pipeline.js";
+import { runIterationPipeline, warmupRoute } from "../iteration/pipeline.js";
 
 // We mock execa so we don't actually run pnpm install against a tmpdir —
 // we just verify the pipeline orchestrates the right sequence of calls.
@@ -422,6 +422,73 @@ describe("runIterationPipeline — orchestration", () => {
     expect(store.setIteration.mock.calls.length).toBeGreaterThanOrEqual(3);
     const lastCall = store.setIteration.mock.calls.at(-1);
     expect(lastCall?.[1].status).toBe("ready");
+  });
+
+  it("still reaches status \"ready\" when the warmup target port is dead (warmup is non-fatal)", async () => {
+    const app: AppConfig = { name: "web", devCommand: "next dev" };
+    const info: IterationInfo = {
+      name: "warm",
+      branch: "iterate/web/warm",
+      worktreePath: tmp,
+      port: 0,
+      pid: null,
+      status: "creating",
+      createdAt: new Date().toISOString(),
+      appName: "web",
+    };
+
+    const pm = mockProcessManager();
+    // Allocate a port nothing is listening on — the warmup GET will be refused.
+    // The pipeline must NOT flip to "error" because of it.
+    pm.allocatePort.mockResolvedValueOnce(59999);
+    const store = mockStore();
+    const hub = mockHub();
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await runIterationPipeline({
+        repoRoot: tmp,
+        worktreeRoot: tmp,
+        app,
+        info,
+        config: { ...baseConfig, apps: [app] },
+        processManager: pm as any,
+        store: store as any,
+        wsHub: hub as any,
+      });
+
+      // Status reached "ready" regardless of the (failing) warmup.
+      expect(info.status).toBe("ready");
+
+      // Drive a warmup directly at the same dead port to confirm it is non-fatal
+      // and logs (the pipeline's own warmup is fire-and-forget / may still be
+      // in flight when runIterationPipeline resolves).
+      await warmupRoute(59999);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("[iterate] warmup request failed:"),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+
+    // Never broadcast an error status.
+    const statuses = hub.events
+      .filter((e) => e.type === "iteration:status")
+      .map((e) => (e.payload as { status: string }).status);
+    expect(statuses).not.toContain("error");
+  });
+
+  it("warmupRoute resolves (does not throw) against a dead port", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      // Should resolve rather than reject — and finish well within its timeout.
+      await expect(warmupRoute(59998, "/", 5000)).resolves.toBeUndefined();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("[iterate] warmup request failed:"),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("surfaces a failing install by letting the error propagate", async () => {

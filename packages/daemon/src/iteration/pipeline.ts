@@ -152,6 +152,45 @@ export function buildChildEnv(
   return out;
 }
 
+/**
+ * Fire a throwaway HTTP GET at the freshly-listening dev server to trigger the
+ * framework's first-route compile eagerly, overlapping it with the time the
+ * user takes to notice the tab and click in.
+ *
+ * `waitForReady` only confirms the port accepts a TCP connection — the dev
+ * server still needs to compile the first route on the first real request
+ * (~5s on a tiny Next app, much longer on a real one). Without this, that
+ * compile happens when the user loads the iframe and stares at a blank page.
+ *
+ * Strictly fire-and-forget: this never throws. A warmup failure must never
+ * flip the iteration to `error`, so all errors are swallowed and logged. The
+ * request follows no redirects, discards the body, and has its own short
+ * timeout independent of the dev server staying up.
+ */
+export async function warmupRoute(
+  port: number,
+  pathname = "/",
+  timeoutMs = 30000,
+): Promise<void> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const path = pathname.startsWith("/") ? pathname : `/${pathname}`;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+      method: "GET",
+      redirect: "manual",
+      signal: controller.signal,
+    });
+    // Drain the body so the connection can close cleanly; we don't use it.
+    await res.arrayBuffer().catch(() => {});
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    console.warn(`[iterate] warmup request failed: ${reason}`);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export interface IterationStartContext {
   /** Root of the main repo (daemon's cwd). Used to resolve config-relative paths. */
   repoRoot: string;
@@ -165,6 +204,13 @@ export interface IterationStartContext {
   processManager: ProcessManager;
   store: StateStore;
   wsHub: WebSocketHub;
+  /**
+   * Route to pre-warm once the dev server is ready, to trigger the first-route
+   * compile before the user loads the iframe. Defaults to "/". The overlay can
+   * thread the pathname the user is currently viewing so we warm the route
+   * they'll actually land on.
+   */
+  warmupPath?: string;
 }
 
 /**
@@ -176,7 +222,7 @@ export interface IterationStartContext {
  * `error` status, and broadcast.
  */
 export async function runIterationPipeline(ctx: IterationStartContext): Promise<void> {
-  const { repoRoot, worktreeRoot, app, info, config, processManager, store, wsHub } = ctx;
+  const { repoRoot, worktreeRoot, app, info, config, processManager, store, wsHub, warmupPath } = ctx;
 
   // Install
   info.status = "installing";
@@ -217,6 +263,12 @@ export async function runIterationPipeline(ctx: IterationStartContext): Promise<
 
   info.status = "ready";
   store.setIteration(info.name, info);
+
+  // Pre-warm the first route so the framework compiles it now, while the user
+  // is still noticing the tab — not when they click in and load the iframe.
+  // Fire-and-forget: warmupRoute never throws, so a failure here can never flip
+  // the iteration to "error".
+  void warmupRoute(allocatedPort, warmupPath);
 }
 
 /** Join a repo root and an optional appDir, always returning an absolute path. */
