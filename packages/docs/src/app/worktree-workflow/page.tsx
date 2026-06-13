@@ -226,6 +226,58 @@ graph LR
 }`}
       />
 
+      <hr />
+
+      <h2 id="build-cache">Build caches across iterations</h2>
+      <p>
+        Iterations share the same git repository, which means they can also share build
+        caches. How much you benefit depends entirely on whether your build runs through{" "}
+        <a href="https://turborepo.com" target="_blank" rel="noopener noreferrer">Turborepo</a>.
+      </p>
+
+      <h3>Turbo-routed builds are nearly free after the first run</h3>
+      <p>
+        If your <code>buildCommand</code> goes through <code>turbo</code> (for example{" "}
+        <code>pnpm run build</code> in a Turborepo workspace), the second and every subsequent
+        iteration is effectively instant. Turbo resolves its local cache through the git common
+        directory, so a brand-new worktree automatically inherits the main repository&apos;s{" "}
+        <code>.turbo/cache</code> with zero configuration — nothing in the iterate pipeline
+        overrides <code>TURBO_CACHE_DIR</code> or forces a per-worktree cache.
+      </p>
+      <Callout label="Measured">
+        <p>
+          A 12-package <code>pnpm run build</code> cost <strong>~42s cold</strong> the first
+          time, then <strong>~1.6s (<code>&gt;&gt;&gt; FULL TURBO</code>, 12/12 cached)</strong>{" "}
+          in a second fresh worktree — the new worktree wrote nothing to its own cache and reused
+          the shared one. Verified against the pinned Turbo <code>2.8.10</code>.
+        </p>
+      </Callout>
+
+      <h3>Non-turbo builds pay full cost every time</h3>
+      <p>
+        Builds that don&apos;t route through turbo do not get this for free. iterate does{" "}
+        <strong>not</strong> copy framework build caches between worktrees, because their cache
+        keys are tied to the project&apos;s absolute path and a copied cache is simply discarded:
+      </p>
+      <ul>
+        <li>
+          <strong>Next.js</strong> — copying <code>.next/</code> gives no first-compile benefit;
+          the webpack filesystem cache is keyed by absolute path.
+        </li>
+        <li>
+          <strong>Vite</strong> — copying <code>node_modules/.vite</code> (the dependency
+          pre-bundle cache) does not help either. Vite&apos;s <code>configHash</code> includes
+          the project root path, so a copied cache is invalidated on startup
+          (<em>&quot;Re-optimizing dependencies because vite config has changed&quot;</em>) and
+          re-bundled from scratch.
+        </li>
+      </ul>
+      <p>
+        The practical takeaway: if you want fast iterations and your repo uses Turborepo, route
+        your <code>buildCommand</code> through <code>turbo</code>. Otherwise, prefer skipping the
+        build step for iterations and rely on the dev server&apos;s own incremental compilation.
+      </p>
+
       <h2>Example session</h2>
       <ol>
         <li>Run <code>/iterate:prompt &quot;Create 3 distinct hero sections&quot;</code> or press the <strong><ForkIcon size={14} style={{ verticalAlign: "-0.15em", marginRight: "0.1rem" }} /> Fork</strong> button on the toolbar.</li>

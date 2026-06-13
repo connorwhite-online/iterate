@@ -187,7 +187,14 @@ export async function runIterationPipeline(ctx: IterationStartContext): Promise<
   const [icmd, ...iargs] = installCmd.split(" ");
   await execa(icmd!, iargs, { cwd: worktreeRoot });
 
-  // Optional build
+  // Optional build.
+  //
+  // Intentionally inherit the ambient environment here (no `env` override). Turbo
+  // resolves its local cache through the git common dir, so a turbo-routed build in a
+  // fresh worktree reuses the main repo's `.turbo/cache` for free (measured: 42s cold →
+  // ~1.6s ">>> FULL TURBO" in a second worktree, turbo 2.8.10). Do NOT set
+  // `TURBO_CACHE_DIR` / `--cache-dir` to a per-worktree path — that would silently
+  // disable this sharing. See docs: worktree-workflow "Build caches across iterations".
   const buildCmd = app.buildCommand ?? config.buildCommand;
   if (buildCmd) {
     const [bcmd, ...bargs] = buildCmd.split(" ");
