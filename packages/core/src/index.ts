@@ -23,6 +23,7 @@ export type {
   ClientMessage,
   ServerMessage,
   IterateState,
+  PhaseTimings,
 } from "./protocol/messages.js";
 
 // Formatting
