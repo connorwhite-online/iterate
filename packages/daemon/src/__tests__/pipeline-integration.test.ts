@@ -114,7 +114,7 @@ describe("runIterationPipeline — orchestration", () => {
     const statusEvents = hub.events
       .filter((e) => e.type === "iteration:status")
       .map((e) => (e.payload as { status: string }).status);
-    expect(statusEvents).toEqual(["installing", "starting"]);
+    expect(statusEvents).toEqual(["installing", "starting", "ready"]);
 
     // Final info should be ready with the allocated port + pid
     expect(info.status).toBe("ready");
@@ -141,6 +141,99 @@ describe("runIterationPipeline — orchestration", () => {
 
     // waitForReady was called with the same port
     expect(pm.waitForReady).toHaveBeenCalledWith("it1", 3101);
+  });
+
+  it("attaches a per-phase timings record to the final ready broadcast", async () => {
+    const app: AppConfig = {
+      name: "web",
+      devCommand: "next dev",
+      buildCommand: "pnpm build:shared",
+      appDir: "apps/web",
+    };
+    const info: IterationInfo = {
+      name: "timed1",
+      branch: "iterate/web/timed1",
+      worktreePath: tmp,
+      port: 0,
+      pid: null,
+      status: "creating",
+      createdAt: new Date().toISOString(),
+      appName: "web",
+    };
+
+    const pm = mockProcessManager();
+    const store = mockStore();
+    const hub = mockHub();
+
+    await runIterationPipeline({
+      repoRoot: tmp,
+      worktreeRoot: tmp,
+      app,
+      info,
+      config: { ...baseConfig, apps: [app] },
+      processManager: pm as any,
+      store: store as any,
+      wsHub: hub as any,
+    });
+
+    const ready = hub.events.find(
+      (e) => e.type === "iteration:status" && (e.payload as { status: string }).status === "ready"
+    );
+    expect(ready).toBeDefined();
+    const timings = (ready!.payload as { timings?: Record<string, number> }).timings;
+    expect(timings).toBeDefined();
+    // Every phase that ran (install, build, spawn) plus a total, all numeric ms.
+    expect(timings).toHaveProperty("install");
+    expect(timings).toHaveProperty("build");
+    expect(timings).toHaveProperty("spawn");
+    expect(timings).toHaveProperty("total");
+    for (const v of Object.values(timings!)) {
+      expect(typeof v).toBe("number");
+      expect(v).toBeGreaterThanOrEqual(0);
+    }
+    // Only emitted on the ready event — earlier status broadcasts carry no timings.
+    const installing = hub.events.find(
+      (e) => e.type === "iteration:status" && (e.payload as { status: string }).status === "installing"
+    );
+    expect((installing!.payload as { timings?: unknown }).timings).toBeUndefined();
+  });
+
+  it("omits the build phase from timings when no buildCommand is configured", async () => {
+    const app: AppConfig = { name: "web", devCommand: "next dev", appDir: "apps/web" };
+    const info: IterationInfo = {
+      name: "timed2",
+      branch: "iterate/web/timed2",
+      worktreePath: tmp,
+      port: 0,
+      pid: null,
+      status: "creating",
+      createdAt: new Date().toISOString(),
+      appName: "web",
+    };
+
+    const pm = mockProcessManager();
+    const store = mockStore();
+    const hub = mockHub();
+
+    await runIterationPipeline({
+      repoRoot: tmp,
+      worktreeRoot: tmp,
+      app,
+      info,
+      config: { ...baseConfig, apps: [app] },
+      processManager: pm as any,
+      store: store as any,
+      wsHub: hub as any,
+    });
+
+    const ready = hub.events.find(
+      (e) => e.type === "iteration:status" && (e.payload as { status: string }).status === "ready"
+    );
+    const timings = (ready!.payload as { timings?: Record<string, number> }).timings!;
+    expect(timings).toHaveProperty("install");
+    expect(timings).toHaveProperty("spawn");
+    expect(timings).toHaveProperty("total");
+    expect(timings).not.toHaveProperty("build");
   });
 
   it("uses portEnvVar + leaves wrapped dev command untouched", async () => {
