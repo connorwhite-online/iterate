@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { AppConfig, IterateConfig, IterationInfo } from "iterate-ui-core";
@@ -406,6 +406,91 @@ describe("runIterationPipeline — orchestration", () => {
     const installCall = execaFn.mock.calls.find((c) => c[0] === "bun");
     expect(installCall).toBeDefined();
     expect(installCall![1]).toEqual(["install"]);
+  });
+
+  it("hardlink-clones node_modules and adds npm fix-up flags for an npm app", async () => {
+    const execaMod = await import("execa");
+    const execaFn = execaMod.execa as unknown as ReturnType<typeof vi.fn>;
+
+    // Separate repo + worktree dirs on the same filesystem so hardlinks work.
+    const repoRoot = mkdtempSync(join(tmpdir(), "iterate-repo-"));
+    const worktreeRoot = mkdtempSync(join(tmpdir(), "iterate-wt-"));
+    try {
+      mkdirSync(join(repoRoot, "node_modules", "left-pad"), { recursive: true });
+      writeFileSync(join(repoRoot, "node_modules", "left-pad", "index.js"), "// pkg");
+
+      const app: AppConfig = { name: "web", devCommand: "next dev", packageManager: "npm" };
+      const info: IterationInfo = {
+        name: "npm-clone",
+        branch: "iterate/web/npm-clone",
+        worktreePath: worktreeRoot,
+        port: 0,
+        pid: null,
+        status: "creating",
+        createdAt: new Date().toISOString(),
+        appName: "web",
+      };
+
+      await runIterationPipeline({
+        repoRoot,
+        worktreeRoot,
+        app,
+        info,
+        config: { ...baseConfig, packageManager: "npm", apps: [app] },
+        processManager: mockProcessManager() as any,
+        store: mockStore() as any,
+        wsHub: mockHub() as any,
+      });
+
+      // node_modules was cloned into the worktree before install.
+      expect(readFileSync(join(worktreeRoot, "node_modules", "left-pad", "index.js"), "utf-8")).toBe("// pkg");
+
+      // The fix-up install ran with --no-audit --no-fund appended.
+      const installCall = execaFn.mock.calls.find((c) => c[0] === "npm");
+      expect(installCall).toBeDefined();
+      expect(installCall![1]).toEqual(["install", "--prefer-offline", "--no-audit", "--no-fund"]);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+      rmSync(worktreeRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT clone node_modules for pnpm (store sharing covers it)", async () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "iterate-repo-"));
+    const worktreeRoot = mkdtempSync(join(tmpdir(), "iterate-wt-"));
+    try {
+      mkdirSync(join(repoRoot, "node_modules", "left-pad"), { recursive: true });
+      writeFileSync(join(repoRoot, "node_modules", "left-pad", "index.js"), "// pkg");
+
+      const app: AppConfig = { name: "web", devCommand: "next dev", packageManager: "pnpm" };
+      const info: IterationInfo = {
+        name: "pnpm-noclone",
+        branch: "iterate/web/pnpm-noclone",
+        worktreePath: worktreeRoot,
+        port: 0,
+        pid: null,
+        status: "creating",
+        createdAt: new Date().toISOString(),
+        appName: "web",
+      };
+
+      await runIterationPipeline({
+        repoRoot,
+        worktreeRoot,
+        app,
+        info,
+        config: { ...baseConfig, packageManager: "pnpm", apps: [app] },
+        processManager: mockProcessManager() as any,
+        store: mockStore() as any,
+        wsHub: mockHub() as any,
+      });
+
+      // pnpm skips the clone entirely.
+      expect(existsSync(join(worktreeRoot, "node_modules"))).toBe(false);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+      rmSync(worktreeRoot, { recursive: true, force: true });
+    }
   });
 
   it("respects per-app installCommand override (bypasses package-manager default)", async () => {

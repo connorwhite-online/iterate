@@ -13,7 +13,11 @@ import {
   resolveAppForWorktreeBranch,
   joinAppDir,
   countIterationsForApp,
+  resolvePackageManager,
+  withNpmFixupFlags,
+  resolveBuildCommand,
 } from "../iteration/pipeline.js";
+import { normalizeConfig } from "iterate-ui-core";
 
 const baseConfig: IterateConfig = {
   apps: [],
@@ -86,6 +90,34 @@ describe("getInstallCommand", () => {
   });
   it("defaults to npm when undefined", () => {
     expect(getInstallCommand(undefined)).toBe("npm install --prefer-offline");
+  });
+});
+
+describe("resolvePackageManager", () => {
+  it("prefers the per-app override over the config default", () => {
+    const app: AppConfig = { name: "web", devCommand: "next dev", packageManager: "npm" };
+    expect(resolvePackageManager(app, { ...baseConfig, packageManager: "pnpm" })).toBe("npm");
+  });
+  it("falls back to the config default when the app has none", () => {
+    const app: AppConfig = { name: "web", devCommand: "next dev" };
+    expect(resolvePackageManager(app, { ...baseConfig, packageManager: "yarn" })).toBe("yarn");
+  });
+});
+
+describe("withNpmFixupFlags", () => {
+  it("adds --no-audit --no-fund to a default npm install", () => {
+    expect(withNpmFixupFlags("npm install --prefer-offline")).toBe(
+      "npm install --prefer-offline --no-audit --no-fund"
+    );
+  });
+  it("is idempotent — does not duplicate flags already present", () => {
+    expect(withNpmFixupFlags("npm install --no-audit --no-fund")).toBe(
+      "npm install --no-audit --no-fund"
+    );
+  });
+  it("leaves non-npm commands untouched", () => {
+    expect(withNpmFixupFlags("yarn install")).toBe("yarn install");
+    expect(withNpmFixupFlags("bun install")).toBe("bun install");
   });
 });
 
@@ -547,5 +579,50 @@ describe("countIterationsForApp", () => {
     };
     expect(countIterationsForApp(all, multiApp, "web")).toBe(3);
     expect(countIterationsForApp(all, multiApp, "admin")).toBe(0);
+  });
+});
+
+describe("resolveBuildCommand (CON-169 — build is scoped per app)", () => {
+  it("does NOT run the legacy top-level buildCommand for explicit multi-app entries", () => {
+    // 2-app config with a top-level buildCommand and no per-app build:
+    // neither app should trigger the repo-wide build.
+    const config = normalizeConfig({
+      buildCommand: "pnpm run build",
+      apps: [
+        { name: "web", devCommand: "next dev" },
+        { name: "admin", devCommand: "vite" },
+      ],
+      packageManager: "pnpm",
+    });
+    expect(config.apps).toHaveLength(2);
+    for (const app of config.apps) {
+      expect(resolveBuildCommand(app)).toBeUndefined();
+    }
+  });
+
+  it("runs a per-app buildCommand for the app that opted in", () => {
+    const config = normalizeConfig({
+      buildCommand: "pnpm run build",
+      apps: [
+        { name: "web", devCommand: "next dev", buildCommand: "pnpm --filter web build" },
+        { name: "admin", devCommand: "vite" },
+      ],
+      packageManager: "pnpm",
+    });
+    expect(resolveBuildCommand(config.apps[0])).toBe("pnpm --filter web build");
+    // The other app still does not inherit the top-level build.
+    expect(resolveBuildCommand(config.apps[1])).toBeUndefined();
+  });
+
+  it("still builds the legacy single-app config (top-level devCommand + buildCommand, empty apps[])", () => {
+    // normalizeConfig migrates the legacy top-level buildCommand onto the
+    // synthesized single app, so the build still runs (no regression).
+    const config = normalizeConfig({
+      devCommand: "pnpm run dev",
+      buildCommand: "pnpm run build",
+      packageManager: "pnpm",
+    });
+    expect(config.apps).toHaveLength(1);
+    expect(resolveBuildCommand(config.apps[0])).toBe("pnpm run build");
   });
 });
