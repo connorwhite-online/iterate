@@ -13,6 +13,8 @@ import {
   resolveAppForWorktreeBranch,
   joinAppDir,
   countIterationsForApp,
+  resolvePackageManager,
+  withNpmFixupFlags,
   resolveBuildCommand,
 } from "../iteration/pipeline.js";
 import { normalizeConfig } from "iterate-ui-core";
@@ -88,6 +90,34 @@ describe("getInstallCommand", () => {
   });
   it("defaults to npm when undefined", () => {
     expect(getInstallCommand(undefined)).toBe("npm install --prefer-offline");
+  });
+});
+
+describe("resolvePackageManager", () => {
+  it("prefers the per-app override over the config default", () => {
+    const app: AppConfig = { name: "web", devCommand: "next dev", packageManager: "npm" };
+    expect(resolvePackageManager(app, { ...baseConfig, packageManager: "pnpm" })).toBe("npm");
+  });
+  it("falls back to the config default when the app has none", () => {
+    const app: AppConfig = { name: "web", devCommand: "next dev" };
+    expect(resolvePackageManager(app, { ...baseConfig, packageManager: "yarn" })).toBe("yarn");
+  });
+});
+
+describe("withNpmFixupFlags", () => {
+  it("adds --no-audit --no-fund to a default npm install", () => {
+    expect(withNpmFixupFlags("npm install --prefer-offline")).toBe(
+      "npm install --prefer-offline --no-audit --no-fund"
+    );
+  });
+  it("is idempotent — does not duplicate flags already present", () => {
+    expect(withNpmFixupFlags("npm install --no-audit --no-fund")).toBe(
+      "npm install --no-audit --no-fund"
+    );
+  });
+  it("leaves non-npm commands untouched", () => {
+    expect(withNpmFixupFlags("yarn install")).toBe("yarn install");
+    expect(withNpmFixupFlags("bun install")).toBe("bun install");
   });
 });
 

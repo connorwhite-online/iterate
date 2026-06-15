@@ -9,6 +9,7 @@ import {
   type IterationInfo,
 } from "iterate-ui-core";
 import { loadEnvFiles } from "iterate-ui-core/node";
+import { cloneNodeModules } from "../worktree/clone-modules.js";
 import type { ProcessManager } from "../process/manager.js";
 import type { StateStore } from "../state/store.js";
 import type { WebSocketHub } from "../websocket/hub.js";
@@ -122,6 +123,32 @@ export function getInstallCommand(pm: IterateConfig["packageManager"] | undefine
 }
 
 /**
+ * Resolve the effective package manager for an app (per-app override wins over
+ * the top-level config default).
+ */
+export function resolvePackageManager(
+  app: AppConfig,
+  config: IterateConfig
+): IterateConfig["packageManager"] {
+  return app.packageManager ?? config.packageManager;
+}
+
+/**
+ * Append npm fix-up flags (`--no-audit --no-fund`) to a default npm install
+ * command. After a hardlink clone, npm only reconciles drift, so we skip the
+ * audit/funding passes that add seconds without value. Only mutates the
+ * package-manager defaults from `getInstallCommand` — a user-supplied
+ * `installCommand` is left exactly as written.
+ */
+export function withNpmFixupFlags(installCmd: string): string {
+  if (!/^npm\b/.test(installCmd)) return installCmd;
+  let cmd = installCmd;
+  if (!/--no-audit\b/.test(cmd)) cmd += " --no-audit";
+  if (!/--no-fund\b/.test(cmd)) cmd += " --no-fund";
+  return cmd;
+}
+
+/**
  * Resolve the optional build command to run after install for a single app.
  *
  * Reads ONLY `app.buildCommand` — it deliberately does NOT fall back to the
@@ -199,7 +226,37 @@ export async function runIterationPipeline(ctx: IterationStartContext): Promise<
   store.setIteration(info.name, info);
   wsHub.broadcast({ type: "iteration:status", payload: { name: info.name, status: "installing" } });
 
-  const installCmd = app.installCommand ?? getInstallCommand(app.packageManager ?? config.packageManager);
+  const pm = resolvePackageManager(app, config);
+  const usingDefaultInstall = !app.installCommand;
+  let installCmd = app.installCommand ?? getInstallCommand(pm);
+
+  // Hardlink-clone node_modules from the main repo (and the app subdir, for
+  // appDir setups) before installing, for npm/yarn/bun. npm then no-ops on the
+  // linked packages and installs only drift — typically a >3x speedup over a
+  // cold install. pnpm shares its content-addressable store already, so it's
+  // skipped. Any failure falls back to the plain install; never fails creation.
+  if (pm !== "pnpm") {
+    const appSrc = resolveAppCwd(repoRoot, app);
+    const appDest = resolveAppCwd(worktreeRoot, app);
+    // Clone the repo-root node_modules, plus the app subdir's when appDir
+    // points somewhere other than the root (monorepo / per-app installs).
+    const sources: Array<[src: string, dest: string]> = [[repoRoot, worktreeRoot]];
+    if (appSrc !== repoRoot) sources.push([appSrc, appDest]);
+
+    for (const [src, dest] of sources) {
+      const result = cloneNodeModules(src, dest);
+      if (!result.cloned && !result.skipped) {
+        // A genuine failure (e.g. EXDEV cross-device, permissions) — not a
+        // benign skip. Log and let the fix-up install reconcile from scratch.
+        console.log(`[iterate] node_modules clone failed (${result.reason}), falling back to full install`);
+      }
+    }
+
+    // After a clone, npm only reconciles drift — add the fix-up flags so it
+    // skips audit/funding. Leave any user-supplied installCommand untouched.
+    if (usingDefaultInstall) installCmd = withNpmFixupFlags(installCmd);
+  }
+
   const [icmd, ...iargs] = installCmd.split(" ");
   await execa(icmd!, iargs, { cwd: worktreeRoot });
 
