@@ -3,6 +3,15 @@ import type { IterationInfo, IterationStatus } from "../types/iterations.js";
 import type { DomChange } from "../types/dom.js";
 import type { IterateConfig } from "../types/config.js";
 
+/**
+ * Per-phase wall-clock durations (milliseconds) for an iteration's creation
+ * pipeline — install, build, dev-server boot, etc., plus a `total`. Keyed by
+ * phase name so new phases (e.g. clone/copy, warmup) can be added without a
+ * type change. Always optional and additive: clients that don't know about it
+ * ignore it. Pairs with the CON-124 progress UI (elapsed-per-phase display).
+ */
+export type PhaseTimings = Record<string, number>;
+
 // --- Client → Server messages (browser overlay → daemon) ---
 
 export type ClientMessage =
@@ -29,7 +38,7 @@ export type ServerMessage =
   | { type: "state:sync"; payload: IterateState }
   | { type: "iteration:created"; payload: IterationInfo }
   | { type: "iteration:removed"; payload: { name: string } }
-  | { type: "iteration:status"; payload: { name: string; status: IterationStatus; error?: string } }
+  | { type: "iteration:status"; payload: { name: string; status: IterationStatus; error?: string; timings?: PhaseTimings } }
   | { type: "change:created"; payload: Change }
   | { type: "change:updated"; payload: Change }
   | { type: "change:deleted"; payload: { id: string } }

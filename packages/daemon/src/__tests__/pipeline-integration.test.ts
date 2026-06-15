@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { AppConfig, IterateConfig, IterationInfo } from "iterate-ui-core";
@@ -114,7 +114,7 @@ describe("runIterationPipeline — orchestration", () => {
     const statusEvents = hub.events
       .filter((e) => e.type === "iteration:status")
       .map((e) => (e.payload as { status: string }).status);
-    expect(statusEvents).toEqual(["installing", "starting"]);
+    expect(statusEvents).toEqual(["installing", "starting", "ready"]);
 
     // Final info should be ready with the allocated port + pid
     expect(info.status).toBe("ready");
@@ -141,6 +141,99 @@ describe("runIterationPipeline — orchestration", () => {
 
     // waitForReady was called with the same port
     expect(pm.waitForReady).toHaveBeenCalledWith("it1", 3101);
+  });
+
+  it("attaches a per-phase timings record to the final ready broadcast", async () => {
+    const app: AppConfig = {
+      name: "web",
+      devCommand: "next dev",
+      buildCommand: "pnpm build:shared",
+      appDir: "apps/web",
+    };
+    const info: IterationInfo = {
+      name: "timed1",
+      branch: "iterate/web/timed1",
+      worktreePath: tmp,
+      port: 0,
+      pid: null,
+      status: "creating",
+      createdAt: new Date().toISOString(),
+      appName: "web",
+    };
+
+    const pm = mockProcessManager();
+    const store = mockStore();
+    const hub = mockHub();
+
+    await runIterationPipeline({
+      repoRoot: tmp,
+      worktreeRoot: tmp,
+      app,
+      info,
+      config: { ...baseConfig, apps: [app] },
+      processManager: pm as any,
+      store: store as any,
+      wsHub: hub as any,
+    });
+
+    const ready = hub.events.find(
+      (e) => e.type === "iteration:status" && (e.payload as { status: string }).status === "ready"
+    );
+    expect(ready).toBeDefined();
+    const timings = (ready!.payload as { timings?: Record<string, number> }).timings;
+    expect(timings).toBeDefined();
+    // Every phase that ran (install, build, spawn) plus a total, all numeric ms.
+    expect(timings).toHaveProperty("install");
+    expect(timings).toHaveProperty("build");
+    expect(timings).toHaveProperty("spawn");
+    expect(timings).toHaveProperty("total");
+    for (const v of Object.values(timings!)) {
+      expect(typeof v).toBe("number");
+      expect(v).toBeGreaterThanOrEqual(0);
+    }
+    // Only emitted on the ready event — earlier status broadcasts carry no timings.
+    const installing = hub.events.find(
+      (e) => e.type === "iteration:status" && (e.payload as { status: string }).status === "installing"
+    );
+    expect((installing!.payload as { timings?: unknown }).timings).toBeUndefined();
+  });
+
+  it("omits the build phase from timings when no buildCommand is configured", async () => {
+    const app: AppConfig = { name: "web", devCommand: "next dev", appDir: "apps/web" };
+    const info: IterationInfo = {
+      name: "timed2",
+      branch: "iterate/web/timed2",
+      worktreePath: tmp,
+      port: 0,
+      pid: null,
+      status: "creating",
+      createdAt: new Date().toISOString(),
+      appName: "web",
+    };
+
+    const pm = mockProcessManager();
+    const store = mockStore();
+    const hub = mockHub();
+
+    await runIterationPipeline({
+      repoRoot: tmp,
+      worktreeRoot: tmp,
+      app,
+      info,
+      config: { ...baseConfig, apps: [app] },
+      processManager: pm as any,
+      store: store as any,
+      wsHub: hub as any,
+    });
+
+    const ready = hub.events.find(
+      (e) => e.type === "iteration:status" && (e.payload as { status: string }).status === "ready"
+    );
+    const timings = (ready!.payload as { timings?: Record<string, number> }).timings!;
+    expect(timings).toHaveProperty("install");
+    expect(timings).toHaveProperty("spawn");
+    expect(timings).toHaveProperty("total");
+    expect(timings).not.toHaveProperty("build");
   });
 
   it("uses portEnvVar + leaves wrapped dev command untouched", async () => {
@@ -313,6 +406,91 @@ describe("runIterationPipeline — orchestration", () => {
     const installCall = execaFn.mock.calls.find((c) => c[0] === "bun");
     expect(installCall).toBeDefined();
     expect(installCall![1]).toEqual(["install"]);
+  });
+
+  it("hardlink-clones node_modules and adds npm fix-up flags for an npm app", async () => {
+    const execaMod = await import("execa");
+    const execaFn = execaMod.execa as unknown as ReturnType<typeof vi.fn>;
+
+    // Separate repo + worktree dirs on the same filesystem so hardlinks work.
+    const repoRoot = mkdtempSync(join(tmpdir(), "iterate-repo-"));
+    const worktreeRoot = mkdtempSync(join(tmpdir(), "iterate-wt-"));
+    try {
+      mkdirSync(join(repoRoot, "node_modules", "left-pad"), { recursive: true });
+      writeFileSync(join(repoRoot, "node_modules", "left-pad", "index.js"), "// pkg");
+
+      const app: AppConfig = { name: "web", devCommand: "next dev", packageManager: "npm" };
+      const info: IterationInfo = {
+        name: "npm-clone",
+        branch: "iterate/web/npm-clone",
+        worktreePath: worktreeRoot,
+        port: 0,
+        pid: null,
+        status: "creating",
+        createdAt: new Date().toISOString(),
+        appName: "web",
+      };
+
+      await runIterationPipeline({
+        repoRoot,
+        worktreeRoot,
+        app,
+        info,
+        config: { ...baseConfig, packageManager: "npm", apps: [app] },
+        processManager: mockProcessManager() as any,
+        store: mockStore() as any,
+        wsHub: mockHub() as any,
+      });
+
+      // node_modules was cloned into the worktree before install.
+      expect(readFileSync(join(worktreeRoot, "node_modules", "left-pad", "index.js"), "utf-8")).toBe("// pkg");
+
+      // The fix-up install ran with --no-audit --no-fund appended.
+      const installCall = execaFn.mock.calls.find((c) => c[0] === "npm");
+      expect(installCall).toBeDefined();
+      expect(installCall![1]).toEqual(["install", "--prefer-offline", "--no-audit", "--no-fund"]);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+      rmSync(worktreeRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT clone node_modules for pnpm (store sharing covers it)", async () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "iterate-repo-"));
+    const worktreeRoot = mkdtempSync(join(tmpdir(), "iterate-wt-"));
+    try {
+      mkdirSync(join(repoRoot, "node_modules", "left-pad"), { recursive: true });
+      writeFileSync(join(repoRoot, "node_modules", "left-pad", "index.js"), "// pkg");
+
+      const app: AppConfig = { name: "web", devCommand: "next dev", packageManager: "pnpm" };
+      const info: IterationInfo = {
+        name: "pnpm-noclone",
+        branch: "iterate/web/pnpm-noclone",
+        worktreePath: worktreeRoot,
+        port: 0,
+        pid: null,
+        status: "creating",
+        createdAt: new Date().toISOString(),
+        appName: "web",
+      };
+
+      await runIterationPipeline({
+        repoRoot,
+        worktreeRoot,
+        app,
+        info,
+        config: { ...baseConfig, packageManager: "pnpm", apps: [app] },
+        processManager: mockProcessManager() as any,
+        store: mockStore() as any,
+        wsHub: mockHub() as any,
+      });
+
+      // pnpm skips the clone entirely.
+      expect(existsSync(join(worktreeRoot, "node_modules"))).toBe(false);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+      rmSync(worktreeRoot, { recursive: true, force: true });
+    }
   });
 
   it("respects per-app installCommand override (bypasses package-manager default)", async () => {
