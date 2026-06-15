@@ -7,6 +7,7 @@ import {
   type AppConfig,
   type IterateConfig,
   type IterationInfo,
+  type PhaseTimings,
 } from "iterate-ui-core";
 import { loadEnvFiles } from "iterate-ui-core/node";
 import { cloneNodeModules } from "../worktree/clone-modules.js";
@@ -217,9 +218,29 @@ export interface IterationStartContext {
  *
  * Throws on any step failure. The caller is expected to catch, set the
  * `error` status, and broadcast.
+ *
+ * Each phase is wrapped in a monotonic timer; durations (ms) are logged as
+ * structured lines (`[iterate] <name> install 7421ms`) and attached to the
+ * final `iteration:status` broadcast as a `timings` record so clients can
+ * surface elapsed-per-phase (pairs with CON-124). Always-on and cheap — the
+ * only overhead is a couple of `performance.now()` reads per phase.
  */
 export async function runIterationPipeline(ctx: IterationStartContext): Promise<void> {
   const { repoRoot, worktreeRoot, app, info, config, processManager, store, wsHub } = ctx;
+
+  const timings: PhaseTimings = {};
+  const pipelineStart = performance.now();
+  /** Run `fn`, record its wall-clock duration under `phase`, and log it. */
+  const timed = async <T>(phase: string, fn: () => Promise<T>): Promise<T> => {
+    const start = performance.now();
+    try {
+      return await fn();
+    } finally {
+      const ms = Math.round(performance.now() - start);
+      timings[phase] = ms;
+      console.log(`[iterate] ${info.name} ${phase} ${ms}ms`);
+    }
+  };
 
   // Install
   info.status = "installing";
@@ -258,7 +279,7 @@ export async function runIterationPipeline(ctx: IterationStartContext): Promise<
   }
 
   const [icmd, ...iargs] = installCmd.split(" ");
-  await execa(icmd!, iargs, { cwd: worktreeRoot });
+  await timed("install", () => execa(icmd!, iargs, { cwd: worktreeRoot }));
 
   // Optional build (per-app only; see resolveBuildCommand for why the legacy
   // top-level config.buildCommand is not applied to multi-app entries).
@@ -272,7 +293,7 @@ export async function runIterationPipeline(ctx: IterationStartContext): Promise<
   const buildCmd = resolveBuildCommand(app);
   if (buildCmd) {
     const [bcmd, ...bargs] = buildCmd.split(" ");
-    await execa(bcmd!, bargs, { cwd: worktreeRoot });
+    await timed("build", () => execa(bcmd!, bargs, { cwd: worktreeRoot }));
   }
 
   // Start dev server
@@ -287,17 +308,24 @@ export async function runIterationPipeline(ctx: IterationStartContext): Promise<
   const { command, env: portEnv } = buildDevCommand(app, allocatedPort);
   const childEnv = buildChildEnv(repoRoot, config, app, portEnv);
 
-  const { pid } = await processManager.start(info.name, devCwd, command, allocatedPort, {
-    ITERATE_WORKTREE_ROOT: worktreeRoot,
-    ITERATE_APP_NAME: app.name,
-    ...childEnv,
+  // Spawn the dev server and wait for it to accept connections — measured as a
+  // single phase since the spawn is near-instant and the port wait dominates.
+  await timed("spawn", async () => {
+    const { pid } = await processManager.start(info.name, devCwd, command, allocatedPort, {
+      ITERATE_WORKTREE_ROOT: worktreeRoot,
+      ITERATE_APP_NAME: app.name,
+      ...childEnv,
+    });
+    info.pid = pid ?? null;
+    await processManager.waitForReady(info.name, allocatedPort);
   });
-  info.pid = pid ?? null;
 
-  await processManager.waitForReady(info.name, allocatedPort);
+  timings.total = Math.round(performance.now() - pipelineStart);
+  console.log(`[iterate] ${info.name} total ${timings.total}ms`);
 
   info.status = "ready";
   store.setIteration(info.name, info);
+  wsHub.broadcast({ type: "iteration:status", payload: { name: info.name, status: "ready", timings } });
 }
 
 /** Join a repo root and an optional appDir, always returning an absolute path. */
