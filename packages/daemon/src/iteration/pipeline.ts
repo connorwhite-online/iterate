@@ -205,6 +205,13 @@ export async function runIterationPipeline(ctx: IterationStartContext): Promise<
 
   // Optional build (per-app only; see resolveBuildCommand for why the legacy
   // top-level config.buildCommand is not applied to multi-app entries).
+  //
+  // Intentionally inherit the ambient environment here (no `env` override). Turbo
+  // resolves its local cache through the git common dir, so a turbo-routed build in a
+  // fresh worktree reuses the main repo's `.turbo/cache` for free (measured: 42s cold →
+  // ~1.6s ">>> FULL TURBO" in a second worktree, turbo 2.8.10). Do NOT set
+  // `TURBO_CACHE_DIR` / `--cache-dir` to a per-worktree path — that would silently
+  // disable this sharing. See docs: worktree-workflow "Build caches across iterations".
   const buildCmd = resolveBuildCommand(app);
   if (buildCmd) {
     const [bcmd, ...bargs] = buildCmd.split(" ");
