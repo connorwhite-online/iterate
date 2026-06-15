@@ -30,7 +30,12 @@ export interface AppConfig {
   basePath?: string;
   /** Override install command (e.g., "pnpm install --filter ./projects/brand-admin..."). */
   installCommand?: string;
-  /** Optional build command to run after install (for workspace deps that must be built first). */
+  /**
+   * Optional build command to run after install (for workspace deps that must be built first).
+   * Each `apps[]` entry must opt in here explicitly — iterate never runs the legacy top-level
+   * `buildCommand` for a multi-app entry (that repo-wide build would otherwise run for every
+   * iteration of every app). The top-level field only seeds the synthesized legacy single-app entry.
+   */
   buildCommand?: string;
 }
 
@@ -71,7 +76,11 @@ export interface IterateConfig {
   devCommand?: string;
   /** @deprecated Use apps[].appDir. Preserved for migration of older configs. */
   appDir?: string;
-  /** @deprecated Use apps[].buildCommand. Preserved for migration of older configs. */
+  /**
+   * @deprecated Use apps[].buildCommand. Preserved for migration of older configs.
+   * Applies ONLY to the legacy single-app path: `normalizeConfig` copies it onto the
+   * synthesized app entry. It is never used as a fallback for explicit `apps[]` entries.
+   */
   buildCommand?: string;
 }
 
