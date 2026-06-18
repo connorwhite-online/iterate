@@ -1,4 +1,5 @@
-import type { SelectedElement, TextSelection, DrawingData, Rect } from "./types/annotations.js";
+import type { SelectedElement, TextSelection, DrawingData, Rect, PageSnapshot } from "./types/annotations.js";
+import { selectPrinciples, type DesignPrinciple } from "./knowledge/index.js";
 
 /**
  * A single change item to format (works for both pending and persisted changes).
@@ -134,6 +135,60 @@ export function formatBatchPrompt(
   }
 
   text += `Please process this feedback and make the requested changes.`;
+
+  return text;
+}
+
+/**
+ * Format a page snapshot plus the relevant design principles as a prompt the
+ * agent uses to produce a design critique. Mirrors `formatBatchPrompt`'s element
+ * blocks so the agent sees the same kind of structured, measured element data.
+ *
+ * If `principles` is omitted, the relevant subset is selected automatically from
+ * the snapshot's nodes (see `selectPrinciples`).
+ */
+export function formatCritiquePrompt(
+  snapshot: PageSnapshot,
+  principles?: DesignPrinciple[],
+): string {
+  const selected = principles ?? selectPrinciples(snapshot.nodes);
+
+  let text = `# Design Critique Request\n\n`;
+  text += `Evaluate this page against the design principles below and return prioritized, element-anchored findings.\n\n`;
+  text += `**Page**: ${snapshot.url}\n`;
+  text += `**Viewport**: ${snapshot.viewport.width}×${snapshot.viewport.height}\n`;
+  if (snapshot.region) {
+    const r = snapshot.region;
+    text += `**Region**: ${r.width.toFixed(0)}×${r.height.toFixed(0)} at (${r.x.toFixed(0)}, ${r.y.toFixed(0)})\n`;
+  }
+  text += `**Captured elements**: ${snapshot.nodes.length}\n\n`;
+
+  text += `## Elements\n\n`;
+  for (const node of snapshot.nodes) {
+    const indent = "  ".repeat(Math.min(node.depth, 6));
+    const name = node.componentName ? `<${node.componentName}>` : node.elementName || node.selector;
+    const source = node.sourceLocation ? ` — \`${node.sourceLocation}\`` : "";
+    text += `${indent}- **${name}**${source}\n`;
+    text += `${indent}  Selector: \`${node.selector}\`\n`;
+    text += `${indent}  Size: ${node.rect.width.toFixed(0)}×${node.rect.height.toFixed(0)} at (${node.rect.x.toFixed(0)}, ${node.rect.y.toFixed(0)})\n`;
+    if (node.nearbyText) text += `${indent}  Text: "${node.nearbyText}"\n`;
+    const styles = Object.entries(node.computedStyles)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join(", ");
+    if (styles) text += `${indent}  Styles: ${styles}\n`;
+  }
+  text += `\n`;
+
+  text += `## Design principles to evaluate against\n\n`;
+  for (const p of selected) {
+    text += `### ${p.title} (\`${p.id}\`, ${p.category})\n`;
+    text += `- **Rule**: ${p.rule}\n`;
+    text += `- **Heuristic**: ${p.heuristic}\n`;
+    text += `- **Source**: ${p.citation.source}${p.citation.url ? ` (${p.citation.url})` : ""}\n\n`;
+  }
+
+  text += `## Instructions\n\n`;
+  text += `For each issue you find, produce a finding with: the element selector, the cited principle id, a severity (high/medium/low), a one-line rationale, a measured value and target where applicable (e.g. "32px" vs "≥44px"), and a concrete recommendation. Prioritize by severity. Only raise findings backed by the captured data — do not speculate about things not visible in the snapshot.`;
 
   return text;
 }

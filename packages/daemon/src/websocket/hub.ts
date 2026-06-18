@@ -8,6 +8,7 @@ import type {
   ServerMessage,
   Change,
   DomChange,
+  CritiqueRequest,
 } from "iterate-ui-core";
 import type { StateStore } from "../state/store.js";
 
@@ -17,9 +18,11 @@ import type { StateStore } from "../state/store.js";
 export class WebSocketHub {
   private clients: Set<WebSocket> = new Set();
   private store: StateStore;
+  private onCritiqueRequest?: (request: CritiqueRequest) => void;
 
-  constructor(store: StateStore) {
+  constructor(store: StateStore, opts?: { onCritiqueRequest?: (request: CritiqueRequest) => void }) {
     this.store = store;
+    this.onCritiqueRequest = opts?.onCritiqueRequest;
   }
 
   /** Register the WebSocket route on the Fastify server */
@@ -191,6 +194,39 @@ export class WebSocketHub {
       case "tool:set-mode": {
         // Relay tool mode changes to all clients (for cross-iframe sync)
         this.broadcast({ type: "tool:mode-changed", payload: msg.payload });
+        break;
+      }
+
+      case "critique:request": {
+        const request: CritiqueRequest = {
+          ...msg.payload,
+          id: crypto.randomUUID(),
+          timestamp: Date.now(),
+          status: "pending",
+        };
+        this.store.addCritiqueRequest(request);
+        this.broadcast({ type: "critique:requested", payload: request });
+        // Auto-spawn the analysis agent (if configured). The hook resolves the
+        // worktree and launches a headless run; it updates status as it goes.
+        this.onCritiqueRequest?.(request);
+        break;
+      }
+
+      case "critique:finding-apply": {
+        // The overlay separately sends change:create; here we just mark the
+        // finding applied so its badge is replaced by the queued-change badge.
+        const updated = this.store.updateCritiqueFinding(msg.payload.id, { status: "applied" });
+        if (updated) {
+          this.broadcast({ type: "critique:finding-updated", payload: updated });
+        }
+        break;
+      }
+
+      case "critique:finding-dismiss": {
+        const removed = this.store.removeCritiqueFinding(msg.payload.id);
+        if (removed) {
+          this.broadcast({ type: "critique:finding-deleted", payload: { id: msg.payload.id } });
+        }
         break;
       }
 

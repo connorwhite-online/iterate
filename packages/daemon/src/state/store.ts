@@ -5,6 +5,8 @@ import type {
   Change,
   ChangeStatus,
   DomChange,
+  CritiqueRequest,
+  CritiqueFinding,
 } from "iterate-ui-core";
 
 /** Command context for /iterate slash commands */
@@ -34,6 +36,8 @@ export class StateStore {
       iterations: {},
       changes: [],
       domChanges: [],
+      critiqueRequests: [],
+      critiqueFindings: [],
     };
   }
 
@@ -117,18 +121,84 @@ export class StateStore {
   }
 
   /** Remove all changes and DOM changes belonging to an iteration */
-  removeIterationData(iteration: string): { changeIds: string[]; domChangeIds: string[] } {
+  removeIterationData(iteration: string): {
+    changeIds: string[];
+    domChangeIds: string[];
+    critiqueRequestIds: string[];
+    critiqueFindingIds: string[];
+  } {
     const changeIds = this.state.changes
       .filter((a) => a.iteration === iteration)
       .map((a) => a.id);
     const domChangeIds = this.state.domChanges
       .filter((c) => c.iteration === iteration)
       .map((c) => c.id);
+    const critiqueRequestIds = this.state.critiqueRequests
+      .filter((r) => r.iteration === iteration)
+      .map((r) => r.id);
+    const critiqueFindingIds = this.state.critiqueFindings
+      .filter((f) => f.iteration === iteration)
+      .map((f) => f.id);
 
     this.state.changes = this.state.changes.filter((a) => a.iteration !== iteration);
     this.state.domChanges = this.state.domChanges.filter((c) => c.iteration !== iteration);
+    this.state.critiqueRequests = this.state.critiqueRequests.filter((r) => r.iteration !== iteration);
+    this.state.critiqueFindings = this.state.critiqueFindings.filter((f) => f.iteration !== iteration);
 
-    return { changeIds, domChangeIds };
+    return { changeIds, domChangeIds, critiqueRequestIds, critiqueFindingIds };
+  }
+
+  // --- Critique requests ---
+
+  getCritiqueRequests(): CritiqueRequest[] {
+    return this.state.critiqueRequests;
+  }
+
+  getCritiqueRequest(id: string): CritiqueRequest | undefined {
+    return this.state.critiqueRequests.find((r) => r.id === id);
+  }
+
+  getPendingCritiqueRequests(): CritiqueRequest[] {
+    return this.state.critiqueRequests.filter((r) => r.status === "pending");
+  }
+
+  addCritiqueRequest(request: CritiqueRequest): void {
+    this.state.critiqueRequests.push(request);
+  }
+
+  updateCritiqueRequest(id: string, updates: Partial<CritiqueRequest>): CritiqueRequest | null {
+    const request = this.state.critiqueRequests.find((r) => r.id === id);
+    if (!request) return null;
+    Object.assign(request, updates);
+    return request;
+  }
+
+  // --- Critique findings ---
+
+  getCritiqueFindings(): CritiqueFinding[] {
+    return this.state.critiqueFindings;
+  }
+
+  getCritiqueFinding(id: string): CritiqueFinding | undefined {
+    return this.state.critiqueFindings.find((f) => f.id === id);
+  }
+
+  addCritiqueFinding(finding: CritiqueFinding): void {
+    this.state.critiqueFindings.push(finding);
+  }
+
+  updateCritiqueFinding(id: string, updates: Partial<CritiqueFinding>): CritiqueFinding | null {
+    const finding = this.state.critiqueFindings.find((f) => f.id === id);
+    if (!finding) return null;
+    Object.assign(finding, updates);
+    return finding;
+  }
+
+  removeCritiqueFinding(id: string): boolean {
+    const idx = this.state.critiqueFindings.findIndex((f) => f.id === id);
+    if (idx === -1) return false;
+    this.state.critiqueFindings.splice(idx, 1);
+    return true;
   }
 
   // --- Commands ---

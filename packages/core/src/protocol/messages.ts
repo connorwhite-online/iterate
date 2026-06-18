@@ -1,4 +1,4 @@
-import type { Change, Rect } from "../types/annotations.js";
+import type { Change, Rect, CritiqueRequest, CritiqueFinding } from "../types/annotations.js";
 import type { IterationInfo, IterationStatus } from "../types/iterations.js";
 import type { DomChange } from "../types/dom.js";
 import type { IterateConfig } from "../types/config.js";
@@ -30,7 +30,10 @@ export type ClientMessage =
   | { type: "dom:resize"; payload: { iteration: string; selector: string; from: Rect; to: Rect } }
   | { type: "iteration:switch"; payload: { iteration: string } }
   | { type: "iteration:compare"; payload: { iterations: [string, string] } }
-  | { type: "tool:set-mode"; payload: { mode: string } };
+  | { type: "tool:set-mode"; payload: { mode: string } }
+  | { type: "critique:request"; payload: Omit<CritiqueRequest, "id" | "timestamp" | "status"> }
+  | { type: "critique:finding-apply"; payload: { id: string } }
+  | { type: "critique:finding-dismiss"; payload: { id: string } };
 
 // --- Server → Client messages (daemon → browser overlay) ---
 
@@ -47,6 +50,11 @@ export type ServerMessage =
   | { type: "dom:deleted"; payload: { id: string } }
   | { type: "command:started"; payload: { commandId: string; prompt: string; iterations: string[] } }
   | { type: "tool:mode-changed"; payload: { mode: string } }
+  | { type: "critique:requested"; payload: CritiqueRequest }
+  | { type: "critique:request-updated"; payload: CritiqueRequest }
+  | { type: "critique:finding-created"; payload: CritiqueFinding }
+  | { type: "critique:finding-updated"; payload: CritiqueFinding }
+  | { type: "critique:finding-deleted"; payload: { id: string } }
   | { type: "error"; payload: { message: string } };
 
 /** Full state synced on WebSocket connection */
@@ -55,4 +63,6 @@ export interface IterateState {
   iterations: Record<string, IterationInfo>;
   changes: Change[];
   domChanges: DomChange[];
+  critiqueRequests: CritiqueRequest[];
+  critiqueFindings: CritiqueFinding[];
 }

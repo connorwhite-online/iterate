@@ -6,6 +6,13 @@ export type {
   DrawingData,
   Rect,
   ChangeStatus,
+  SnapshotNode,
+  PageSnapshot,
+  CritiqueSeverity,
+  CritiqueFindingStatus,
+  CritiqueRequestStatus,
+  CritiqueFinding,
+  CritiqueRequest,
 } from "./types/annotations.js";
 export type { IterationInfo, IterationStatus, IterationSource } from "./types/iterations.js";
 export type { DomChange, DomSnapshot } from "./types/dom.js";
@@ -27,5 +34,9 @@ export type {
 } from "./protocol/messages.js";
 
 // Formatting
-export { formatBatchPrompt } from "./format.js";
+export { formatBatchPrompt, formatCritiquePrompt } from "./format.js";
 export type { FormatChange, FormatDomChange } from "./format.js";
+
+// Design knowledge
+export { DESIGN_PRINCIPLES, getPrinciple, selectPrinciples } from "./knowledge/index.js";
+export type { DesignPrinciple, PrincipleCategory } from "./knowledge/index.js";
