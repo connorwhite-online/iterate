@@ -6,7 +6,7 @@ import { FloatingPanel, ORIGINAL_TAB } from "./panel/FloatingPanel.js";
 import { DaemonConnection } from "./transport/connection.js";
 import { ThemeProvider } from "./theme.js";
 import { buildForkRequest, filterIterationsForApp } from "./fork-request.js";
-import type { IterationInfo } from "iterate-ui-core";
+import type { IterationInfo, CritiqueFinding } from "iterate-ui-core";
 
 /** postMessage types for parent <-> iframe communication */
 interface IterateMessage {
@@ -60,6 +60,17 @@ function StandaloneOverlay() {
   const iterationRef = useRef<string>(ORIGINAL_TAB);
   const previewModeRef = useRef(true);
   const [mode, setMode] = useState<ToolMode>("browse");
+
+  // Critique state (parent context / ORIGINAL_TAB)
+  const [critiqueNonce, setCritiqueNonce] = useState(0);
+  const [critiqueScanning, setCritiqueScanning] = useState(false);
+  const [critiqueFindings, setCritiqueFindings] = useState<CritiqueFinding[]>([]);
+  const [focusFinding, setFocusFinding] = useState<{ id: string; nonce: number }>({ id: "", nonce: 0 });
+  const handleCritique = useCallback(() => setCritiqueNonce((n) => n + 1), []);
+  const handleFocusFinding = useCallback(
+    (id: string) => setFocusFinding((prev) => ({ id, nonce: prev.nonce + 1 })),
+    []
+  );
   const [iteration, setIterationRaw] = useState<string>(() => {
     const stored = sessionStorage.getItem("iterate:activeTab");
     if (stored) return stored;
@@ -782,6 +793,10 @@ function StandaloneOverlay() {
         }}
         previewMode={previewMode}
         visible={visible && !isViewingIteration}
+        critiqueNonce={critiqueNonce}
+        focusFinding={focusFinding}
+        onCritiqueScanningChange={setCritiqueScanning}
+        onCritiqueFindingsChange={setCritiqueFindings}
       />
 
       {/* Floating toolbar panel */}
@@ -805,6 +820,10 @@ function StandaloneOverlay() {
         isViewingIteration={isViewingIteration}
         tabBadgeCounts={tabBadgeCounts}
         readyIframes={readyIframes}
+        onCritique={handleCritique}
+        critiqueScanning={critiqueScanning}
+        critiqueFindings={critiqueFindings}
+        onFocusFinding={handleFocusFinding}
       />
     </>
     </ThemeProvider>

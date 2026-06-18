@@ -56,6 +56,17 @@ export function MoveIcon({ size = 24, color = "currentColor" }: IconProps) {
   );
 }
 
+/** Critique mode — magnifier with a spark, suggesting an AI design review */
+export function CritiqueIcon({ size = 24, color = "currentColor" }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <circle cx="10.5" cy="10.5" r="6.5" stroke={color} strokeWidth={2} />
+      <path d="M20 20L16 16" stroke={color} strokeWidth={2} strokeLinecap="round" />
+      <path d="M10.5 7.5L11.2 9.3L13 10L11.2 10.7L10.5 12.5L9.8 10.7L8 10L9.8 9.3L10.5 7.5Z" fill={color} />
+    </svg>
+  );
+}
+
 /** Submit changes */
 export function SendIcon({ size = 24, color = "currentColor" }: IconProps) {
   return (

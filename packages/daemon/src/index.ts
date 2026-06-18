@@ -8,6 +8,7 @@ import {
   DEFAULT_CONFIG,
   type IterateConfig,
   type IterationInfo,
+  type CritiqueFinding,
 } from "iterate-ui-core";
 import {
   findFreePort,
@@ -23,6 +24,7 @@ import { ProcessManager } from "./process/manager.js";
 import { WebSocketHub } from "./websocket/hub.js";
 import { copyFilesToWorktree, copyUncommittedFiles } from "./worktree/copy-files.js";
 import { registerProxyRoutes } from "./proxy/router.js";
+import { spawnCritiqueAgent } from "./agent/critique-runner.js";
 import {
   runIterationPipeline,
   resolveAppForRequest,
@@ -63,7 +65,29 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   const store = new StateStore(config);
   const worktreeManager = new WorktreeManager(cwd);
   const processManager = new ProcessManager(config.basePort);
-  const wsHub = new WebSocketHub(store);
+  const wsHub = new WebSocketHub(store, {
+    // Auto-run a critique by launching a headless agent in the iteration's
+    // worktree (falls back to the repo root for "Original"/root). If the
+    // `claude` CLI isn't available the request stays pending and the overlay
+    // shows a manual "run /iterate:critique" hint.
+    onCritiqueRequest: (req) => {
+      const iteration = store.getIteration(req.iteration);
+      const agentCwd = iteration?.worktreePath || cwd;
+      spawnCritiqueAgent({
+        requestId: req.id,
+        cwd: agentCwd,
+        repoRoot: cwd,
+        onExit: (ok, detail) => {
+          // The agent marks the request in-progress/complete via REST while it
+          // runs. On a failed spawn (e.g. claude not found), leave it pending
+          // but surface the error so the overlay can fall back to manual.
+          if (!ok) {
+            console.warn(`[iterate] critique agent did not complete: ${detail ?? "unknown"}`);
+          }
+        },
+      });
+    },
+  });
 
   // Hoisted here so route handlers (DELETE /api/iterations/:name) can close
   // over them before the worktree-scan section further below initializes them.
@@ -210,13 +234,16 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
       }
     }
 
-    // Clean up changes and DOM changes belonging to this iteration
-    const { changeIds, domChangeIds } = store.removeIterationData(name);
+    // Clean up changes, DOM changes and critique data belonging to this iteration
+    const { changeIds, domChangeIds, critiqueFindingIds } = store.removeIterationData(name);
     for (const id of changeIds) {
       wsHub.broadcast({ type: "change:deleted", payload: { id } });
     }
     for (const id of domChangeIds) {
       wsHub.broadcast({ type: "dom:deleted", payload: { id } });
+    }
+    for (const id of critiqueFindingIds) {
+      wsHub.broadcast({ type: "critique:finding-deleted", payload: { id } });
     }
 
     store.removeIteration(name);
@@ -259,12 +286,15 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     }
 
     for (const iter of allIterations) {
-      const { changeIds, domChangeIds } = store.removeIterationData(iter.name);
+      const { changeIds, domChangeIds, critiqueFindingIds } = store.removeIterationData(iter.name);
       for (const id of changeIds) {
         wsHub.broadcast({ type: "change:deleted", payload: { id } });
       }
       for (const id of domChangeIds) {
         wsHub.broadcast({ type: "dom:deleted", payload: { id } });
+      }
+      for (const id of critiqueFindingIds) {
+        wsHub.broadcast({ type: "critique:finding-deleted", payload: { id } });
       }
       store.removeIteration(iter.name);
       wsHub.broadcast({ type: "iteration:removed", payload: { name: iter.name } });
@@ -332,6 +362,86 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     const removed = store.removeDomChange(id);
     if (!removed) return reply.status(404).send({ message: "DOM change not found" });
     wsHub.broadcast({ type: "dom:deleted", payload: { id } });
+    return { ok: true };
+  });
+
+  // --- Critique ---
+
+  app.get("/api/critique-requests", async (request) => {
+    const { status } = request.query as { status?: string };
+    let requests = store.getCritiqueRequests();
+    if (status) requests = requests.filter((r) => r.status === status);
+    return requests;
+  });
+
+  app.get("/api/critique-requests/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const req = store.getCritiqueRequest(id);
+    if (!req) return reply.status(404).send({ message: "Critique request not found" });
+    return req;
+  });
+
+  /** Mark a critique request in-progress (agent has picked it up) */
+  app.patch("/api/critique-requests/:id/start", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const updated = store.updateCritiqueRequest(id, { status: "in-progress" });
+    if (!updated) return reply.status(404).send({ message: "Critique request not found" });
+    wsHub.broadcast({ type: "critique:request-updated", payload: updated });
+    return updated;
+  });
+
+  /** Mark a critique request complete (agent has submitted all findings) */
+  app.patch("/api/critique-requests/:id/complete", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const updated = store.updateCritiqueRequest(id, { status: "complete" });
+    if (!updated) return reply.status(404).send({ message: "Critique request not found" });
+    wsHub.broadcast({ type: "critique:request-updated", payload: updated });
+    return updated;
+  });
+
+  app.get("/api/critique-findings", async (request) => {
+    const { requestId } = request.query as { requestId?: string };
+    let findings = store.getCritiqueFindings();
+    if (requestId) findings = findings.filter((f) => f.requestId === requestId);
+    return findings;
+  });
+
+  /** Agent submits a finding for a critique request */
+  app.post("/api/critique-findings", async (request, reply) => {
+    const body = request.body as Partial<CritiqueFinding>;
+    if (!body || !body.requestId || !body.element || !body.principleId) {
+      return reply.status(400).send({ message: "Finding requires requestId, principleId and element" });
+    }
+    const req = store.getCritiqueRequest(body.requestId);
+    const finding: CritiqueFinding = {
+      id: crypto.randomUUID(),
+      iteration: body.iteration ?? req?.iteration ?? "",
+      url: body.url ?? req?.url,
+      requestId: body.requestId,
+      principleId: body.principleId,
+      principleTitle: body.principleTitle ?? body.principleId,
+      category: body.category ?? "",
+      severity: body.severity ?? "medium",
+      element: body.element,
+      rationale: body.rationale ?? "",
+      measured: body.measured,
+      target: body.target,
+      recommendation: body.recommendation ?? "",
+      pagePosition: body.pagePosition,
+      isFixedPosition: body.isFixedPosition,
+      status: "open",
+    };
+    store.addCritiqueFinding(finding);
+    wsHub.broadcast({ type: "critique:finding-created", payload: finding });
+    return finding;
+  });
+
+  /** Dismiss/remove a finding */
+  app.delete("/api/critique-findings/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const removed = store.removeCritiqueFinding(id);
+    if (!removed) return reply.status(404).send({ message: "Finding not found" });
+    wsHub.broadcast({ type: "critique:finding-deleted", payload: { id } });
     return { ok: true };
   });
 

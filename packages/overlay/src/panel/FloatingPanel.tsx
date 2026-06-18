@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ToolMode } from "../IterateOverlay.js";
-import type { IterationInfo, IterationStatus } from "iterate-ui-core";
+import type { IterationInfo, IterationStatus, CritiqueFinding } from "iterate-ui-core";
 import { useTheme } from "../theme.js";
 import {
   CursorIcon,
   MoveIcon,
   MarkerIcon,
+  CritiqueIcon,
   CloseIcon,
   LogoIcon,
   TrashIcon,
@@ -18,6 +19,13 @@ import {
   SpinnerIcon,
   DiscardIcon,
 } from "./icons.js";
+
+/** Severity → color for critique finding rows. */
+const FINDING_SEVERITY_COLORS: Record<string, string> = {
+  high: "#dc2626",
+  medium: "#d97706",
+  low: "#2563eb",
+};
 
 export const ORIGINAL_TAB = "__original__";
 
@@ -56,6 +64,14 @@ export interface FloatingPanelProps {
   readyIframes?: Set<string>;
   /** Whether any changes are currently being processed (in-progress) */
   processing?: boolean;
+  /** Called when user triggers a critique of the current screen (button or R) */
+  onCritique?: () => void;
+  /** Whether a critique run is in progress (shows scanning state) */
+  critiqueScanning?: boolean;
+  /** Open critique findings for the current iteration (drives the results list) */
+  critiqueFindings?: CritiqueFinding[];
+  /** Called when user clicks a finding row — scrolls to + opens the finding */
+  onFocusFinding?: (id: string) => void;
 }
 
 type Corner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
@@ -113,6 +129,10 @@ export function FloatingPanel({
   tabBadgeCounts = {},
   readyIframes,
   processing = false,
+  onCritique,
+  critiqueScanning = false,
+  critiqueFindings = [],
+  onFocusFinding,
 }: FloatingPanelProps) {
   const theme = useTheme();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -244,6 +264,11 @@ export function FloatingPanel({
           (document.activeElement as HTMLElement)?.blur?.();
           onModeChange(mode === "move" ? "browse" : "move");
           break;
+        case "r":
+          e.preventDefault();
+          (document.activeElement as HTMLElement)?.blur?.();
+          onCritique?.();
+          break;
         case "u":
           e.preventDefault();
           onUndoMove?.();
@@ -263,7 +288,7 @@ export function FloatingPanel({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [visible, onVisibilityChange, mode, onModeChange, onUndoMove, onClearBatch, onCopyBatch]);
+  }, [visible, onVisibilityChange, mode, onModeChange, onUndoMove, onClearBatch, onCopyBatch, onCritique]);
 
   // Drag start — only from the panel background, not buttons
   const handleMouseDown = useCallback(
@@ -491,6 +516,13 @@ export function FloatingPanel({
               active={mode === "move"}
               onClick={() => onModeChange(mode === "move" ? "browse" : "move")}
             />
+            <IconButton
+              icon={critiqueScanning ? <SpinnerIcon size={ICON_SIZE} /> : <CritiqueIcon size={ICON_SIZE} />}
+              label={critiqueScanning ? "Critiquing…" : "Critique this screen (R)"}
+              active={critiqueFindings.length > 0}
+              disabled={critiqueScanning}
+              onClick={() => onCritique?.()}
+            />
 
             {/* Change tools — always visible, disabled when no pending changes */}
             <Divider />
@@ -634,8 +666,119 @@ export function FloatingPanel({
             onVisibilityChange={onVisibilityChange}
           />
         </div>
+
+        {/* Critique results list — appears on the outer edge of the panel */}
+        {visible && critiqueFindings.length > 0 && (
+          <CritiqueResultsList
+            findings={critiqueFindings}
+            isTopSide={isTopSide}
+            onFocusFinding={onFocusFinding}
+          />
+        )}
       </div>
     </TooltipDirectionContext.Provider>
+  );
+}
+
+/**
+ * Compact list of critique findings, grouped by severity. Lets the user triage
+ * findings that may be off-screen — clicking a row scrolls to and opens it.
+ */
+function CritiqueResultsList({
+  findings,
+  isTopSide,
+  onFocusFinding,
+}: {
+  findings: CritiqueFinding[];
+  isTopSide: boolean;
+  onFocusFinding?: (id: string) => void;
+}) {
+  const theme = useTheme();
+  const order: Array<"high" | "medium" | "low"> = ["high", "medium", "low"];
+  const counts = {
+    high: findings.filter((f) => f.severity === "high").length,
+    medium: findings.filter((f) => f.severity === "medium").length,
+    low: findings.filter((f) => f.severity === "low").length,
+  };
+  const sorted = [...findings].sort(
+    (a, b) => order.indexOf(a.severity) - order.indexOf(b.severity)
+  );
+  return (
+    <div
+      style={{
+        background: theme.panelBg,
+        border: `1px solid ${theme.border}`,
+        borderRadius: 10,
+        marginTop: isTopSide ? 0 : 6,
+        marginBottom: isTopSide ? 6 : 0,
+        padding: 8,
+        width: 264,
+        maxHeight: 280,
+        overflowY: "auto",
+        boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 600,
+          color: theme.textSecondary,
+          marginBottom: 6,
+          fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        }}
+      >
+        {findings.length} finding{findings.length === 1 ? "" : "s"}: {counts.high} high, {counts.medium} medium, {counts.low} low
+      </div>
+      {sorted.map((f) => (
+        <button
+          key={f.id}
+          onClick={() => onFocusFinding?.(f.id)}
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 8,
+            width: "100%",
+            textAlign: "left",
+            background: "transparent",
+            border: "none",
+            borderRadius: 6,
+            padding: "6px 6px",
+            cursor: "pointer",
+            fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = theme.hoverBg)}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+        >
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              background: FINDING_SEVERITY_COLORS[f.severity] ?? "#2563eb",
+              flexShrink: 0,
+              marginTop: 4,
+            }}
+          />
+          <span style={{ minWidth: 0 }}>
+            <span style={{ display: "block", fontSize: 12, fontWeight: 600, color: theme.textPrimary }}>
+              {f.principleTitle}
+            </span>
+            <span
+              style={{
+                display: "block",
+                fontSize: 11,
+                color: theme.textSecondary,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {f.element.componentName ? `<${f.element.componentName}>` : f.element.elementName}
+            </span>
+          </span>
+        </button>
+      ))}
+    </div>
   );
 }
 

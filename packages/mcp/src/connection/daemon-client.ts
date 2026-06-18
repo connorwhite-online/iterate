@@ -4,6 +4,8 @@ import type {
   IterationInfo,
   DomChange,
   ServerMessage,
+  CritiqueRequest,
+  CritiqueFinding,
 } from "iterate-ui-core";
 import { WebSocket } from "ws";
 
@@ -130,6 +132,14 @@ export class DaemonClient {
     return this.state?.domChanges ?? [];
   }
 
+  getCritiqueRequests(): CritiqueRequest[] {
+    return this.state?.critiqueRequests ?? [];
+  }
+
+  getCritiqueFindings(): CritiqueFinding[] {
+    return this.state?.critiqueFindings ?? [];
+  }
+
   /** Subscribe to batch:submitted events */
   onBatchSubmitted(handler: BatchSubmittedHandler): () => void {
     this.batchListeners.add(handler);
@@ -253,6 +263,33 @@ export class DaemonClient {
       case "iteration:status":
         if (this.state && this.state.iterations[msg.payload.name]) {
           this.state.iterations[msg.payload.name]!.status = msg.payload.status;
+        }
+        break;
+
+      // --- Critique ---
+      case "critique:requested":
+        if (this.state) this.state.critiqueRequests.push(msg.payload);
+        break;
+      case "critique:request-updated":
+        if (this.state) {
+          const idx = this.state.critiqueRequests.findIndex((r) => r.id === msg.payload.id);
+          if (idx !== -1) this.state.critiqueRequests[idx] = msg.payload;
+        }
+        break;
+      case "critique:finding-created":
+        if (this.state) this.state.critiqueFindings.push(msg.payload);
+        break;
+      case "critique:finding-updated":
+        if (this.state) {
+          const idx = this.state.critiqueFindings.findIndex((f) => f.id === msg.payload.id);
+          if (idx !== -1) this.state.critiqueFindings[idx] = msg.payload;
+        }
+        break;
+      case "critique:finding-deleted":
+        if (this.state) {
+          this.state.critiqueFindings = this.state.critiqueFindings.filter(
+            (f) => f.id !== msg.payload.id
+          );
         }
         break;
 

@@ -2,7 +2,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { DaemonClient } from "./connection/daemon-client.js";
-import { formatBatchPrompt } from "iterate-ui-core";
+import { formatBatchPrompt, formatCritiquePrompt, getPrinciple } from "iterate-ui-core";
+import type { CritiqueFinding, CritiqueSeverity } from "iterate-ui-core";
 import { formatIterationList } from "./format.js";
 import { loadConfig, resolveDaemonPort } from "iterate-ui-core/node";
 import { execSync } from "node:child_process";
@@ -669,6 +670,122 @@ async function main() {
     }
   );
 
+  // --- Critique tools ---
+
+  server.tool(
+    "iterate_get_critique_request",
+    "Get the pending design-critique request: a page snapshot plus the design principles to evaluate it against, formatted as an actionable prompt. Use this when asked to critique a design (e.g. via the iterate:critique skill). Marks the request in-progress.",
+    {
+      requestId: z
+        .string()
+        .optional()
+        .describe("Specific critique request ID (optional; uses the latest pending request if omitted)"),
+    },
+    async ({ requestId }) => {
+      if (!client.connected && !client.getState()) {
+        return { content: [{ type: "text", text: "Not connected to daemon — waiting for reconnection." }] };
+      }
+
+      const requests = client.getCritiqueRequests();
+      const request = requestId
+        ? requests.find((r) => r.id === requestId)
+        : requests.filter((r) => r.status === "pending").at(-1) ?? requests.at(-1);
+
+      if (!request) {
+        return { content: [{ type: "text", text: "No critique request found." }] };
+      }
+
+      // Mark in-progress so the overlay shows a scanning state.
+      try {
+        await client.callApi("PATCH", `/api/critique-requests/${request.id}/start`);
+      } catch {
+        // Non-fatal — proceed with the critique even if the status update fails.
+      }
+
+      const text =
+        `**Critique request ID**: ${request.id}\n` +
+        `**Iteration**: ${request.iteration}\n\n` +
+        formatCritiquePrompt(request.snapshot) +
+        `\n\nWhen done, submit findings with \`iterate_submit_critique\` (use this requestId).`;
+
+      return { content: [{ type: "text", text }] };
+    }
+  );
+
+  server.tool(
+    "iterate_submit_critique",
+    "Submit design-critique findings for a request. Each finding references an element by its selector (from the snapshot) and a principle id; the server resolves the element and places the on-page badge. Marks the request complete.",
+    {
+      requestId: z.string().describe("The critique request ID these findings belong to"),
+      findings: z
+        .array(
+          z.object({
+            selector: z.string().describe("Selector of the element this finding is anchored to (must match a snapshot element)"),
+            principleId: z.string().describe("Cited principle id, e.g. \"a11y-target-size\""),
+            severity: z.enum(["high", "medium", "low"]).describe("Finding severity"),
+            rationale: z.string().describe("One-line explanation of the problem"),
+            recommendation: z.string().describe("Concrete fix to apply"),
+            measured: z.string().optional().describe("Measured value, e.g. \"32px\" or \"contrast 3.1:1\""),
+            target: z.string().optional().describe("Target value, e.g. \"≥44px\" or \"≥4.5:1\""),
+            principleTitle: z.string().optional().describe("Human-readable principle title (defaults from the corpus)"),
+            category: z.string().optional().describe("Principle category (defaults from the corpus)"),
+          })
+        )
+        .describe("The findings to submit"),
+    },
+    async ({ requestId, findings }) => {
+      const request = client.getCritiqueRequests().find((r) => r.id === requestId);
+      if (!request) {
+        return { content: [{ type: "text", text: `Critique request "${requestId}" not found.` }] };
+      }
+
+      const submitted: string[] = [];
+      const skipped: string[] = [];
+
+      for (const f of findings) {
+        const node = request.snapshot.nodes.find((n) => n.selector === f.selector);
+        if (!node) {
+          skipped.push(`${f.selector} (no matching snapshot element)`);
+          continue;
+        }
+        const principle = getPrinciple(f.principleId);
+        const pagePosition = {
+          x: node.rect.x + node.rect.width / 2,
+          y: node.rect.y + node.rect.height / 2,
+        };
+        const finding: Omit<CritiqueFinding, "id"> = {
+          iteration: request.iteration,
+          url: request.url,
+          requestId,
+          principleId: f.principleId,
+          principleTitle: f.principleTitle ?? principle?.title ?? f.principleId,
+          category: f.category ?? principle?.category ?? "",
+          severity: f.severity as CritiqueSeverity,
+          element: node,
+          rationale: f.rationale,
+          measured: f.measured,
+          target: f.target,
+          recommendation: f.recommendation,
+          pagePosition,
+          isFixedPosition: node.isFixed,
+          status: "open",
+        };
+        await client.callApi("POST", "/api/critique-findings", finding);
+        submitted.push(f.selector);
+      }
+
+      try {
+        await client.callApi("PATCH", `/api/critique-requests/${requestId}/complete`);
+      } catch {
+        // Non-fatal.
+      }
+
+      let text = `Submitted ${submitted.length} finding(s) for request "${requestId}".`;
+      if (skipped.length > 0) text += `\nSkipped ${skipped.length}: ${skipped.join("; ")}`;
+      return { content: [{ type: "text", text }] };
+    }
+  );
+
   // --- Prompt templates ---
 
   server.prompt(
@@ -690,6 +807,37 @@ async function main() {
       }
 
       const text = formatBatchPrompt(changes, domChanges, iteration);
+
+      return {
+        messages: [
+          {
+            role: "user" as const,
+            content: { type: "text" as const, text },
+          },
+        ],
+      };
+    }
+  );
+
+  server.prompt(
+    "iterate_critique",
+    "Get the pending design-critique request (page snapshot + design principles) formatted as an actionable prompt. Use this to critique the current design and then submit findings with iterate_submit_critique.",
+    {
+      requestId: z
+        .string()
+        .optional()
+        .describe("Specific critique request ID (optional; uses the latest pending request if omitted)"),
+    },
+    async ({ requestId }) => {
+      const requests = client.getCritiqueRequests();
+      const request = requestId
+        ? requests.find((r) => r.id === requestId)
+        : requests.filter((r) => r.status === "pending").at(-1) ?? requests.at(-1);
+
+      const text = request
+        ? `**Critique request ID**: ${request.id}\n**Iteration**: ${request.iteration}\n\n` +
+          formatCritiquePrompt(request.snapshot)
+        : "No critique request found.";
 
       return {
         messages: [

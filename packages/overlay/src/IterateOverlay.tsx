@@ -6,9 +6,12 @@ import type {
   TextSelection,
   DrawingData,
   DomChange,
+  CritiqueFinding,
+  CritiqueRequest,
 } from "iterate-ui-core";
 import { formatBatchPrompt } from "iterate-ui-core";
 import { ElementPicker, type PickedElement } from "./inspector/ElementPicker.js";
+import { capturePageSnapshot } from "./inspector/snapshot.js";
 import { MarqueeSelect } from "./inspector/MarqueeSelect.js";
 import { TextSelect } from "./inspector/TextSelect.js";
 import { MarkerDraw } from "./inspector/MarkerDraw.js";
@@ -17,7 +20,14 @@ import { DragHandler, type PendingMove } from "./manipulate/DragHandler.js";
 import { DaemonConnection } from "./transport/connection.js";
 import { saveState, loadState } from "./storage/persistence.js";
 
-export type ToolMode = "select" | "move" | "draw" | "browse";
+export type ToolMode = "select" | "move" | "draw" | "browse" | "critique";
+
+/** Severity → badge color for critique findings. */
+const SEVERITY_COLORS: Record<string, string> = {
+  high: "#dc2626",
+  medium: "#d97706",
+  low: "#2563eb",
+};
 
 export interface IterateOverlayProps {
   /** Which tool mode is active */
@@ -38,6 +48,16 @@ export interface IterateOverlayProps {
   previewMode?: boolean;
   /** Whether the toolbar is visible — when false, badges are hidden and tools are disabled */
   visible?: boolean;
+  /** Incrementing trigger — each new value runs a critique on the current screen */
+  critiqueNonce?: number;
+  /** Focus request — scrolls to and opens a finding's card when nonce changes */
+  focusFinding?: { id: string; nonce: number };
+  /** Current open-finding count (passed up for toolbar badge) */
+  onCritiqueCountChange?: (count: number) => void;
+  /** Whether a critique run is in progress (passed up for scanning indicator) */
+  onCritiqueScanningChange?: (scanning: boolean) => void;
+  /** Open critique findings for the current iteration (passed up for the panel results list) */
+  onCritiqueFindingsChange?: (findings: CritiqueFinding[]) => void;
 }
 
 /** Get the current URL from the iteration iframe (same-origin with cross-origin fallback). */
@@ -139,6 +159,11 @@ export function IterateOverlay({
   onProcessingChange,
   previewMode = true,
   visible = true,
+  critiqueNonce = 0,
+  focusFinding,
+  onCritiqueCountChange,
+  onCritiqueScanningChange,
+  onCritiqueFindingsChange,
 }: IterateOverlayProps) {
   const connectionRef = useRef<DaemonConnection | null>(null);
 
@@ -151,6 +176,12 @@ export function IterateOverlay({
 
   // Server-side changes — synced from daemon via WebSocket
   const [changes, setChanges] = useState<Change[]>([]);
+
+  // Critique state — synced from daemon via WebSocket
+  const [critiqueFindings, setCritiqueFindings] = useState<CritiqueFinding[]>([]);
+  const [critiqueRequests, setCritiqueRequests] = useState<CritiqueRequest[]>([]);
+  // Which finding's detail card is open
+  const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null);
 
   // Server-side DOM changes — synced from daemon via WebSocket
   const [domChanges, setDomChanges] = useState<DomChange[]>([]);
@@ -240,8 +271,33 @@ export function IterateOverlay({
 
           setChanges(syncChanges);
           setDomChanges(syncDomChanges);
+          setCritiqueFindings(
+            (msg.payload.critiqueFindings ?? []).filter((f: CritiqueFinding) => f.iteration === iteration)
+          );
+          setCritiqueRequests(
+            (msg.payload.critiqueRequests ?? []).filter((r: CritiqueRequest) => r.iteration === iteration)
+          );
           break;
         }
+        case "critique:requested":
+          if (msg.payload.iteration === iteration) {
+            setCritiqueRequests((prev) => [...prev, msg.payload]);
+          }
+          break;
+        case "critique:request-updated":
+          setCritiqueRequests((prev) => prev.map((r) => (r.id === msg.payload.id ? msg.payload : r)));
+          break;
+        case "critique:finding-created":
+          if (msg.payload.iteration === iteration) {
+            setCritiqueFindings((prev) => [...prev, msg.payload]);
+          }
+          break;
+        case "critique:finding-updated":
+          setCritiqueFindings((prev) => prev.map((f) => (f.id === msg.payload.id ? msg.payload : f)));
+          break;
+        case "critique:finding-deleted":
+          setCritiqueFindings((prev) => prev.filter((f) => f.id !== msg.payload.id));
+          break;
         case "change:created":
           if (msg.payload.iteration === iteration) {
             setChanges((prev) => [...prev, msg.payload]);
@@ -312,6 +368,99 @@ export function IterateOverlay({
   useEffect(() => {
     onProcessingChange?.(isProcessing);
   }, [isProcessing, onProcessingChange]);
+
+  // Open findings for the current page (applied/dismissed are filtered out;
+  // applied findings live on as a queued Change badge instead).
+  const visibleFindings = critiqueFindings.filter((f) => {
+    if (f.status !== "open") return false;
+    if (f.url && currentUrl && !urlsMatchPage(f.url, currentUrl)) return false;
+    return true;
+  });
+  const critiqueScanning = critiqueRequests.some((r) => r.status !== "complete");
+
+  useEffect(() => {
+    onCritiqueCountChange?.(visibleFindings.length);
+  }, [visibleFindings.length, onCritiqueCountChange]);
+
+  useEffect(() => {
+    onCritiqueScanningChange?.(critiqueScanning);
+  }, [critiqueScanning, onCritiqueScanningChange]);
+
+  useEffect(() => {
+    onCritiqueFindingsChange?.(visibleFindings);
+    // visibleFindings is recomputed each render; depend on a stable signature
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [critiqueFindings, currentUrl]);
+
+  // Run a critique when the trigger nonce changes. Captures a snapshot of the
+  // current screen (same-origin document) and sends it to the daemon, which
+  // auto-runs the analysis agent.
+  const lastCritiqueNonce = useRef(0);
+  useEffect(() => {
+    if (critiqueNonce <= 0 || critiqueNonce === lastCritiqueNonce.current) return;
+    lastCritiqueNonce.current = critiqueNonce;
+    const conn = connectionRef.current;
+    if (!conn) return;
+    let targetDoc: Document = document;
+    try {
+      targetDoc = iframeRef.current?.contentDocument ?? document;
+    } catch {
+      targetDoc = document;
+    }
+    const snapshot = capturePageSnapshot(targetDoc, getScrollOffset());
+    conn.send({
+      type: "critique:request",
+      payload: { iteration, url: getCurrentPageUrl(iframeRef), snapshot },
+    });
+  }, [critiqueNonce, iteration, iframeRef]);
+
+  // Apply a finding: create a normal queued change from it (so iterate:go
+  // implements it), then mark the finding applied so its badge is replaced.
+  const handleApplyFinding = useCallback(
+    (id: string) => {
+      const conn = connectionRef.current;
+      const finding = critiqueFindings.find((f) => f.id === id);
+      if (!conn || !finding) return;
+      const { tagName: _t, depth: _d, isFixed: _f, ...element } = finding.element;
+      conn.send({
+        type: "change:create",
+        payload: {
+          iteration,
+          url: finding.url ?? getCurrentPageUrl(iframeRef),
+          elements: [element as SelectedElement],
+          comment: `${finding.recommendation} — ${finding.principleTitle} (${finding.severity})`,
+          pagePosition: finding.pagePosition,
+          isFixedPosition: finding.isFixedPosition || undefined,
+        },
+      });
+      conn.send({ type: "critique:finding-apply", payload: { id } });
+      setSelectedFindingId(null);
+    },
+    [critiqueFindings, iteration, iframeRef]
+  );
+
+  // Dismiss a finding: removes it from the daemon (and its badge).
+  const handleDismissFinding = useCallback((id: string) => {
+    connectionRef.current?.send({ type: "critique:finding-dismiss", payload: { id } });
+    setSelectedFindingId((prev) => (prev === id ? null : prev));
+  }, []);
+
+  // Focus a finding from the panel list: scroll its element into view and open the card.
+  const lastFocusNonce = useRef(0);
+  useEffect(() => {
+    if (!focusFinding || focusFinding.nonce === lastFocusNonce.current) return;
+    lastFocusNonce.current = focusFinding.nonce;
+    const finding = critiqueFindings.find((f) => f.id === focusFinding.id);
+    if (!finding) return;
+    setSelectedFindingId(finding.id);
+    try {
+      const doc = iframeRef.current?.contentDocument ?? document;
+      const el = doc.querySelector(finding.element.selector);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    } catch {
+      // Best-effort scroll; ignore invalid selectors / cross-origin docs.
+    }
+  }, [focusFinding, critiqueFindings, iframeRef]);
 
   // Handle element selection from ElementPicker (click / ctrl+click)
   const handleElementSelect = useCallback(
@@ -1028,6 +1177,44 @@ export function IterateOverlay({
             </React.Fragment>
           );
         })}
+
+        {/* Critique finding badges (severity-colored), anchored to elements */}
+        {visibleFindings.map((finding) => {
+          if (finding.isFixedPosition) return null; // rendered in fixed layer
+          const pos = finding.pagePosition;
+          if (!pos) return null;
+          return (
+            <InteractiveBadge
+              key={finding.id}
+              number="!"
+              x={pos.x}
+              y={pos.y}
+              color={SEVERITY_COLORS[finding.severity] ?? "#2563eb"}
+              onEdit={() => setSelectedFindingId(finding.id)}
+              isEditing={selectedFindingId === finding.id}
+              elementRect={finding.element.rect}
+            />
+          );
+        })}
+
+        {/* Critique finding detail card */}
+        {selectedFindingId && (() => {
+          const finding = visibleFindings.find((f) => f.id === selectedFindingId);
+          if (!finding || !finding.pagePosition) return null;
+          const pos = finding.isFixedPosition
+            ? { x: finding.pagePosition.x + getScrollOffset().x, y: finding.pagePosition.y + getScrollOffset().y }
+            : finding.pagePosition;
+          return (
+            <FindingCard
+              finding={finding}
+              x={pos.x}
+              y={pos.y}
+              onApply={() => handleApplyFinding(finding.id)}
+              onDismiss={() => handleDismissFinding(finding.id)}
+              onClose={() => setSelectedFindingId(null)}
+            />
+          );
+        })()}
       </>,
       markersLayer,
     )}
@@ -1076,6 +1263,25 @@ export function IterateOverlay({
                 elementRect={fixedBadgeRect}
               />
             </React.Fragment>
+          );
+        })}
+
+        {/* Critique finding badges for fixed/sticky elements */}
+        {visibleFindings.map((finding) => {
+          if (!finding.isFixedPosition) return null; // rendered in absolute layer
+          const pos = finding.pagePosition;
+          if (!pos) return null;
+          return (
+            <InteractiveBadge
+              key={finding.id}
+              number="!"
+              x={pos.x}
+              y={pos.y}
+              color={SEVERITY_COLORS[finding.severity] ?? "#2563eb"}
+              onEdit={() => setSelectedFindingId(finding.id)}
+              isEditing={selectedFindingId === finding.id}
+              elementRect={finding.element.rect}
+            />
           );
         })}
       </>,
@@ -1168,6 +1374,140 @@ function AnimatedBadge({
 }
 
 /**
+ * Detail card for a critique finding. Anchored near the finding's badge,
+ * shows the cited principle, measured-vs-target rationale and recommendation,
+ * with Apply (→ queued change) and Dismiss actions.
+ */
+function FindingCard({
+  finding,
+  x,
+  y,
+  onApply,
+  onDismiss,
+  onClose,
+}: {
+  finding: CritiqueFinding;
+  x: number;
+  y: number;
+  onApply: () => void;
+  onDismiss: () => void;
+  onClose: () => void;
+}) {
+  const color = SEVERITY_COLORS[finding.severity] ?? "#2563eb";
+  return (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        position: "absolute",
+        left: x + 14,
+        top: y - 10,
+        width: 300,
+        maxWidth: "90vw",
+        background: "#fff",
+        border: "1px solid #e5e7eb",
+        borderRadius: 10,
+        boxShadow: "0 8px 28px rgba(0,0,0,0.16)",
+        padding: 14,
+        pointerEvents: "auto",
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        color: "#111827",
+        zIndex: 10,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <span
+          style={{
+            background: color,
+            color: "#fff",
+            fontSize: 10,
+            fontWeight: 700,
+            textTransform: "uppercase",
+            padding: "2px 6px",
+            borderRadius: 4,
+            letterSpacing: 0.4,
+          }}
+        >
+          {finding.severity}
+        </span>
+        <span style={{ fontSize: 11, color: "#6b7280" }}>{finding.category}</span>
+        <button
+          onClick={onClose}
+          style={{
+            marginLeft: "auto",
+            border: "none",
+            background: "transparent",
+            cursor: "pointer",
+            fontSize: 16,
+            lineHeight: 1,
+            color: "#9ca3af",
+          }}
+          aria-label="Close"
+        >
+          ×
+        </button>
+      </div>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{finding.principleTitle}</div>
+      <div style={{ fontSize: 12, color: "#374151", lineHeight: 1.5, marginBottom: 8 }}>
+        {finding.rationale}
+      </div>
+      {(finding.measured || finding.target) && (
+        <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 8, fontFamily: "monospace" }}>
+          {finding.measured ?? "?"} → {finding.target ?? "?"}
+        </div>
+      )}
+      <div
+        style={{
+          fontSize: 12,
+          color: "#111827",
+          background: "#f9fafb",
+          border: "1px solid #f3f4f6",
+          borderRadius: 6,
+          padding: "6px 8px",
+          marginBottom: 10,
+          lineHeight: 1.5,
+        }}
+      >
+        {finding.recommendation}
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button
+          onClick={onApply}
+          style={{
+            flex: 1,
+            border: "none",
+            background: "#111827",
+            color: "#fff",
+            borderRadius: 6,
+            padding: "7px 0",
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          Apply
+        </button>
+        <button
+          onClick={onDismiss}
+          style={{
+            flex: 1,
+            border: "1px solid #e5e7eb",
+            background: "#fff",
+            color: "#374151",
+            borderRadius: 6,
+            padding: "7px 0",
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
  * Interactive change badge. Clickable circle that opens the edit form
  * when clicked. Rendered inside the absolute markers layer so it scrolls
  * naturally with the page.
@@ -1181,7 +1521,7 @@ function InteractiveBadge({
   isEditing,
   elementRect,
 }: {
-  number: number;
+  number: number | string;
   x: number;
   y: number;
   color: string;

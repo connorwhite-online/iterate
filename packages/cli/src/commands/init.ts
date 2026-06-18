@@ -228,7 +228,7 @@ export const initCommand = new Command("init")
     console.log(`  Daemon port (starting point): ${config.daemonPort}`);
     console.log(`  Max iterations: ${config.maxIterations}`);
     console.log(`\nRun \`iterate doctor\` to verify setup, then \`iterate serve\` to start the daemon.`);
-    console.log(`Slash commands: /iterate:go, /iterate:prompt, /iterate:keep`);
+    console.log(`Slash commands: /iterate:go, /iterate:prompt, /iterate:keep, /iterate:critique`);
     console.log(`Restart Claude Code to activate slash commands.`);
   });
 
